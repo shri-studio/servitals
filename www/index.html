@@ -18,6 +18,10 @@
     font-family: 'JetBrains Mono'; font-style: normal; font-weight: 700;
     font-display: swap; src: url('fonts/jetbrains-mono-700.woff2') format('woff2');
   }
+  @font-face {
+    font-family: 'Press Start 2P'; font-style: normal; font-weight: 400;
+    font-display: swap; src: url('fonts/press-start-2p-400.woff2') format('woff2');
+  }
 
   /* ---- light (default) ---- */
   :root {
@@ -66,6 +70,86 @@
     }
   }
 
+  /* ---- 8bit retro style: layered on top of dark/light via data-style ---- */
+  :root[data-style="8bit"] {
+    --border-w: 3px;
+    --bg:        #FFF1E8;
+    --bg-panel:  #ffffff;
+    --border:    #5F574F;
+    --dim:       #7E2553;
+    --fg:        #1D2B53;
+    --fg-bright: #000000;
+    --green:  #008751;
+    --cyan:   #29ADFF;
+    --amber:  #AB5236;
+    --red:    #FF004D;
+    --magenta:#7E2553;
+    --blue:   #1D2B53;
+    --track:  #C2C3C7;
+    --spark:  #83769C;
+    --shadow: 4px 4px 0 var(--border);
+    --glow: none;
+  }
+  :root[data-theme="dark"][data-style="8bit"] {
+    --bg:        #1D2B53;
+    --bg-panel:  #14142b;
+    --border:    #5F574F;
+    --dim:       #83769C;
+    --fg:        #FFF1E8;
+    --fg-bright: #ffffff;
+    --green:  #00E436;
+    --cyan:   #29ADFF;
+    --amber:  #FFA300;
+    --red:    #FF004D;
+    --magenta:#FF77A8;
+    --blue:   #29ADFF;
+    --track:  #2b2b45;
+    --spark:  #5F574F;
+    --shadow: 4px 4px 0 #000000;
+    --glow: none;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"])[data-style="8bit"] {
+      --bg:#1D2B53; --bg-panel:#14142b; --border:#5F574F; --dim:#83769C;
+      --fg:#FFF1E8; --fg-bright:#ffffff; --green:#00E436; --cyan:#29ADFF;
+      --amber:#FFA300; --red:#FF004D; --magenta:#FF77A8; --blue:#29ADFF;
+      --track:#2b2b45; --spark:#5F574F; --shadow:4px 4px 0 #000000; --glow:none;
+    }
+  }
+  :root[data-style="8bit"] .head,
+  :root[data-style="8bit"] .panel {
+    image-rendering: pixelated;
+  }
+  :root[data-style="8bit"] .head .title,
+  :root[data-style="8bit"] .panel > h2,
+  :root[data-style="8bit"] .keyhint b,
+  :root[data-style="8bit"] .modal h3,
+  :root[data-style="8bit"] .ps1,
+  :root[data-style="8bit"] .sb,
+  :root[data-style="8bit"] button {
+    font-family: 'Press Start 2P', monospace;
+    letter-spacing: 0;
+  }
+  :root[data-style="8bit"] .head .title { font-size: 12px; line-height: 1.8; }
+  :root[data-style="8bit"] .panel > h2 { font-size: 9px; line-height: 1.9; }
+  :root[data-style="8bit"] .keyhint b { font-size: 9px; line-height: 2.2; }
+  :root[data-style="8bit"] .modal h3 { font-size: 9px; line-height: 2; }
+  :root[data-style="8bit"] .head .dot {
+    border-radius: 0;
+    animation: blink8bit 1s steps(1) infinite;
+  }
+  @keyframes blink8bit { 0%,49%{opacity:1} 50%,100%{opacity:0} }
+  :root[data-style="8bit"] body::after {
+    content: "";
+    position: fixed; inset: 0; pointer-events: none; z-index: 999;
+    background: repeating-linear-gradient(
+      to bottom, rgba(0,0,0,.12) 0px, rgba(0,0,0,.12) 1px,
+      transparent 1px, transparent 3px
+    );
+    mix-blend-mode: multiply;
+  }
+  :root[data-theme="dark"][data-style="8bit"] body::after { mix-blend-mode: overlay; }
+
   * { margin: 0; padding: 0; box-sizing: border-box; }
 
   html, body { background: var(--bg); }
@@ -90,7 +174,7 @@
 
   /* ---- header ---- */
   .head {
-    border: 1px solid var(--border);
+    border: var(--border-w, 1px) solid var(--border);
     background: var(--bg-panel);
     box-shadow: var(--shadow);
     padding: 10px 14px;
@@ -140,7 +224,7 @@
   }
 
   .panel {
-    border: 1px solid var(--border);
+    border: var(--border-w, 1px) solid var(--border);
     background: var(--bg-panel);
     box-shadow: var(--shadow);
     padding: 14px 14px 12px;
@@ -288,7 +372,7 @@
   .svc-ctl { display: none; gap: 5px; padding: 1px 0 9px 18px; flex-wrap: wrap; align-items: center; }
   .svc.open .svc-ctl { display: flex; }
   .svc .sb {
-    background: none; border: 1px solid var(--border); padding: 3px 9px; cursor: pointer;
+    background: none; border: var(--border-w, 1px) solid var(--border); padding: 3px 9px; cursor: pointer;
     font-family: inherit; font-size: 12px; line-height: 1.3; color: var(--dim); text-decoration: none;
   }
   .svc .sb:hover { color: var(--fg-bright); border-color: var(--dim); }
@@ -305,7 +389,7 @@
   }
   #toast {
     position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%);
-    background: var(--bg-panel); border: 1px solid var(--border); color: var(--fg-bright);
+    background: var(--bg-panel); border: var(--border-w, 1px) solid var(--border); color: var(--fg-bright);
     padding: 8px 16px; font-size: 12.5px; z-index: 60; opacity: 0;
     transition: opacity .2s; pointer-events: none; max-width: 90vw;
   }
@@ -315,7 +399,7 @@
   .netbars .d:hover { outline: 1px solid var(--dim); outline-offset: -1px; }
   #nettip {
     position: fixed; z-index: 60; pointer-events: none; opacity: 0;
-    background: var(--bg-panel); border: 1px solid var(--border); padding: 7px 10px;
+    background: var(--bg-panel); border: var(--border-w, 1px) solid var(--border); padding: 7px 10px;
     font-size: 12px; line-height: 1.5; white-space: nowrap; transition: opacity .12s;
   }
   #nettip.show { opacity: 1; }
@@ -326,7 +410,7 @@
   #confirm-msg .cq { color: var(--dim); font-size: 12.5px; display: block; margin-top: 6px; }
   .cbtns { display: flex; gap: 8px; justify-content: flex-end; padding: 0 16px 14px; }
   .cbtns button {
-    background: none; border: 1px solid var(--border); color: var(--dim);
+    background: none; border: var(--border-w, 1px) solid var(--border); color: var(--dim);
     font-family: inherit; font-size: 12.5px; padding: 6px 14px; cursor: pointer;
   }
   .cbtns button:hover { color: var(--fg-bright); border-color: var(--dim); }
@@ -337,15 +421,16 @@
   .clock .cl { font-size: 12px; color: var(--dim); letter-spacing: .1em; text-transform: uppercase; }
   .clock .cdte { font-size: 12px; color: var(--dim); }
 
-  .wx { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; }
+  .wx { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px 24px; }
+  .wx .wc { display: flex; flex-direction: column; height: 100%; }
   .wx .wnow { display: flex; gap: 10px; align-items: baseline; }
   .wx .wicon { font-size: 20px; }
   .wx .wtemp { font-size: 20px; color: var(--fg-bright); font-weight: 500; }
   .wx .wname { color: var(--fg-bright); }
-  .wx .wsub { color: var(--dim); font-size: 12px; }
-  .wx .wfc { display: flex; gap: 18px; margin-top: 12px; }
-  .wx .fc { font-size: 12px; color: var(--fg); display: flex; align-items: center; gap: 5px; }
-  .wx .fcd { color: var(--dim); text-transform: uppercase; letter-spacing: .05em; }
+  .wx .wsub { color: var(--fg); font-size: 12px; }
+  .wx .wfc { display: flex; flex-wrap: wrap; gap: 8px 16px; margin-top: auto; padding-top: 12px; }
+  .wx .fc { font-size: 12px; color: var(--fg); display: flex; align-items: center; gap: 5px; white-space: nowrap; }
+  .wx .fcd { color: var(--fg); text-transform: uppercase; letter-spacing: .05em; }
   .wx .fct { color: var(--fg-bright); }
   .wx .fcl { color: var(--dim); margin-left: 3px; }
 
@@ -373,7 +458,7 @@
   }
   .overlay.open { display: flex; }
   .modal {
-    background: var(--bg-panel); border: 1px solid var(--border);
+    background: var(--bg-panel); border: var(--border-w, 1px) solid var(--border);
     max-width: 640px; width: 100%; padding: 0;
   }
   .modal h3 {
@@ -387,14 +472,14 @@
   .modal section > label { display: block; color: var(--fg-bright); font-size: 12px; letter-spacing: .1em; text-transform: uppercase; margin-bottom: 8px; }
   .modal .item { display: flex; align-items: center; gap: 8px; margin-bottom: 5px; }
   .modal .item .txt { flex: 1; color: var(--fg); }
-  .modal .item .rm { color: var(--red); cursor: pointer; border: 1px solid var(--border); padding: 0 7px; }
+  .modal .item .rm { color: var(--red); cursor: pointer; border: var(--border-w, 1px) solid var(--border); padding: 0 7px; }
   .modal input[type=text], .modal input[type=number], .modal select {
-    background: var(--bg); border: 1px solid var(--border); color: var(--fg-bright);
+    background: var(--bg); border: var(--border-w, 1px) solid var(--border); color: var(--fg-bright);
     font-family: inherit; font-size: 12px; padding: 5px 8px; width: 100%;
   }
   .modal .addrow { display: flex; gap: 6px; margin-top: 6px; }
   .modal .addrow button, .modal .btns button {
-    background: var(--bg); border: 1px solid var(--border); color: var(--cyan);
+    background: var(--bg); border: var(--border-w, 1px) solid var(--border); color: var(--cyan);
     font-family: inherit; font-size: 12px; padding: 5px 12px; cursor: pointer; white-space: nowrap;
   }
   .modal .addrow button:hover, .modal .btns button:hover { border-color: var(--cyan); }
@@ -402,18 +487,18 @@
   .modal .toggles label { color: var(--fg); cursor: pointer; text-transform: none; letter-spacing: 0; font-size: 12px; }
 
   .favrow { display: flex; align-items: center; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
-  #fav-preview { width: 22px; height: 22px; object-fit: contain; background: var(--bg); border: 1px solid var(--border); }
+  #fav-preview { width: 22px; height: 22px; object-fit: contain; background: var(--bg); border: var(--border-w, 1px) solid var(--border); }
 
   .panelcfg { display: flex; flex-direction: column; gap: 3px; }
   .pcf {
     display: grid; grid-template-columns: 18px 1fr auto auto; gap: 8px; align-items: center;
-    padding: 5px 8px; background: var(--bg); border: 1px solid var(--border);
+    padding: 5px 8px; background: var(--bg); border: var(--border-w, 1px) solid var(--border);
   }
   .pcf.drag-over { border-color: var(--cyan); }
   .pcf .grip { color: var(--dim); cursor: grab; text-align: center; user-select: none; }
   .pcf .pn { color: var(--fg-bright); text-transform: uppercase; letter-spacing: .05em; font-size: 12px; }
   .pcf select {
-    background: var(--bg-panel); border: 1px solid var(--border); color: var(--fg);
+    background: var(--bg-panel); border: var(--border-w, 1px) solid var(--border); color: var(--fg);
     font-family: inherit; font-size: 11.5px; padding: 2px 4px;
   }
   .pcf label { color: var(--dim); font-size: 11.5px; display: flex; align-items: center; gap: 4px; cursor: pointer; }
@@ -423,7 +508,7 @@
   .modal .geo-results div { padding: 3px 6px; cursor: pointer; color: var(--fg); }
   .modal .geo-results div:hover { background: var(--track); color: var(--fg-bright); }
   .modal textarea {
-    width: 100%; height: 160px; background: var(--bg); border: 1px solid var(--border);
+    width: 100%; height: 160px; background: var(--bg); border: var(--border-w, 1px) solid var(--border);
     color: var(--fg); font-family: inherit; font-size: 12px; padding: 8px; margin-top: 8px;
   }
   .hidden { display: none !important; }
@@ -451,7 +536,7 @@
     <div class="right">
       <div class="hclock" id="headclock">--:--:--</div>
       <div class="hdate" id="headdate">&mdash;</div>
-      <div class="keyhint"><b id="btn-refresh">[r] refresh</b> &nbsp; <b id="btn-settings">[s] settings</b> &nbsp; <b id="btn-theme">[t] theme</b> &nbsp; <a href="/__auth/logout" style="color:var(--dim)">[logout]</a></div>
+      <div class="keyhint"><b id="btn-refresh">[r] refresh</b> &nbsp; <b id="btn-settings">[s] settings</b> &nbsp; <b id="btn-theme">[t] theme</b> &nbsp; <b id="btn-style">[y] style</b> &nbsp; <a href="/__auth/logout" style="color:var(--dim)">[logout]</a></div>
     </div>
   </div>
 
@@ -774,6 +859,23 @@ function toggleTheme() {
   if (t === "light" || t === "dark") document.documentElement.setAttribute("data-theme", t);
 })();
 
+const STYLES = ["classic", "8bit"];   // orthogonal to theme; append future styles here
+function currentStyle() {
+  return document.documentElement.getAttribute("data-style") || "classic";
+}
+function toggleStyle() {
+  const next = STYLES[(STYLES.indexOf(currentStyle()) + 1) % STYLES.length];
+  if (next === "classic") document.documentElement.removeAttribute("data-style");
+  else document.documentElement.setAttribute("data-style", next);
+  $("#btn-style").textContent = `[y] ${next}`;
+  try { localStorage.setItem("sysdash.style", next); } catch (e) {}
+}
+(function initStyle() {
+  let s = null;
+  try { s = localStorage.getItem("sysdash.style"); } catch (e) {}
+  if (STYLES.includes(s) && s !== "classic") document.documentElement.setAttribute("data-style", s);
+})();
+
 /* ------------------------------------------------------------------ render: metrics */
 let lastData = null;
 const HISTLEN = 60;   // matches the agent's `tail -n 60`: 60 samples = 60 × INTERVAL of trend
@@ -1005,7 +1107,7 @@ function ctlButtons(c) {
     + `</div>`;
 }
 const CPUCLS = { ok: "cpu-ok", warn: "cpu-hot", crit: "cpu-max" };
-function cpuClass(cpu) { return CPUCLS[health(cpu || 0, 60, 150)]; }
+function cpuClass(cpu) { return CPUCLS[health(cpu || 0, 50, 80)]; }
 
 function renderDocker() {
   const list = dockerData;
@@ -1037,7 +1139,7 @@ function renderDocker() {
     const stats = (c.state === "running" && c.mem != null);
     const memRel = stats ? (c.mem / maxMem) * 100 : 0;      // vs the biggest container
     const memCls = HL[health(c.mem || 0, 5e8, 2e9)];
-    const cpuHl  = HL[health(c.cpu || 0, 60, 150)];
+    const cpuHl  = HL[health(c.cpu || 0, 50, 80)];
     const open = openNames.has(c.name) ? " open" : "";
     const main = stats
       ? name
@@ -1376,6 +1478,7 @@ document.addEventListener("visibilitychange", () => {
   await loadConfig();
   $("#ps1").textContent = "visitor@" + (cfg.title || "host");
   $("#btn-theme").textContent = `[t] ${currentTheme()}`;
+  $("#btn-style").textContent = `[y] ${currentStyle()}`;
   applyBranding();
   renderClocks();
   applyLayout();
@@ -1387,6 +1490,7 @@ document.addEventListener("visibilitychange", () => {
   $("#btn-settings").onclick = openSettings;
   $("#settings-close").onclick = closeSettings;
   $("#btn-theme").onclick = toggleTheme;
+  $("#btn-style").onclick = toggleStyle;
   $("#btn-refresh").onclick = refreshNow;
   $("#svc-more").onclick = () => { svcExpanded = !svcExpanded; renderDocker(); };
   $$(".svsort").forEach(s => s.onclick = () => { svcSort = s.dataset.s; renderDocker(); });
@@ -1499,6 +1603,7 @@ document.addEventListener("visibilitychange", () => {
     }
     if (e.key === "s") { e.preventDefault(); $("#overlay").classList.contains("open") ? closeSettings() : openSettings(); }
     if (e.key === "t") toggleTheme();
+    if (e.key === "y") toggleStyle();
     if (e.key === "r") { e.preventDefault(); refreshNow(); }
     if (e.key === "Escape") { closeSettings(); $("#logs-overlay").classList.remove("open"); }
   });

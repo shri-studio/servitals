@@ -12,6 +12,8 @@ INTERVAL="${INTERVAL:-300}"   # slow heartbeat; the UI triggers fresh samples on
 IFACE_ENV="${NET_IFACE:-}"
 DISKS="${DISKS:-/}"
 VNSTAT_DB="$HOST/var/lib/vnstat"
+NCPU=$(grep -c '^processor' "$HOST/proc/cpuinfo" 2>/dev/null || echo 1)
+[ "${NCPU:-0}" -gt 0 ] 2>/dev/null || NCPU=1
 STATE="/tmp/state"
 mkdir -p "$STATE"
 # sparkline history + refresh trigger live next to data.json (the .trend history
@@ -106,11 +108,10 @@ cpu_json() {
   done < "$HOST/proc/stat"
   local per="[$(IFS=,; echo "${per_vals[*]-}")]"   # integers -> JSON array, no jq per core
 
-  local ncpu load
-  ncpu=$(grep -c '^processor' "$HOST/proc/cpuinfo" 2>/dev/null || echo 1)
+  local load
   load=$(cut -d' ' -f1-3 "$HOST/proc/loadavg" 2>/dev/null || echo "0 0 0")
   set -- $load
-  jq -cn --argjson pct "$pct" --argjson n "${ncpu:-1}" --argjson per "$per" \
+  jq -cn --argjson pct "$pct" --argjson n "$NCPU" --argjson per "$per" \
      --argjson l1 "${1:-0}" --argjson l5 "${2:-0}" --argjson l15 "${3:-0}" \
      '{usage:$pct, cores:$n, per:$per, load:[$l1,$l5,$l15]}'
 }
@@ -272,9 +273,11 @@ docker_json() {
 
   # per-container cpu (one sample; ~1-2s, fine at this interval). MemUsage from
   # docker stats includes active page cache (cgroup v2) so we don't use it for
-  # memory — see `anon` below.
-  stats=$(docker stats --no-stream --format '{{json .}}' 2>/dev/null | jq -s '
-    [ .[] | { name: .Name, cpu: ( .CPUPerc | rtrimstr("%") | tonumber? // 0 ) } ]' 2>/dev/null)
+  # memory — see `anon` below. docker's own CPUPerc is normalized to one core
+  # (100% = 1 core saturated); we rescale to the host's total capacity so it's
+  # directly comparable to the host-wide cpu.usage in cpu_json.
+  stats=$(docker stats --no-stream --format '{{json .}}' 2>/dev/null | jq -s --argjson n "$NCPU" '
+    [ .[] | { name: .Name, cpu: ( (.CPUPerc | rtrimstr("%") | tonumber? // 0) / $n ) } ]' 2>/dev/null)
   [ -n "$stats" ] || stats='[]'
 
   # real memory = anonymous pages from each container's cgroup memory.stat
