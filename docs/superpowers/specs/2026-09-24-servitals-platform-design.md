@@ -120,7 +120,7 @@ www/          index.html shell, app/*.js (ES modules, lazy), styles/*.css, fonts
 debian/       packaging for servitals and servitals-agent
 docs/         protocol.md, threat-model.md, backup.md, install guides
 test/         node --test suites, shell tests, conformance vectors, budget checks
-compose/      docker-compose.example.yml for the Docker install
+docker-compose.example.yml   stays at the repository root (users copy it next to .env)
 ```
 
 The current `auth/` and `collector/` directories move to `hub/` and `agent/`.
@@ -138,7 +138,7 @@ coreutils, `jq`, `curl` and `vnstat` for the agent.
 - The Docker install keeps nginx through `UPSTREAM=http://web:80`; native
   installs leave it unset.
 - Password hashing moves to scrypt (N=2^15, r=8, p=1, 16-byte salt), stored as
-  `scrypt$N$r$p$salt_b64$hash_b64`. One hash needs 32 MiB, so calls pass
+  `scrypt:N:r:p:salt_b64:hash_b64` (colons, not `$`, so the value survives `.env` interpolation in Docker Compose). One hash needs 32 MiB, so calls pass
   `maxmem: 64 MiB` and at most 2 hashes run at once (further logins wait),
   which bounds the memory spike. The legacy sha256 `AUTH_PASS_HASH` and
   plain `AUTH_PASS` keep working with a warning in the log at startup.
@@ -148,12 +148,18 @@ coreutils, `jq`, `curl` and `vnstat` for the agent.
   `GET /config.json` is served from `STATE_DIR` with a fallback to the
   shipped defaults in `www/config.default.json`.
 - Logging moves to the scheme in section 11.
-- **Proxy headers are trusted only from trusted peers.** `Cf-Connecting-Ip`
-  and `X-Forwarded-For` are honoured only when the TCP peer address is in
+- **Proxy headers are trusted only from trusted peers.** The forwarding
+  header is honoured only when the TCP peer address is in
   `TRUSTED_PROXIES` (default `127.0.0.1,::1`, which covers a local
   cloudflared or reverse proxy). This replaces the global `TRUST_PROXY`
   switch, under which anyone reaching the port directly could claim a LAN
   address and gain whitelist privileges, including container control.
+- The client address is the **rightmost** `X-Forwarded-For` entry, the one
+  the trusted proxy appended; entries to its left are client-controlled.
+  Both cloudflared and common reverse proxies append to `X-Forwarded-For`.
+  `PROXY_HEADER=cf-connecting-ip` switches to Cloudflare's single-value
+  header for setups where only Cloudflare can reach the proxy; it is off by
+  default because any other proxy would pass a client-sent value through.
   `TRUST_PROXY=1` from an old `.env` maps to the loopback default with a
   warning.
 - A trusted proxy's own address is never treated as whitelisted. A request
@@ -180,8 +186,12 @@ coreutils, `jq`, `curl` and `vnstat` for the agent.
 - Native mode uses `HOST_ROOT=/`. `STATE` moves from the fixed `/tmp/state` to
   `$STATE_DIR` (`/var/lib/servitals-agent`), which survives restarts.
 - Per-container CPU comes from cgroup `cpu.stat` `usage_usec` deltas, read
-  from the same directories as `memory.stat`. `docker stats` is removed. The
-  container list still uses `docker ps` through the socket.
+  from the same directories as `memory.stat`. `docker stats` is removed.
+- The container list comes from the Docker API over the socket with
+  `curl --unix-socket /var/run/docker.sock http://d/containers/json?all=1`,
+  not the Docker CLI. The CLI is a Go binary that briefly takes about 29 MB
+  per call (measured 2026-09-24), three times the agent's whole memory
+  budget, and `curl` is already a dependency.
 - Mount lookups use the **last** matching line of `mountinfo`, so a cifs mount
   stacked on an autofs mount reports `cifs`. Every `stat -f` call runs under
   `timeout 5`, so a dead network share cannot hang the tick.
@@ -494,7 +504,7 @@ itself and `https://api.open-meteo.com` for the weather panel.
 | --- | --- | --- |
 | Architecture | all | all |
 | Depends | `${misc:Depends}`, `nodejs (>= 18)`, `servitals-agent (= ${source:Version})` | `${misc:Depends}`, `bash`, `coreutils`, `jq`, `curl`, `mawk \| awk` |
-| Recommends | | `vnstat`, `docker.io \| docker-ce-cli` |
+| Recommends | | `vnstat` |
 | Suggests | `apprise` | |
 | Installs | `/usr/share/servitals/{hub,www}`, `/usr/bin/servitals-ctl`, unit, sysusers, man page | `/usr/lib/servitals-agent/`, `/usr/bin/servitals-agent`, unit, sysusers, man page |
 
@@ -556,7 +566,7 @@ Both units: `NoNewPrivileges=yes`, `ProtectSystem=strict`,
 
 ### 13.6 Docker install and migration
 
-- `compose/docker-compose.example.yml` keeps the three-container Docker
+- `docker-compose.example.yml` keeps the three-container Docker
   install (gateway, nginx, agent), renamed to servitals.
 - The compose file pins its network to a fixed subnet
   (`172.31.250.0/24`) and sets `TRUSTED_PROXIES=172.31.250.1`, the gateway
@@ -755,9 +765,11 @@ works on its own.
 
 - A system-unit run of the agent with the full hardening set (only the user
   manager was tested).
-- Press Start 2P: whether its OFL carries a Reserved Font Name, and whether a
-  WOFF2 subset counts as a modified version under Debian's font policy. If so,
-  rename the bundled face or build it from source.
+- Press Start 2P: its OFL **does** carry the Reserved Font Name "Press Start
+  2P" (checked 2026-09-24). Before the Debian upload, decide whether the
+  bundled WOFF2 subset counts as a modified version under Debian's font
+  policy; if it does, rename the bundled face (for example "servitals 8bit")
+  or build the WOFF2 from source in the package build.
 - iOS Web Push availability in the EU, on a real device.
 - Cloudflare Bot Fight Mode behaviour with the agent's requests, for the
   tunnel guide.
