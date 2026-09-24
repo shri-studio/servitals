@@ -5,3 +5,8 @@ www/.refresh
 data/
 www/config.json
 docker-compose.yml
+
+# local agent-tool state/cache — regenerable, not project source
+.wolf/
+.codegraph/
+.superpowers/
