@@ -15,8 +15,10 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: Install shellcheck
         run: sudo apt-get update && sudo apt-get install -y shellcheck
-      - name: shellcheck (errors only; warnings are tightened when the agent is split in sub-project 2)
-        run: shellcheck -S error agent/collect.sh bin/servitals-ctl bin/bans bin/unban bin/whitelist test/budget.sh test/compose-smoke.sh
+      - name: shellcheck
+        run: |
+          shellcheck -S warning agent/collect.sh agent/lib/*.sh bin/servitals-agent packaging/install-local.sh
+          shellcheck -S error bin/servitals-ctl bin/bans bin/unban bin/whitelist test/budget.sh test/compose-smoke.sh
       - name: node --check
         run: for f in hub/server.js hub/lib/*.js test/*.js test/helpers/*.js; do node --check "$f"; done
 
@@ -32,7 +34,7 @@ jobs:
         with:
           node-version: ${{ matrix.node }}
       - name: Install agent tools
-        run: sudo apt-get update && sudo apt-get install -y jq
+        run: sudo apt-get update && sudo apt-get install -y jq curl
       - name: Unit and integration tests
         run: node --test test/*.test.js
 

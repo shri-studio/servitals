@@ -15,9 +15,9 @@ packages**:
 
 | service | image | job |
 | --- | --- | --- |
-| `gateway` | `node:22-alpine` | login gateway on `PORT`; the only exposed port. Session cookie, per-IP lockout, whitelist. Proxies authed traffic to `web`. Serves `/__ctl/*` (refresh trigger + LAN-only container start/stop/restart/logs via the docker socket). |
-| `web`   | `nginx:alpine` | serve `www/` (the static page + `data.json`); internal only |
-| `agent` | `alpine` + bash | reads host metrics and writes `www/data.json` on the `.refresh` trigger (the dashboard drops it while open) or, idle, every `INTERVAL` seconds |
+| `gateway` | `node:22-alpine` | login gateway on `PORT`; the only exposed port. Session cookie, per-IP lockout, whitelist. Proxies authed traffic to `web`; answers `/data.json` and `/config.json` itself and takes the agent's signed pushes on `/api/v1/agent/*`. Serves `/__ctl/*` (refresh + LAN-only container start/stop/restart/logs via the docker socket). |
+| `web`   | `nginx:alpine` | serve `www/` (the static page and fonts); internal only |
+| `agent` | `alpine` + bash | reads host metrics and pushes a snapshot to the gateway over the signed agent API every `INTERVAL` seconds (default 60), and at once when the dashboard asks for fresh data |
 
 Measured: **~11 MiB real memory** (anonymous RSS — agent ~1, auth ~9, web ~1;
 `docker stats` reports several times that because it counts reclaimable page
@@ -74,7 +74,7 @@ Edit **`.env`**:
   host mountpoints)
 
 Edit **`www/config.json`**: title, weather locations, clocks, drive labels
-(all of this is also editable live in the settings panel later).
+(all of this is also editable live in the settings panel later). On its first start the gateway copies this file to `data/config.json`; from then on the settings panel writes `data/config.json`, and later edits to `www/config.json` are ignored.
 
 ```sh
 docker compose up -d --build
@@ -82,6 +82,12 @@ docker compose up -d --build
 
 Open `http://<host>:<PORT>` (default `20002`) and log in. The first snapshot
 takes a few seconds — the panels show "connecting…" until then.
+
+**Upgrading an existing Docker install:** copy the `agent` service and the
+`volumes:` block from `docker-compose.example.yml` into your
+`docker-compose.yml`, remove `REFRESH_FILE` from the gateway, then
+`docker compose up -d --build`. The gateway moves `www/config.json` into
+`data/` on its first start.
 
 `docker-compose.yml`, `.env` and `www/config.json` are git-ignored — the
 `*.example` files are the templates, so your edits stay local and never
@@ -95,6 +101,10 @@ client address, so lockout works for public visitors. Forwarding headers
 from any other address are ignored, so nobody can fake a LAN address. If the
 proxy runs in another container, set `TRUSTED_PROXIES` to that container's
 address.
+
+sudo apt install nodejs jq curl vnstat
+git clone https://github.com/shri-studio/servitals && cd servitals
+sudo packaging/install-local.sh          # asks for the admin password
 
 ## Authentication & lockout
 
@@ -141,12 +151,12 @@ The **settings panel** (press `s`) edits everything live:
   columns), show/hide
 - weather locations, world clocks, refresh interval, per-drive labels
 
-**Save** writes `www/config.json` via the auth gateway
+**Save** writes `data/config.json` (native install: `/var/lib/servitals/config.json`) via the gateway
 (`POST /__ctl/config`), so every viewer sees the same layout and icon. If
 that endpoint isn't reachable it falls back to this browser's
 `localStorage`, and "export json" prints the config to paste in by hand.
 
-`www/config.json` is git-ignored; ship-time defaults live in
+`data/` is git-ignored; example settings live in
 `www/config.example.json`.
 
 Per-drive labels and warnings, keyed by mountpoint:
@@ -189,14 +199,14 @@ Storage and network sit side by side; network's today / month / all-time
 figures are an aligned table (down · up · total · avg↓ · avg↑), with a
 `30d` / `24h` bar history below it (hover a bar for its down/up).
 
-**Refresh — demand-driven.** The agent samples only when asked: it watches
-for a `.refresh` file and wakes on it. The open dashboard drops that trigger
-on load and then every `refreshSec` (default 60) while its tab is visible;
-when the tab is hidden nothing polls. `r` does the same thing on demand.
-With no viewer at all, the agent falls back to a slow `INTERVAL` heartbeat
-(default 300 s) so `data.json`, the trend history and the "session" temp
-range don't drift too far. The live network rate is an average over
-whichever gap produced the latest snapshot.
+**Refresh — demand-driven.** The agent keeps one signed long-poll request
+open to the gateway (`GET /api/v1/agent/wait`). When the dashboard asks for
+fresh data (on load, every `refreshSec` while the tab is visible, or `r`),
+the gateway answers that request and the agent samples and pushes within
+about two seconds. A refresh within 5 s of the last push is answered from
+the latest snapshot. With no viewer the agent pushes every `INTERVAL`
+seconds (default 60). The live network rate is an average over whichever
+gap produced the latest snapshot.
 
 ## Layout
 
@@ -208,17 +218,19 @@ servitals/
 ├── hub/
 │   ├── Dockerfile
 │   ├── server.js           # the login gateway (zero deps)
-│   └── lib/                # log, password, clientip, origin
+│   └── lib/                # log, password, clientip, origin, static, fsutil, agentsig, nodes, agentapi
 ├── agent/
 │   ├── Dockerfile
-│   └── collect.sh          # the whole agent
+│   ├── collect.sh          # the agent loop
+│   └── lib/                # one file per metric group, plus log, hmac, api
 ├── bin/
-│   └── servitals-ctl       # bans · unban · whitelist · hash-password
-├── data/                   # bans.json, whitelist.txt, secret, audit.log (gitignored)
+│   ├── servitals-ctl       # bans · unban · whitelist · hash-password · docker
+│   └── servitals-agent     # run · test · docker enable|disable
+├── packaging/              # systemd units, sysusers, default env files, install-local.sh
+├── data/                   # bans, whitelist, secret, audit.log, config.json, nodes.json, local-agent.env, snapshots/ (gitignored)
 ├── test/                   # node --test suites, budget and smoke scripts
 └── www/
     ├── index.html          # the whole UI
     ├── config.example.json # copy to config.json (gitignored) and edit
-    ├── fonts/              # self-hosted JetBrains Mono and Press Start 2P (OFL)
-    └── data.json           # generated by the agent (gitignored)
+    └── fonts/              # self-hosted JetBrains Mono and Press Start 2P (OFL)
 ```
