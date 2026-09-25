@@ -1,0 +1,31 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+[Unit]
+Description=servitals dashboard hub
+Documentation=https://github.com/shri-studio/servitals
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=_servitals
+Group=_servitals
+EnvironmentFile=/etc/servitals/hub.env
+Environment=WWW_DIR=/usr/share/servitals/www
+ExecStart=/usr/bin/node /usr/share/servitals/hub/server.js
+StateDirectory=servitals
+StateDirectoryMode=0750
+ReadWritePaths=/var/lib/servitals
+UMask=0077
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=read-only
+PrivateTmp=yes
+ProtectKernelTunables=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

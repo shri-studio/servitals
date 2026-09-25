@@ -1,0 +1,33 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+[Unit]
+Description=servitals agent (metrics collector)
+Documentation=https://github.com/shri-studio/servitals
+After=network-online.target servitals.service
+Wants=network-online.target
+# not paired yet: stay down instead of crash-looping (the installer or `join` starts it)
+ConditionPathExists=/etc/servitals/agent-credentials.env
+
+[Service]
+Type=simple
+User=_servitals-agent
+Group=_servitals-agent
+EnvironmentFile=/etc/servitals/agent.env
+Environment=HOST_ROOT=/
+Environment=CREDENTIALS_FILE=/etc/servitals/agent-credentials.env
+ExecStart=/usr/bin/servitals-agent run
+StateDirectory=servitals-agent
+StateDirectoryMode=0700
+UMask=0077
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=read-only
+PrivateTmp=yes
+ProtectKernelTunables=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
