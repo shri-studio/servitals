@@ -6,8 +6,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 
 const ROOT = path.join(__dirname, "..");
-// README.md joins this list in Task 10, when it is rewritten
-const FILES = ["hub/server.js", "agent/collect.sh", "www/index.html", "docker-compose.example.yml", ".env.example"];
+const FILES = ["hub/server.js", "agent/collect.sh", "www/index.html", "docker-compose.example.yml", ".env.example", "README.md"];
 
 test("old names only remain on lines marked legacy-name", () => {
   for (const f of FILES) {

@@ -1,4 +1,6 @@
-# systemdashboard
+# servitals
+
+Formerly **systemdashboard**. Licensed under AGPL-3.0-or-later. <!-- legacy-name -->
 
 A tiny, self-hosted, terminal-styled status page for a home server:
 live RAM, per-drive storage, CPU/load, temperature, vnstat network history,
@@ -13,7 +15,7 @@ packages**:
 
 | service | image | job |
 | --- | --- | --- |
-| `auth`  | `node:22-alpine` | login gateway on `PORT`; the only exposed port. Session cookie, per-IP lockout, whitelist. Proxies authed traffic to `web`. Serves `/__ctl/*` (refresh trigger + LAN-only container start/stop/restart/logs via the docker socket). |
+| `gateway` | `node:22-alpine` | login gateway on `PORT`; the only exposed port. Session cookie, per-IP lockout, whitelist. Proxies authed traffic to `web`. Serves `/__ctl/*` (refresh trigger + LAN-only container start/stop/restart/logs via the docker socket). |
 | `web`   | `nginx:alpine` | serve `www/` (the static page + `data.json`); internal only |
 | `agent` | `alpine` + bash | reads host metrics and writes `www/data.json` on the `.refresh` trigger (the dashboard drops it while open) or, idle, every `INTERVAL` seconds |
 
@@ -55,8 +57,8 @@ Data sources — all read-only, nothing installed on the host:
 ## Setup
 
 ```sh
-git clone https://github.com/shri-studio/systemdashboard.git
-cd systemdashboard
+git clone https://github.com/shri-studio/systemdashboard.git  # legacy-name: update after the GitHub rename
+cd systemdashboard  # legacy-name: update after the GitHub rename
 
 cp docker-compose.example.yml docker-compose.yml
 cp .env.example .env
@@ -65,8 +67,9 @@ cp www/config.example.json www/config.json
 
 Edit **`.env`**:
 
-- `AUTH_USER` and `AUTH_PASS` — **required**, pick a real password
-  (or set `AUTH_PASS_HASH` to a sha256 hex digest and leave `AUTH_PASS` unset)
+- `AUTH_USER`, and either `AUTH_PASS_HASH` (recommended: run
+  `bin/servitals-ctl hash-password` and paste the result in single quotes)
+  or `AUTH_PASS`. The gateway refuses to start without one of them.
 - `PORT`, `TZ`, `NET_IFACE` (blank = auto-detect), `DISKS` (comma-separated
   host mountpoints)
 
@@ -84,27 +87,33 @@ takes a few seconds — the panels show "connecting…" until then.
 `*.example` files are the templates, so your edits stay local and never
 land in a commit.
 
-To expose it through an existing reverse proxy / Cloudflare tunnel, point a
-hostname at `http://localhost:<PORT>`. The tunnel's `Cf-Connecting-Ip` /
-`X-Forwarded-For` header is used for the real client IP (only when
-`TRUST_PROXY=1`), so lockout works for public visitors. When a local proxy
-is the only thing that should reach the gateway, set `BIND_ADDR=127.0.0.1`
-in `.env` so the port isn't exposed on the LAN — otherwise a client on the
-same network could send a forged IP header and skip the lockout.
+To expose it through an existing reverse proxy or Cloudflare tunnel, point a
+hostname at `http://localhost:<PORT>`. A tunnel or proxy on the same host
+connects from the Docker network's gateway, `172.31.250.1`, which is the
+default `TRUSTED_PROXIES`; its `X-Forwarded-For` header then gives the real
+client address, so lockout works for public visitors. Forwarding headers
+from any other address are ignored, so nobody can fake a LAN address. If the
+proxy runs in another container, set `TRUSTED_PROXIES` to that container's
+address.
 
 ## Authentication & lockout
 
-The `auth` gateway is the only thing listening on `PORT`; `web` has no
+The `gateway` service is the only thing listening on `PORT`; `web` has no
 published port.
 
 | env | default | meaning |
 | --- | --- | --- |
-| `AUTH_USER` / `AUTH_PASS` | — | credentials (or `AUTH_PASS_HASH` = sha256 hex) |
+| `AUTH_USER` | `admin` | login name |
+| `AUTH_PASS_HASH` | — | scrypt hash from `bin/servitals-ctl hash-password` (keep it in single quotes in `.env`); legacy sha256 hex still works |
+| `AUTH_PASS` | — | plain password, if no hash is set (logs a warning) |
 | `MAX_FAILS` | `3` | failed logins from one IP before it is blocked |
 | `BAN_HOURS` | `0` | block duration; `0` = permanent until unbanned |
 | `SESSION_HOURS` | `720` | login session lifetime (30 days) |
-| `WHITELIST` | private ranges | IPs/CIDRs that are never blocked and skip fail tracking |
-| `TRUST_PROXY` | `1` | trust `Cf-Connecting-Ip` / `X-Forwarded-For` for the client IP |
+| `WHITELIST` | private ranges | IPv4 addresses and CIDRs, or exact IPv6 addresses, that are never blocked and skip fail tracking |
+| `TRUSTED_PROXIES` | `172.31.250.1` in Docker | peers whose `X-Forwarded-For` is trusted; everyone else's forwarding headers are ignored |
+| `PROXY_HEADER` | `x-forwarded-for` | set `cf-connecting-ip` only when nothing but Cloudflare can reach your proxy |
+| `PUBLIC_URL` | — | public address, if a proxy rewrites `Host` |
+| `LOG_LEVEL` / `LOG_FORMAT` | `info` / `logfmt` | `error`…`debug`; `json` for log shippers |
 | `BIND_ADDR` | `0.0.0.0` | host address the port binds to; `127.0.0.1` to keep it off the LAN |
 
 Private ranges (`10/8`, `172.16/12`, `192.168/16`, loopback) are whitelisted
@@ -114,9 +123,10 @@ through the tunnel can trip the block.
 State lives in `./data/` (git-ignored), re-read on every request:
 
 ```sh
-bin/bans                     # list blocked IPs + the whitelist
-bin/unban 203.0.113.7        # remove a block (takes effect immediately)
-bin/whitelist 203.0.113.7    # never block this IP/CIDR again (also unbans)
+bin/servitals-ctl bans                   # list blocked IPs + the whitelist
+bin/servitals-ctl unban 203.0.113.7      # remove a block (takes effect immediately)
+bin/servitals-ctl whitelist 203.0.113.7  # never block this IP/CIDR again (also unbans)
+bin/servitals-ctl hash-password          # print an AUTH_PASS_HASH value
 ```
 
 `data/whitelist.txt` can also be edited directly — one IP or CIDR per line.
@@ -157,7 +167,7 @@ Per-drive labels and warnings, keyed by mountpoint:
 | `t` | toggle theme: dark ⇄ light |
 | `esc` | close settings |
 
-`[logout]` in the header ends the session. The font (JetBrains Mono) is
+`[logout]` in the header ends the session (a POST, so other sites cannot log you out). The font (JetBrains Mono) is
 self-hosted under `www/fonts/`, so it renders identically offline.
 `prefers-reduced-motion` disables the blink/pulse animations.
 
@@ -191,22 +201,24 @@ whichever gap produced the latest snapshot.
 ## Layout
 
 ```
-systemdashboard/
+servitals/
 ├── docker-compose.example.yml   # → docker-compose.yml (gitignored)
 ├── .env.example                 # → .env (gitignored)
 ├── nginx.conf
-├── auth/
+├── hub/
 │   ├── Dockerfile
-│   └── server.js           # the whole login gateway (zero deps)
-├── collector/
+│   ├── server.js           # the login gateway (zero deps)
+│   └── lib/                # log, password, clientip, origin
+├── agent/
 │   ├── Dockerfile
 │   └── collect.sh          # the whole agent
 ├── bin/
-│   ├── bans · unban · whitelist
-├── data/                   # bans.json, whitelist.txt, secret (gitignored)
+│   └── servitals-ctl       # bans · unban · whitelist · hash-password
+├── data/                   # bans.json, whitelist.txt, secret, audit.log (gitignored)
+├── test/                   # node --test suites, budget and smoke scripts
 └── www/
     ├── index.html          # the whole UI
     ├── config.example.json # copy to config.json (gitignored) and edit
-    ├── fonts/              # self-hosted JetBrains Mono (woff2, latin subset)
+    ├── fonts/              # self-hosted JetBrains Mono and Press Start 2P (OFL)
     └── data.json           # generated by the agent (gitignored)
 ```
