@@ -84,5 +84,15 @@ for _ in $(seq 1 30); do
   sleep 1
 done
 curl -fsS -b "$jar" "$BASE/data.json" | jq -e '.host.name' >/dev/null || fail "no data.json from the agent"
+snap=$(curl -fsS -b "$jar" "$BASE/data.json")
+[ "$(jq -r '.disks[0].mounted' <<<"$snap")" = true ] || fail "snapshot is not from the new agent: $snap"
+[ -s data/local-agent.env ] || fail "gateway did not write data/local-agent.env"
+cfg=$(curl -fsS -b "$jar" "$BASE/config.json")
+[ "$(jq -r .title <<<"$cfg")" = homeserver ] || fail "www/config.json was not moved to state: $cfg"
+code=$(curl -s -o /dev/null -w '%{http_code}' -b "$jar" -H "Origin: $BASE" -X POST "$BASE/__ctl/refresh")
+[ "$code" = 200 ] || fail "refresh: expected 200, got $code"
+# capture first: `docker compose logs | grep -q` fails under pipefail when grep exits early
+agent_log=$(docker compose -p "$PROJECT" logs agent)
+grep -q 'event=agent.hub' <<<"$agent_log" || fail "agent never loaded its credentials"
 
 echo "compose smoke test passed"

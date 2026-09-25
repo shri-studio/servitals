@@ -31,12 +31,15 @@ services:
       # container start/stop/restart/logs from the UI: "1" = whitelisted IPs
       # (LAN) only, "0" = any logged-in user. refresh trigger is always allowed.
       - CTL_LAN_ONLY=${CTL_LAN_ONLY:-1}
-      - REFRESH_FILE=/www/.refresh
+      # the gateway writes data/local-agent.env for the agent container below
+      - LOCAL_HUB_URL=http://gateway:8080
+      # read once, to move an old www/config.json into data/
+      - WWW_DIR=/www
       - LOG_LEVEL=${LOG_LEVEL:-info}
       - LOG_FORMAT=${LOG_FORMAT:-logfmt}
     volumes:
       - ./data:/data
-      - ./www:/www                                 # write the .refresh trigger
+      - ./www:/www:ro
       - /var/run/docker.sock:/var/run/docker.sock   # container start/stop/restart/logs
     depends_on:
       - web
@@ -52,19 +55,24 @@ services:
       - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
 
   agent:
-    build: ./agent
+    build:
+      context: .
+      dockerfile: agent/Dockerfile
     image: servitals-agent:local
     container_name: servitals-agent
     restart: unless-stopped
     environment:
       - HOST_ROOT=/host
-      - OUT_FILE=/www/data.json
-      - INTERVAL=${INTERVAL:-300}
+      # credentials for the local node, written by the gateway on its first start
+      - CREDENTIALS_FILE=/data/local-agent.env
+      - CRED_WAIT=1
+      - INTERVAL=${INTERVAL:-60}
       - NET_IFACE=${NET_IFACE:-}
       - DISKS=${DISKS:-/}
       - TZ=${TZ:-UTC}
     volumes:
-      - ./www:/www
+      - ./data:/data:ro
+      - agent-state:/var/lib/servitals-agent
       - /var/run/docker.sock:/var/run/docker.sock:ro
       # Whole host FS, read-only, with rslave so nested mounts (e.g. /srv,
       # /mnt/*) are visible to the agent for per-drive usage.
@@ -74,6 +82,8 @@ services:
         read_only: true
         bind:
           propagation: rslave
+    depends_on:
+      - gateway
 
 networks:
   default:
@@ -83,3 +93,6 @@ networks:
         # if this range clashes with another network on the host
         - subnet: 172.31.250.0/24
           gateway: 172.31.250.1
+
+volumes:
+  agent-state:

@@ -5,3 +5,5 @@
 !hub/server.js
 !hub/lib/
 !VERSION
+!agent/collect.sh
+!agent/lib/
