@@ -11,11 +11,27 @@ mount_info() {  # $1 = mountpoint -> "fstype source" of its LAST mountinfo line
     END { if (v != "") print v }' "$HOST/proc/1/mountinfo" 2>/dev/null
 }
 
+auto_disks() {  # real filesystems from mountinfo, comma separated: DISKS=auto
+  # Whole mounts only ($4 == "/"; bind mounts of a subdirectory are skipped), a
+  # disk or network filesystem type, and not under system paths. For a stacked
+  # mountpoint the top line wins, so cifs over autofs is kept.
+  awk '
+    $4 != "/" { next }
+    { for (i = 7; i <= NF; i++) if ($i == "-") { fs = $(i+1); break } }
+    fs !~ /^(ext[234]|xfs|btrfs|zfs|f2fs|fuseblk|ntfs3?|exfat|cifs|smb3|nfs4?)$/ { next }
+    $5 ~ /^\/(boot|snap|proc|sys|dev|run|tmp|var\/lib\/docker|var\/snap)(\/|$)/ { next }
+    !seen[$5]++ { order[++n] = $5 }
+    END { for (i = 1; i <= n; i++) printf "%s%s", (i > 1 ? "," : ""), order[i] }
+  ' "$HOST/proc/1/mountinfo" 2>/dev/null
+}
+
 disks_json() {
   local lines="" m p info fstype src base parent model rota
   local bs blocks bfree bavail size used avail pct t="${STAT_TIMEOUT:-5}"
   [[ $t =~ ^[0-9]+$ ]] && [ "$t" -ge 1 ] || t=5
-  IFS=',' read -ra MS <<< "$DISKS"
+  local list=$DISKS
+  if [ "$list" = auto ]; then list=$(auto_disks); fi
+  IFS=',' read -ra MS <<< "$list"
   for m in "${MS[@]}"; do
     m=$(echo "$m" | xargs)
     [ -n "$m" ] || continue

@@ -15,7 +15,7 @@ HOST="${HOST_ROOT:-/}"
 INTERVAL="${INTERVAL:-60}"    # heartbeat; the hub wakes the agent for fresh samples on demand
 [[ $INTERVAL =~ ^[0-9]+$ ]] && [ "$INTERVAL" -ge 5 ] && [ "$INTERVAL" -le 3600 ] || INTERVAL=60
 IFACE_ENV="${NET_IFACE:-}"
-DISKS="${DISKS:-/}"
+DISKS="${DISKS:-auto}"   # "auto": every real filesystem; or a comma-separated list
 VNSTAT_DB="$HOST/var/lib/vnstat"
 NCPU=$(grep -c '^processor' "$HOST/proc/cpuinfo" 2>/dev/null || echo 1)
 [ "${NCPU:-0}" -gt 0 ] 2>/dev/null || NCPU=1

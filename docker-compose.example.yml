@@ -68,7 +68,7 @@ services:
       - CRED_WAIT=1
       - INTERVAL=${INTERVAL:-60}
       - NET_IFACE=${NET_IFACE:-}
-      - DISKS=${DISKS:-/}
+      - DISKS=${DISKS:-auto}
       - TZ=${TZ:-UTC}
     volumes:
       - ./data:/data:ro

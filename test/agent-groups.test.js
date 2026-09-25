@@ -145,4 +145,28 @@ test("a STAT_TIMEOUT that is not a number falls back to 5 s", () => {
   assert.strictEqual(d.length, 1);
 });
 
+
+test("DISKS=auto finds real filesystems and skips system, pseudo and bind mounts", () => {
+  const host = fakeHost({
+    ...BASE,
+    "proc/1/mountinfo": [
+      "25 1 8:2 / / rw,relatime shared:1 - ext4 /dev/sda2 rw",
+      "26 25 0:5 / /dev rw,nosuid shared:2 - devtmpfs udev rw",
+      "27 25 0:25 / /run rw,nosuid shared:3 - tmpfs tmpfs rw",
+      "28 25 8:1 / /boot/efi rw,relatime shared:4 - vfat /dev/sda1 rw",
+      "29 25 7:3 / /snap/core/17 ro,relatime shared:5 - squashfs /dev/loop3 ro",
+      "36 25 8:17 / /srv rw,relatime shared:6 - ext4 /dev/sdb1 rw",
+      "37 25 8:17 /media /home/me/media rw,relatime shared:6 - ext4 /dev/sdb1 rw",
+      "40 25 0:40 / /mnt/share rw,relatime shared:20 - autofs systemd-1 rw,fd=50",
+      "41 40 0:50 / /mnt/share rw,relatime shared:21 - cifs //nas/share rw",
+      "45 25 8:33 / /mnt/elements rw,relatime shared:22 - fuseblk /dev/sdc1 rw",
+      "50 25 0:60 / /var/lib/docker/overlay2/abc/merged rw,relatime - overlay overlay rw",
+      "",
+    ].join("\n"),
+    "mnt/share/f": "x", "mnt/elements/f": "x",
+  });
+  const d = json(runGroup(host, "disks_json", { DISKS: "auto" }));
+  assert.deepStrictEqual(d.map((x) => x.mount), ["/", "/srv", "/mnt/share", "/mnt/elements"]);
+});
+
 module.exports = { fakeHost, runGroup, BASE, json };
