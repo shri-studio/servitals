@@ -26,13 +26,13 @@ const { createStatic } = require("./lib/static");
 const { writeFileAtomic } = require("./lib/fsutil");
 const os = require("os");
 const { createNodeStore, localAgentEnv } = require("./lib/nodes");
+const { createAgentApi } = require("./lib/agentapi");
 
 const UP        = process.env.UPSTREAM     || "";   // unset: serve WWW_DIR directly (native install)
 const WWW_DIR   = path.resolve(process.env.WWW_DIR || path.join(__dirname, "..", "www"));
 const BIND_ADDR = process.env.BIND_ADDR    || "";   // unset: all addresses
 const DOCKER_SOCK = process.env.DOCKER_SOCK || "/var/run/docker.sock";
 const CTL_LAN_ONLY = process.env.CTL_LAN_ONLY !== "0";   // control actions: whitelisted IPs only
-const REFRESH_FILE = process.env.REFRESH_FILE || "/www/.refresh";
 const USER      = process.env.AUTH_USER    || "admin";
 const PASS      = process.env.AUTH_PASS    || "";
 const PASS_HASH = process.env.AUTH_PASS_HASH || "";           // scrypt:… (or legacy sha256 hex)
@@ -123,6 +123,21 @@ if (localNode.created) log.audit("node.added", { node: localNode.id, local: true
 // the local agent's credentials: Docker mounts this file, the installer copies it
 writeFileAtomic(path.join(DATA, "local-agent.env"),
   localAgentEnv(LOCAL_HUB_URL, localNode.id, nodes.get(localNode.id).secret), 0o600);
+
+/* ---------- agent API and the latest snapshot per node ---------- */
+const SNAP_DIR = path.join(DATA, "snapshots");
+fs.mkdirSync(SNAP_DIR, { recursive: true });
+const latest = new Map();   // node id -> raw snapshot bytes
+try { latest.set(localNode.id, fs.readFileSync(path.join(SNAP_DIR, localNode.id + ".json"))); }
+catch (_) { /* no snapshot yet */ }
+const agentApi = createAgentApi({
+  nodes, log,
+  onSnapshot(id, snap, raw) {
+    latest.set(id, raw);
+    try { writeFileAtomic(path.join(SNAP_DIR, id + ".json"), raw); }
+    catch (e) { log.warn("api.snapshot_write_failed", { node: id, error: e.code || String(e) }); }
+  },
+});
 
 const readJSON = (f) => { try { return JSON.parse(fs.readFileSync(f, "utf8")); } catch { return {}; } };
 const writeJSON = (f, o) => fs.writeFileSync(f, JSON.stringify(o, null, 2) + "\n");
@@ -334,6 +349,9 @@ const server = http.createServer((req, res) => {
 });
 
 async function handle(req, res) {
+  // agents authenticate with signatures, never cookies; browser bans do not apply
+  if ((req.url || "").startsWith("/api/v1/")) return agentApi.handle(req, res);
+
   const client = resolveClient(req);
   const ip = client.ip;
   const wl = whitelisted(client);
@@ -406,15 +424,25 @@ async function handle(req, res) {
     return res.end(body);
   }
 
+  // the local node's latest snapshot, where the page and old scripts expect it
+  if (authed && req.method === "GET" && pathname === "/data.json") {
+    const snap = latest.get(nodes.localId());
+    res.writeHead(snap ? 200 : 503, { "content-type": "application/json", "cache-control": "no-store" });
+    return res.end(snap || '{"error":"no snapshot yet"}');
+  }
+
   // ---- control endpoints (require a session; restart also requires LAN) ----
   if (req.url && req.url.startsWith("/__ctl/")) {
     if (!authed) { res.writeHead(401, { "content-type": "text/plain" }); return res.end("login required"); }
     const json = (code, o) => { res.writeHead(code, { "content-type": "application/json" }); res.end(JSON.stringify(o)); };
 
-    // ask the agent to sample now — harmless, any authed user
+    // ask the local agent to sample now — harmless, any authed user. Within 5 s
+    // of a push the data is fresh and a wake would only earn a 429.
     if (req.method === "POST" && req.url === "/__ctl/refresh") {
-      try { fs.writeFileSync(REFRESH_FILE, String(Date.now())); } catch (e) {}
-      return json(200, { ok: true });
+      const id = nodes.localId();
+      const fresh = !!id && Date.now() - agentApi.lastPushAt(id) < 5000;
+      const woke = !!id && !fresh && agentApi.wake(id);
+      return json(200, { ok: true, woke, fresh });
     }
 
     // does this client get container controls?
@@ -474,7 +502,11 @@ async function handle(req, res) {
 // a gateway should stay up: log and keep serving rather than exit on a stray throw
 process.on("unhandledRejection", (e) => log.error("process.unhandled_rejection", { error: String(e && e.stack || e) }));
 process.on("uncaughtException",  (e) => log.error("process.uncaught_exception", { error: String(e && e.stack || e) }));
-process.on("SIGTERM", () => server.close(() => process.exit(0)));
+process.on("SIGTERM", () => {
+  agentApi.close();   // answer open long polls so close() is not held up by them
+  server.close(() => process.exit(0));
+  setTimeout(() => process.exit(0), 3000).unref();
+});
 
 server.listen(PORT, BIND_ADDR || undefined, () => {
   log.info("server.start", {
