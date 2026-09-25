@@ -11,8 +11,10 @@ These hold in every version. A change that breaks one needs its own review.
 1. **The agent never executes anything a hub sends.** The only instruction a
    hub can give is "sample now". Replies are signed; unsigned or badly signed
    replies are ignored.
-2. **A node's secret never crosses the network.** It is typed or pasted by an
-   admin and used only as an HMAC key.
+2. **A node's secret never crosses the network**, with one documented
+   exception: code-based linking sends it once, inside TLS, on HTTPS hubs
+   only. Otherwise it is typed or pasted by an admin and used only as an HMAC
+   key.
 3. **Snapshots are untrusted input.** The hub validates them against the
    schema before storing, and the page escapes every string it renders.
 4. **Container control exists only for the hub's own host**, only for
@@ -30,6 +32,8 @@ These hold in every version. A change that breaks one needs its own review.
 | client IP identity | anyone reaching the port directly | forge a LAN address, skip lockout, get container control | proxy headers honoured only from peers in `TRUSTED_PROXIES` (loopback by default); a proxy's own address is never whitelisted; compose pins its gateway address |
 | hosted outbound requests | hosted user | SSRF into the hosting network or cloud metadata | destination resolved, private and special ranges refused, IP pinned, no redirects |
 | proxy credentials | anyone reading logs or status pages | use of the organisation's proxy | credentials only in env files (0640/0600); logs and the UI show the proxy host, never `user:password` |
+| code-based linking | code guessing | link a device into someone's account | 8-character codes from a 32-symbol alphabet, 10-minute life, single use, stored hashed, 10 attempts per account and IP per 10 minutes |
+| code-based linking | social engineering: the victim approves an attacker's code, or gives their code to an attacker | the attacker's device shows fake data in the victim's account, or the victim's metrics go to the attacker's account | approval page shows host, OS, source IP and start time; the agent prints the account it joined; `servitals-agent unlink`; warning text on both sides |
 | backup files | anyone who copies one | admin hash, node secrets, channel tokens | written 0600; `--encrypt` option; hosted backups always encrypted |
 | admin login | internet bots | dashboard access | scrypt; per-IP lockout after `MAX_FAILS`; LAN whitelist; 800 ms delay on failure; TOTP on hosted |
 | browser session | XSS, CSRF | act as the admin | escaping plus schema validation; `HttpOnly`, `SameSite=Lax`, `Secure` on HTTPS; `Origin` check on state changes; strict CSP (no inline script or style) |

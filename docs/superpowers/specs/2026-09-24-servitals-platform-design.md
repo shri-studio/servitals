@@ -244,6 +244,51 @@ behaviour.
    `bad secret`, `clock skew`, `unreachable` or `unsupported protocol`.
 3. The secret is typed or pasted by the admin. It never crosses the network.
 
+#### 6.1.1 Code-based linking (HTTPS hubs only)
+
+Copying a 77-character join string between screens is the clumsy part of
+pairing, so agents can also link with a short code, following the OAuth
+device authorization pattern (RFC 8628, used by TVs and the GitHub CLI):
+
+```
+$ sudo servitals-agent link https://servitals.prabzo.com
+  Open https://servitals.prabzo.com/link and enter:  WXKP-4M7R
+  Only enter this code on that site, in your own account.
+  Waiting for approval… (expires in 10:00)
+  Linked as "nas" to account r***@gmail.com. Agent started.
+```
+
+1. The agent generates its node secret locally and calls
+   `POST /api/v1/link/start` over HTTPS with the secret, its host name, OS and
+   agent version. The hub answers with a long random `device_code` (kept by
+   the agent) and a short `user_code` (shown to the person).
+2. The person opens `/link` while logged in, types the code, and sees what
+   they are approving: host name, OS, agent version, the request's source IP,
+   and when it started. They choose a node name and tags, then **Approve** or
+   **Deny**.
+3. The agent polls `POST /api/v1/link/poll` with the `device_code` every 5
+   seconds. After approval it receives the node id and the account label,
+   writes `/etc/servitals/agent-credentials.env`, starts the unit and prints
+   which account it joined.
+
+Rules:
+- HTTPS only. The agent refuses a `http://` hub URL for `link`, and the hub
+  answers `403 https_required` unless the request arrived over HTTPS (or from
+  loopback, for tests). Plain-HTTP hubs keep the typed `join` string.
+- This is the one place a node secret crosses the network, once, inside TLS,
+  as a documented exception to threat-model invariant 2.
+- `user_code`: 8 characters from an alphabet without look-alikes
+  (`ABCDEFGHJKLMNPQRSTUVWXYZ23456789`), shown as `XXXX-XXXX`, single use,
+  valid 10 minutes. `device_code`: 32 random bytes. Both are stored hashed.
+- Rate limits: 5 link starts per source IP per hour; 10 code entries per
+  account and per IP per 10 minutes; codes are compared in constant time.
+- Approval counts against the account's node limit (hosted: 5); over the
+  limit the page says so and denies.
+- The agent prints the account it joined, so a person tricked into approving
+  in someone else's account would see the wrong account at once and can
+  run `servitals-agent unlink`.
+- Works the same on self-hosted HTTPS hubs, where the hub's admin approves.
+
 The hub's own agent is paired by the `servitals` package's `postinst`, which
 writes the credentials file for the local agent only if no credentials file
 exists yet (an agent already joined to another hub is left alone). That file
@@ -662,6 +707,9 @@ per-account settings, so a paid tier would not need a redesign.
   analytics or trackers, and that the weather panel's requests go from the
   browser straight to Open-Meteo with the configured coordinates.
 - No remote control of any kind on the hosted service.
+- **Adding a device** uses code-based linking (section 6.1.1) by default;
+  the "Add node" screen shows `servitals-agent link https://servitals.prabzo.com`
+  with the typed join string as a fallback.
 - **Outbound requests are SSRF-guarded.** Every user-supplied destination
   (webhook, ntfy, Gotify, Matrix, Apprise API, SMTP host) is resolved first;
   loopback, private, link-local, CGNAT, multicast and cloud metadata
@@ -791,10 +839,10 @@ works on its own.
 | 1 | Foundation: rename, LICENSE, source layout, logging, scrypt, `TRUSTED_PROXIES` and `Origin` checks, CI skeleton, budget checks | CI green; Docker install still works renamed; forged proxy headers no longer grant LAN privileges |
 | 2 | Native mode: gateway static serving, agent fixes and groups, local agent over the API, state paths | both run as system units on this host with the hardening in 13.2 |
 | 3 | Debian packaging and PPA pipeline | `apt install servitals` from the PPA on a clean noble and resolute container; autopkgtest passes |
-| 4 | Multi-node: protocol, pairing, wake, validation, fleet UI, styles registry with the v1 styles, customization, config as code, backup and rotation CLI, `docs/networking.md` | a second machine joins, shows in the fleet grid, survives hub restarts; the agent works through `HTTPS_PROXY` |
+| 4 | Multi-node: protocol, pairing (join string and code-based linking on HTTPS hubs), wake, validation, fleet UI, styles registry with the v1 styles, customization, config as code, backup and rotation CLI, `docs/networking.md` | a second machine joins, shows in the fleet grid, survives hub restarts; the agent works through `HTTPS_PROXY` |
 | 5 | Metrics: Ubuntu, processes, disk I/O, fans, battery | panels render in every style; budget holds |
 | 6 | History and alerts with all channels, Web Push, routing, outbound proxy (`hub/lib/proxy.js`) | a disk rule fires, notifies ntfy and Web Push, resolves; the same works through an HTTP proxy |
-| 7 | Hosted service | signup to live node on a staging domain; security tests pass |
+| 7 | Hosted service | signup to live node on a staging domain with `servitals-agent link`; security tests pass |
 | 8 | Relay | a self-hosted node appears in a hosted account and wakes from it |
 
 ## 21. Roadmap (after v1)
