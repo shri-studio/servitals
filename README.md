@@ -57,8 +57,8 @@ Data sources — all read-only, nothing installed on the host:
 ## Setup
 
 ```sh
-git clone https://github.com/shri-studio/systemdashboard.git  # legacy-name: update after the GitHub rename
-cd systemdashboard  # legacy-name: update after the GitHub rename
+git clone https://github.com/shri-studio/servitals.git
+cd servitals
 
 cp docker-compose.example.yml docker-compose.yml
 cp .env.example .env
