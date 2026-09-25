@@ -8,7 +8,7 @@
  * - whitelisted IPs / CIDRs can never be banned and skip login-count tracking
  * - client IPs from proxy headers only when the peer is in TRUSTED_PROXIES
  * - state-changing requests need a same-origin Origin header
- * - ban list and whitelist are plain files under DATA_DIR, re-read every request
+ * - state (bans, whitelist, config, nodes, snapshots) lives in STATE_DIR
  *
  * unban:      servitals-ctl unban <ip>
  * whitelist:  servitals-ctl whitelist <ip|cidr>
@@ -23,6 +23,7 @@ const { createClientResolver, parseCidrList, isWhitelisted } = require("./lib/cl
 const { originAllowed, requestIsHttps } = require("./lib/origin");
 const { VERSION } = require("./lib/version");
 const { createStatic } = require("./lib/static");
+const { writeFileAtomic } = require("./lib/fsutil");
 
 const UP        = process.env.UPSTREAM     || "";   // unset: serve WWW_DIR directly (native install)
 const WWW_DIR   = path.resolve(process.env.WWW_DIR || path.join(__dirname, "..", "www"));
@@ -40,7 +41,8 @@ const PUBLIC_URL = process.env.PUBLIC_URL || "";
 const PROXY_HEADER = (process.env.PROXY_HEADER || "x-forwarded-for").toLowerCase();
 const SITE   = process.env.SITE_NAME || "servitals";
 const PORT   = parseInt(process.env.PORT || "8080", 10);
-const DATA   = process.env.DATA_DIR || "/data";
+// STATE_DIRECTORY is set by systemd's StateDirectory=; DATA_DIR is the Docker name
+const DATA   = process.env.STATE_DIR || process.env.STATE_DIRECTORY || process.env.DATA_DIR || "/data";
 const SEED_WHITELIST = (process.env.WHITELIST ||
   "127.0.0.1,::1,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16").split(",").map(s => s.trim());
 
@@ -100,6 +102,16 @@ if (!fs.existsSync(WL_F)) {
     SEED_WHITELIST.join("\n") + "\n");
 }
 const SECRET = fs.readFileSync(SECRET_F, "utf8").trim();
+
+// config.json used to live in www/ (Docker install); copy it to the state dir once
+const CONFIG_F = path.join(DATA, "config.json");
+const LEGACY_CONFIG = path.join(WWW_DIR, "config.json");
+if (!fs.existsSync(CONFIG_F) && fs.existsSync(LEGACY_CONFIG)) {
+  try {
+    fs.copyFileSync(LEGACY_CONFIG, CONFIG_F);
+    log.info("config.migrated", { from: LEGACY_CONFIG, to: CONFIG_F });
+  } catch (e) { log.warn("config.migrate_failed", { from: LEGACY_CONFIG, error: e.code || String(e) }); }
+}
 
 const readJSON = (f) => { try { return JSON.parse(fs.readFileSync(f, "utf8")); } catch { return {}; } };
 const writeJSON = (f, o) => fs.writeFileSync(f, JSON.stringify(o, null, 2) + "\n");
@@ -373,6 +385,15 @@ async function handle(req, res) {
   }
 
   const authed = validCookie(getCookie(req, "sv_session"));
+  const pathname = (req.url || "/").split("?")[0];
+
+  // dashboard settings: from the state dir, not www/ (the page falls back to its defaults)
+  if (authed && req.method === "GET" && pathname === "/config.json") {
+    let body = "{}\n";
+    try { body = fs.readFileSync(CONFIG_F, "utf8"); } catch (_) { /* nothing saved yet */ }
+    res.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" });
+    return res.end(body);
+  }
 
   // ---- control endpoints (require a session; restart also requires LAN) ----
   if (req.url && req.url.startsWith("/__ctl/")) {
@@ -402,9 +423,7 @@ async function handle(req, res) {
       if (obj.portainerUrl && !/^https?:\/\/[^\s"'<>]+$/i.test(obj.portainerUrl))
         return json(400, { error: "portainerUrl must be an http(s) URL" });
       try {
-        const dst = process.env.CONFIG_FILE || "/www/config.json";
-        fs.writeFileSync(dst + ".tmp", JSON.stringify(obj, null, 2) + "\n");
-        fs.renameSync(dst + ".tmp", dst);
+        writeFileAtomic(CONFIG_F, JSON.stringify(obj, null, 2) + "\n");
         log.audit("config.saved", { ip });
         return json(200, { ok: true });
       } catch (e) { return json(500, { error: String(e) }); }

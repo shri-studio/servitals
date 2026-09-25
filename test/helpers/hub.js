@@ -146,4 +146,14 @@ function cookieFrom(res) {
   return null;
 }
 
-module.exports = { startHub, runHubUntilExit, request, login, cookieFrom, formBody, DEFAULT_PASS };
+// POST to a /__ctl route as the logged-in browser would (session + same Origin)
+function ctlPost(port, cookie, p, body) {
+  const headers = { cookie, origin: `http://127.0.0.1:${port}` };
+  if (body !== undefined) {
+    headers["content-type"] = "application/json";
+    headers["content-length"] = Buffer.byteLength(body);
+  }
+  return request(port, { method: "POST", path: p, headers, body });
+}
+
+module.exports = { startHub, runHubUntilExit, request, login, cookieFrom, formBody, DEFAULT_PASS, ctlPost };

@@ -1623,7 +1623,7 @@ document.addEventListener("visibilitychange", () => {
   };
   $("#cfg-export").onclick = () => {
     $("#export-wrap").classList.remove("hidden");
-    $("#export-lbl").textContent = "www/config.json — the container-control endpoint writes this for you on save";
+    $("#export-lbl").textContent = "config.json in the hub's state directory — saving the settings writes it for you";
     $("#export-text").value = JSON.stringify(cfg, null, 2);
     $("#export-text").select();
   };
