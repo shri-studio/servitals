@@ -1,17 +1,28 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: AGPL-3.0-or-later
-# servitals-ctl: admin commands for the gateway's state files.
+# servitals-ctl: admin commands for the servitals hub.
 #   servitals-ctl bans                 list blocked IPs and the whitelist
 #   servitals-ctl unban <ip>           remove a block (takes effect immediately)
 #   servitals-ctl whitelist <ip|cidr>  never block this address again (also unbans)
 #   servitals-ctl hash-password        print an AUTH_PASS_HASH value
-# DATA_DIR defaults to ./data next to this script's parent (Docker install).
+#   servitals-ctl docker enable        let the hub control containers (root-equivalent)
+#   servitals-ctl docker disable       take that access away again
+# State: STATE_DIR, else DATA_DIR, else ./data of a Docker checkout, else /var/lib/servitals.
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-DATA_DIR="${DATA_DIR:-$ROOT/data}"
+SELF_DIR="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
+if [ -d "$SELF_DIR/../hub" ]; then
+  ROOT="$(cd "$SELF_DIR/.." && pwd)"   # running from a checkout
+else
+  ROOT=/usr/share/servitals
+fi
+if [ -n "${STATE_DIR:-}" ]; then DATA_DIR=$STATE_DIR
+elif [ -z "${DATA_DIR:-}" ]; then
+  if [ -d "$ROOT/data" ]; then DATA_DIR=$ROOT/data; else DATA_DIR=/var/lib/servitals; fi
+fi
 BANS="$DATA_DIR/bans.json"
 WL="$DATA_DIR/whitelist.txt"
+UNIT=servitals.service
 
 die() { echo "servitals-ctl: $*" >&2; exit 1; }
 
@@ -21,6 +32,7 @@ atomic_write() {
   tmp=$(mktemp "$dst.XXXXXX")
   cat > "$tmp"
   chmod --reference="$dst" "$tmp" 2>/dev/null || chmod 644 "$tmp"
+  chown --reference="$dst" "$tmp" 2>/dev/null || true   # root edits keep the hub's ownership
   mv "$tmp" "$dst"
 }
 
@@ -88,10 +100,29 @@ cmd_hash_password() {
   return 0
 }
 
+cmd_docker() {  # enable|disable
+  local dir="${DROPIN_ROOT:-/etc/systemd/system}/$UNIT.d"
+  case "${1:-}" in
+    enable)
+      "${GETENT:-getent}" group docker >/dev/null || die "this host has no docker group"
+      echo "warning: members of the docker group can take over this host as root." >&2
+      echo "Container controls in the dashboard then act with that power; keep CTL_LAN_ONLY=1." >&2
+      mkdir -p "$dir"
+      printf '# written by: servitals-ctl docker enable\n[Service]\nSupplementaryGroups=docker\n' > "$dir/docker.conf"
+      ;;
+    disable) rm -f "$dir/docker.conf" ;;
+    *) die "usage: servitals-ctl docker enable|disable" ;;
+  esac
+  "${SYSTEMCTL:-systemctl}" daemon-reload
+  "${SYSTEMCTL:-systemctl}" try-restart "$UNIT"
+  echo "docker access ${1}d for $UNIT"
+}
+
 case "${1:-}" in
+  docker)        shift; cmd_docker "$@" ;;
   bans)          shift; cmd_bans "$@" ;;
   unban)         shift; cmd_unban "$@" ;;
   whitelist)     shift; cmd_whitelist "$@" ;;
   hash-password) shift; cmd_hash_password "$@" ;;
-  *) sed -n '3,8p' "$0" | sed 's/^# \{0,1\}//'; exit 1 ;;
+  *) sed -n '3,10p' "$0" | sed 's/^# \{0,1\}//'; exit 1 ;;
 esac

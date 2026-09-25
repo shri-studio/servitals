@@ -1,0 +1,59 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# servitals-agent: run and inspect the servitals agent.
+#   servitals-agent run              run the agent (the systemd unit uses this)
+#   servitals-agent test             sample once and print the snapshot; nothing is sent
+#   servitals-agent docker enable    let the agent read the Docker socket (root-equivalent)
+#   servitals-agent docker disable   take that access away again
+set -euo pipefail
+
+SELF_DIR="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
+if [ -f "$SELF_DIR/../agent/collect.sh" ]; then
+  AGENT_HOME="$(cd "$SELF_DIR/../agent" && pwd)"   # running from a checkout
+else
+  AGENT_HOME=/usr/lib/servitals-agent
+fi
+UNIT=servitals-agent.service
+
+die() { echo "servitals-agent: $*" >&2; exit 1; }
+
+docker_access() {  # enable|disable
+  local dir="${DROPIN_ROOT:-/etc/systemd/system}/$UNIT.d"
+  case "${1:-}" in
+    enable)
+      "${GETENT:-getent}" group docker >/dev/null || die "this host has no docker group"
+      echo "warning: members of the docker group can take over this host as root." >&2
+      echo "The agent only reads the container list, but whoever controls the agent gets that power." >&2
+      mkdir -p "$dir"
+      printf '# written by: servitals-agent docker enable\n[Service]\nSupplementaryGroups=docker\n' > "$dir/docker.conf"
+      ;;
+    disable) rm -f "$dir/docker.conf" ;;
+    *) die "usage: servitals-agent docker enable|disable" ;;
+  esac
+  "${SYSTEMCTL:-systemctl}" daemon-reload
+  "${SYSTEMCTL:-systemctl}" try-restart "$UNIT"
+  echo "docker access ${1}d for $UNIT"
+}
+
+cmd_test() {
+  local env_file="${AGENT_ENV:-/etc/servitals/agent.env}"
+  if [ -r "$env_file" ]; then
+    set -a
+    # shellcheck source=/dev/null
+    . "$env_file"
+    set +a
+  fi
+  # global, not local: the EXIT trap runs after this function has returned
+  TEST_DIR=$(mktemp -d)
+  trap 'rm -rf "$TEST_DIR"' EXIT
+  STATE_DIR="$TEST_DIR" OUT_FILE="$TEST_DIR/snapshot.json" ONCE=1 HOST_ROOT="${HOST_ROOT:-/}" \
+    bash "$AGENT_HOME/collect.sh" >&2 || die "sampling failed"
+  jq . "$TEST_DIR/snapshot.json"
+}
+
+case "${1:-}" in
+  run)    shift; exec bash "$AGENT_HOME/collect.sh" "$@" ;;
+  test)   shift; cmd_test ;;
+  docker) shift; docker_access "$@" ;;
+  *) sed -n '3,7p' "$0" | sed 's/^# \{0,1\}//'; exit 1 ;;
+esac
