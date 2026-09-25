@@ -4,24 +4,33 @@
 # (globals such as HOST, STATE and NCPU are set by collect.sh)
 # disks: usage per DISKS entry, source and model from mountinfo and sysfs
 
-mount_source() {  # $1 = host mountpoint -> device / remote
-  awk -v m="$1" '{
-    if ($5 == m) { for (i = 6; i <= NF; i++) if ($i == "-") { print $(i+2); exit } }
-  }' "$HOST/proc/1/mountinfo"
+mount_info() {  # $1 = mountpoint -> "fstype source" of its LAST mountinfo line
+  # A mountpoint can appear several times (cifs stacked on autofs); the last
+  # line is the mount on top, the one a path lookup reaches.
+  awk -v m="$1" '$5 == m { for (i = 7; i <= NF; i++) if ($i == "-") { v = $(i+1) " " $(i+2); break } }
+    END { if (v != "") print v }' "$HOST/proc/1/mountinfo" 2>/dev/null
 }
 
 disks_json() {
-  local out="[]" m p src base parent model rota
+  local lines="" m p info fstype src base parent model rota
   local bs blocks bfree bavail size used avail pct
   IFS=',' read -ra MS <<< "$DISKS"
   for m in "${MS[@]}"; do
     m=$(echo "$m" | xargs)
     [ -n "$m" ] || continue
     if [ "$m" = "/" ]; then p="$HOST"; else p="$HOST$m"; fi
-    [ -d "$p" ] || continue
+    info=$(mount_info "$m")
+    if [ -z "$info" ]; then
+      # not a mountpoint: say so instead of reporting the parent filesystem
+      lines+="$m"$'\t0\n'
+      continue
+    fi
+    read -r fstype src <<< "$info"
+    [ -n "$src" ] || src="?"
 
-    # statvfs via busybox stat -f: %S block size, %b total, %f free, %a avail
-    read -r bs blocks bfree bavail < <(stat -f -c '%S %b %f %a' "$p" 2>/dev/null || echo "0 0 0 0")
+    # statvfs: %S block size, %b total, %f free, %a avail. A dead network share
+    # can block here forever, so bound it; a share that does not answer is left out.
+    read -r bs blocks bfree bavail < <(timeout "${STAT_TIMEOUT:-5}" stat -f -c '%S %b %f %a' "$p" 2>/dev/null || echo "0 0 0 0")
     [ "${blocks:-0}" -gt 0 ] || continue
     size=$(( bs * blocks ))
     avail=$(( bs * bavail ))
@@ -32,7 +41,6 @@ disks_json() {
       pct=0
     fi
 
-    src=$(mount_source "$m"); [ -n "$src" ] || src="?"
     model=""; rota=""
     if [ "${src#/dev/}" != "$src" ]; then
       base=${src#/dev/}
@@ -44,15 +52,12 @@ disks_json() {
       model=$(cat "$HOST/sys/class/block/$parent/device/model" 2>/dev/null | xargs || true)
       rota=$(cat "$HOST/sys/class/block/$parent/queue/rotational" 2>/dev/null || echo "")
     fi
-    local fstype
-    fstype=$(awk -v mp="$m" '{ if ($5==mp) { for(i=6;i<=NF;i++) if($i=="-"){print $(i+1); exit} } }' "$HOST/proc/1/mountinfo")
-
-    out=$(echo "$out" | jq -c \
-      --arg mount "$m" --arg src "$src" --arg model "$model" --arg fs "${fstype:-}" \
-      --argjson size "$size" --argjson used "$used" --argjson avail "$avail" --argjson pct "$pct" \
-      --arg rota "$rota" \
-      '. + [{mount:$mount, source:$src, model:$model, fstype:$fs,
-             rotational:($rota=="1"), size:$size, used:$used, avail:$avail, pct:$pct}]')
+    lines+="$m"$'\t1\t'"$src"$'\t'"$model"$'\t'"$fstype"$'\t'"$rota"$'\t'"$size"$'\t'"$used"$'\t'"$avail"$'\t'"$pct"$'\n'
   done
-  echo "$out"
+  # one jq for all disks
+  printf '%s' "$lines" | jq -R -s -c '[ split("\n")[] | select(length > 0) | split("\t") |
+    if .[1] == "0" then { mount: .[0], mounted: false }
+    else { mount: .[0], mounted: true, source: .[2], model: .[3], fstype: .[4],
+           rotational: (.[5] == "1"), size: (.[6] | tonumber), used: (.[7] | tonumber),
+           avail: (.[8] | tonumber), pct: (.[9] | tonumber) } end ]'
 }

@@ -15,12 +15,13 @@ test("ONCE=1 writes one snapshot of this host and exits", () => {
     timeout: 30000,
   });
   assert.strictEqual(r.status, 0, r.stderr.toString());
-  assert.match(r.stdout.toString(), /^servitals agent: /m);
+  assert.match(r.stdout.toString(), /^servitals agent: .*INTERVAL=60s/m);
   const d = JSON.parse(fs.readFileSync(out, "utf8"));
   assert.ok(d.host.name.length > 0);
   assert.ok(d.mem.total > 0);
   assert.ok(d.cpu.cores >= 1);
   assert.strictEqual(d.disks[0].mount, "/");
+  assert.strictEqual(d.disks[0].mounted, true);
   assert.deepStrictEqual(d.docker, []);
   fs.rmSync(dir, { recursive: true, force: true });
 });

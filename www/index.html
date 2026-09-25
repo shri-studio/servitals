@@ -1065,6 +1065,11 @@ function renderMetrics(d) {
         ? dk.model + (dk.rotational ? " · hdd" : " · ssd")
         : (dk.fstype || dk.source || ""));
       const warn = meta.warn ? ` <span class="dwarn">⚠ ${esc(meta.warn)}</span>` : "";
+      if (dk.mounted === false) {
+        return `<div class="disk"><div class="dtop">
+          <span class="dname">${name} <span class="muted">${esc(dk.mount)}</span></span>
+          <span class="v hl-amber">not mounted</span></div>${warn ? `<div class="dmodel">${warn}</div>` : ""}</div>`;
+      }
       const cls = HCLS[health(dk.pct, 78, 90)];
       const freePct = dk.size ? (dk.avail / dk.size) * 100 : 100;
       const freeCls = freePct < 5 ? "hl-red" : freePct < 10 ? "hl-amber" : "dfree";

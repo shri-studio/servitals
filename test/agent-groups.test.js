@@ -97,4 +97,35 @@ test("net_json without an interface is null", () => {
   assert.strictEqual(runGroup(fakeHost(BASE), 'net_json ""').stdout.trim(), "null");
 });
 
+test("a stacked mount reports the top of the stack (cifs on autofs)", () => {
+  const host = fakeHost({
+    ...BASE,
+    "proc/1/mountinfo": BASE["proc/1/mountinfo"] +
+      "40 25 0:40 / /mnt/share rw,relatime shared:20 - autofs systemd-1 rw,fd=50\n" +
+      "41 40 0:50 / /mnt/share rw,relatime shared:21 - cifs //nas/share rw\n",
+    "mnt/share/file": "x",
+  });
+  const d = json(runGroup(host, "disks_json", { DISKS: "/mnt/share" }));
+  assert.deepStrictEqual([d[0].fstype, d[0].source, d[0].mounted], ["cifs", "//nas/share", true]);
+});
+
+test("DISKS entries that are not mountpoints say so", () => {
+  const host = fakeHost({ ...BASE, "mnt/none/file": "x" });
+  const d = json(runGroup(host, "disks_json", { DISKS: "/srv,/mnt/none,/mnt/gone" }));
+  assert.deepStrictEqual(d.map((x) => [x.mount, x.mounted]), [["/srv", true], ["/mnt/none", false], ["/mnt/gone", false]]);
+  assert.deepStrictEqual(Object.keys(d[1]).sort(), ["mount", "mounted"]);
+});
+
+test("a hung statvfs is cut off", () => {
+  const stub = fs.mkdtempSync(path.join(os.tmpdir(), "sv-stub-"));
+  // exec, so `timeout` kills the sleeping process itself and the pipe closes
+  fs.writeFileSync(path.join(stub, "stat"), "#!/bin/sh\nexec sleep 10\n", { mode: 0o755 });
+  const started = Date.now();
+  const r = runGroup(fakeHost(BASE), "disks_json", {
+    DISKS: "/srv", STAT_TIMEOUT: "1", PATH: `${stub}:${process.env.PATH}`,
+  });
+  assert.ok(Date.now() - started < 5000, "finished within the timeout, not after 10 s");
+  assert.deepStrictEqual(json(r), []);
+});
+
 module.exports = { fakeHost, runGroup, BASE, json };

@@ -11,7 +11,7 @@ HERE="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
 HOST="${HOST_ROOT:-/}"
 OUT="${OUT_FILE:-/www/data.json}"
 OUTDIR="$(dirname "$OUT")"
-INTERVAL="${INTERVAL:-300}"   # slow heartbeat; the UI triggers fresh samples on demand
+INTERVAL="${INTERVAL:-60}"    # heartbeat; the hub wakes the agent for fresh samples on demand
 IFACE_ENV="${NET_IFACE:-}"
 DISKS="${DISKS:-/}"
 VNSTAT_DB="$HOST/var/lib/vnstat"
@@ -51,7 +51,7 @@ collect() {
     --argjson host "$host" --argjson mem "$mem" --argjson cpu "$cpu" \
     --argjson temp "$temp" --argjson disks "$disks" --argjson net "${net:-null}" \
     --argjson docker "$docker" --rawfile trend "$TREND_FILE" \
-    --argjson interval "${INTERVAL:-300}" \
+    --argjson interval "$INTERVAL" \
     '{ts:(now|floor), interval:$interval, host:$host, mem:$mem, cpu:$cpu, temp:$temp,
       disks:$disks, net:$net, docker:$docker,
       trend: ($trend / "\n" | map(select(length > 0) | fromjson?))}' \
