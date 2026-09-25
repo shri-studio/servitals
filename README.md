@@ -113,8 +113,20 @@ users and units are the ones the packages will use.
 ```bash
 sudo apt install nodejs jq curl vnstat
 git clone https://github.com/shri-studio/servitals && cd servitals
-sudo packaging/install-local.sh          # asks for the admin password
+sudo packaging/install-local.sh          # asks for the admin name and password
 ```
+
+Moving from the Docker install? `sudo packaging/install-local.sh
+--import-docker /path/to/old/servitals` copies your login, dashboard
+settings (`config.json`: title, disk labels, clocks, weather), whitelist
+and `DISKS`/`NET_IFACE` from it, so the native dashboard looks the same.
+`servitals-ctl import-docker <dir>` does the same on an installed hub.
+Container controls stay LAN-only (`CTL_LAN_ONLY=1`) even if the Docker
+install allowed them for everyone.
+
+Disks: `DISKS=auto` (the default) shows every real disk and network
+filesystem; list mountpoints instead to choose. Disks without a label in
+the settings show a short name (`/` is "system", `/mnt/backup` is "backup").
 
 | what | where |
 | --- | --- |

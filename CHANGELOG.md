@@ -17,6 +17,12 @@ All notable changes to this project are documented here. The format follows
 - `servitals-agent` CLI (`run`, `test`, `docker enable|disable`) and
   `servitals-ctl docker enable|disable`.
 - Metric groups can be turned off with `COLLECT_<GROUP>=0`.
+- `DISKS=auto` (now the default) finds every real disk and network
+  filesystem; disks without a label show a short default name.
+- `servitals-ctl import-docker <dir>` and `install-local.sh --import-docker`
+  bring a Docker install's login, settings, whitelist and disks to a native
+  install. The installer asks for the admin name (default: the user who ran
+  sudo) and prints it at the end.
 - Product name, version and source link in the dashboard footer, and a
   one-time notice after an update. The version is shown only after login.
 - scrypt password hashes (`bin/servitals-ctl hash-password`).

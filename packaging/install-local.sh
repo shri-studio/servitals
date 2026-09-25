@@ -3,12 +3,16 @@
 # Install servitals from this checkout as native systemd services, in the
 # layout the Ubuntu packages use. For development, and for hosts that run
 # from a checkout until the PPA exists.
-#   sudo packaging/install-local.sh               install or upgrade
-#   sudo packaging/install-local.sh --uninstall   remove programs and units;
-#                                                 keeps /etc/servitals, state and users
-# First install only: HUB_PORT (default 20002) and ADMIN_USER (default admin)
-# go into /etc/servitals/hub.env; the admin password comes from ADMIN_PASSWORD
-# or is asked for on the terminal. Later runs never change /etc/servitals.
+#   sudo packaging/install-local.sh                     install or upgrade
+#   sudo packaging/install-local.sh --import-docker DIR also copy login, settings and
+#                                                       disks from a Docker install in DIR
+#   sudo packaging/install-local.sh --uninstall         remove programs and units;
+#                                                       keeps /etc/servitals, state and users
+# First install only: HUB_PORT (default 20002) goes into /etc/servitals/hub.env,
+# and the admin name and password are asked for (the name defaults to the user
+# who ran sudo). ADMIN_USER and ADMIN_PASSWORD answer those questions for
+# scripts. With --import-docker the Docker install's login is used instead.
+# Later runs only change /etc/servitals through --import-docker.
 set -euo pipefail
 
 SRC="$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)"
@@ -19,6 +23,13 @@ UNITS=/etc/systemd/system
 
 die() { echo "install-local: $*" >&2; exit 1; }
 [ "$(id -u)" = 0 ] || die "run as root: sudo $0"
+
+IMPORT=""
+case "${1:-}" in
+  --import-docker) IMPORT=${2:-}; [ -d "$IMPORT" ] || die "usage: $0 --import-docker <docker-install-dir>" ;;
+  --uninstall|"") ;;
+  *) die "unknown option $1" ;;
+esac
 
 if [ "${1:-}" = --uninstall ]; then
   systemctl disable --now servitals-agent.service servitals.service 2>/dev/null || true
@@ -61,28 +72,51 @@ systemd-sysusers /usr/lib/sysusers.d/servitals.conf /usr/lib/sysusers.d/servital
 # 4. configuration, first install only
 install -d -m 755 "$ETC"
 if [ ! -e "$ETC/hub.env" ]; then
-  echo "admin password for the dashboard (at least 8 characters):"
-  if [ -n "${ADMIN_PASSWORD:-}" ]; then
-    hash=$(printf '%s\n' "$ADMIN_PASSWORD" | /usr/bin/servitals-ctl hash-password)
+  port=${HUB_PORT:-20002}
+  [[ $port =~ ^[0-9]{1,5}$ ]] || die "HUB_PORT must be a port number"
+  if [ -n "$IMPORT" ] && grep -qE '^AUTH_PASS(_HASH)?=.' "$IMPORT/.env" 2>/dev/null; then
+    user="admin"; hash=""   # the Docker install's login is imported below
   else
-    hash=$(/usr/bin/servitals-ctl hash-password < /dev/tty)
+    user=${ADMIN_USER:-}
+    if [ -z "$user" ]; then
+      user=${SUDO_USER:-admin}
+      [ "$user" != root ] || user="admin"
+      if [ -z "${ADMIN_PASSWORD:-}" ]; then
+        read -rp "admin username [$user]: " answer < /dev/tty
+        user=${answer:-$user}
+      fi
+    fi
+    [[ $user =~ ^[A-Za-z0-9._-]{1,64}$ ]] || die "admin username: use 1-64 letters, digits, dot, dash or underscore"
+    echo "admin password for $user (at least 8 characters):"
+    if [ -n "${ADMIN_PASSWORD:-}" ]; then
+      hash=$(printf '%s\n' "$ADMIN_PASSWORD" | /usr/bin/servitals-ctl hash-password)
+    else
+      hash=$(/usr/bin/servitals-ctl hash-password < /dev/tty)
+    fi
+    [[ $hash == scrypt:* ]] || die "could not hash the password"
   fi
-  [[ $hash == scrypt:* ]] || die "could not hash the password"
-  sed -e "s/^PORT=.*/PORT=${HUB_PORT:-20002}/" \
-      -e "s/^AUTH_USER=.*/AUTH_USER=${ADMIN_USER:-admin}/" \
-      -e "s|^# AUTH_PASS_HASH=.*|AUTH_PASS_HASH=$hash|" \
+  sed -e "s/^PORT=.*/PORT=$port/" -e "s/^AUTH_USER=.*/AUTH_USER=$user/" \
       "$SRC/packaging/etc/hub.env" > "$ETC/hub.env"
+  if [ -n "$hash" ]; then
+    sed -i "s|^# AUTH_PASS_HASH=.*|AUTH_PASS_HASH=$hash|" "$ETC/hub.env"
+  fi
   chmod 600 "$ETC/hub.env"
 fi
 [ -e "$ETC/agent.env" ] || install -m 644 "$SRC/packaging/etc/agent.env" "$ETC/agent.env"
 
-# 5. units
+# 5. settings, login and disks from a Docker install (before the hub starts)
+if [ -n "$IMPORT" ]; then
+  install -d -o _servitals -g _servitals -m 750 /var/lib/servitals
+  STATE_DIR=/var/lib/servitals ETC_DIR="$ETC" /usr/bin/servitals-ctl import-docker "$IMPORT"
+fi
+
+# 6. units
 install -m 644 "$SRC/packaging/systemd/servitals.service" "$SRC/packaging/systemd/servitals-agent.service" "$UNITS/"
 systemctl daemon-reload
 systemctl enable servitals.service servitals-agent.service
 systemctl restart servitals.service
 
-# 6. pair the local agent, first install only: the hub wrote its credentials on start
+# 7. pair the local agent, first install only: the hub wrote its credentials on start
 port=$(sed -n 's/^PORT=//p' "$ETC/hub.env" | tail -n 1)
 port=${port:-20002}
 for _ in $(seq 1 50); do
@@ -96,5 +130,6 @@ fi
 systemctl restart servitals-agent.service
 
 echo "servitals is running: http://$(hostname):$port/"
+echo "log in as: $(sed -n 's/^AUTH_USER=//p' "$ETC/hub.env" | tail -n 1)"
 echo "container list in the dashboard: sudo servitals-agent docker enable   (root-equivalent, see README)"
 echo "container controls:              sudo servitals-ctl docker enable"

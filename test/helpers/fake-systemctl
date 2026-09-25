@@ -1,0 +1,22 @@
+#!/bin/bash
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Stand-in for systemctl inside a plain container (no systemd): runs the two
+# servitals units as their users, enough for packaging/install-local.sh.
+echo "systemctl $*" >> /tmp/systemctl.log
+envs() { grep -v '^#' "$1" | grep '=' | sed 's/^/export /'; }
+case "$1 $2" in
+  "restart servitals.service")
+    pkill -f hub/server.js; sleep 0.3
+    install -d -o _servitals -g _servitals -m 750 /var/lib/servitals
+    ( eval "$(envs /etc/servitals/hub.env)"; export WWW_DIR=/usr/share/servitals/www STATE_DIRECTORY=/var/lib/servitals
+      setpriv --reuid=_servitals --regid=_servitals --init-groups /usr/bin/node /usr/share/servitals/hub/server.js > /tmp/hub.log 2>&1 & ) ;;
+  "restart servitals-agent.service")
+    [ -e /etc/servitals/agent-credentials.env ] || exit 0
+    pkill -f collect.sh
+    install -d -o _servitals-agent -g _servitals-agent -m 700 /var/lib/servitals-agent
+    ( eval "$(envs /etc/servitals/agent.env)"; export HOST_ROOT=/ CREDENTIALS_FILE=/etc/servitals/agent-credentials.env STATE_DIRECTORY=/var/lib/servitals-agent
+      setpriv --reuid=_servitals-agent --regid=_servitals-agent --init-groups /usr/bin/servitals-agent run > /tmp/agent.log 2>&1 & ) ;;
+  "disable --now")
+    pkill -f hub/server.js; pkill -f collect.sh ;;
+esac
+exit 0
