@@ -15,7 +15,7 @@ test("ONCE=1 writes one snapshot of this host and exits", () => {
     timeout: 30000,
   });
   assert.strictEqual(r.status, 0, r.stderr.toString());
-  assert.match(r.stdout.toString(), /^servitals agent: .*INTERVAL=60s/m);
+  assert.match(r.stdout.toString(), /event=agent\.start .*interval=60 .*mode=file/);
   const d = JSON.parse(fs.readFileSync(out, "utf8"));
   assert.ok(d.host.name.length > 0);
   assert.ok(d.mem.total > 0);
