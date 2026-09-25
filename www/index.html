@@ -1060,7 +1060,7 @@ function renderMetrics(d) {
   if (d.disks) {
     $("#disks").innerHTML = d.disks.map(dk => {
       const meta = (cfg.disks && cfg.disks[dk.mount]) || {};
-      const name = esc(meta.label || dk.mount);
+      const name = esc(meta.label || diskLabel(dk.mount));
       const kind = esc(dk.model
         ? dk.model + (dk.rotational ? " · hdd" : " · ssd")
         : (dk.fstype || dk.source || ""));
@@ -1169,6 +1169,13 @@ function ctlButtons(c) {
     + `</div>`;
 }
 const CPUCLS = { ok: "cpu-ok", warn: "cpu-hot", crit: "cpu-max" };
+// default disk name when config.json has no label: "/" is "system", else the last path part
+function diskLabel(mount) {
+  if (mount === "/") return "system";
+  const parts = String(mount).split("/").filter(Boolean);
+  return parts.length ? parts[parts.length - 1] : String(mount);
+}
+
 function cpuClass(cpu) { return CPUCLS[health(cpu || 0, 50, 80)]; }
 
 function renderDocker() {
