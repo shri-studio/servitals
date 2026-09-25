@@ -204,6 +204,18 @@
   .head .hclock { color: var(--fg-bright); font-size: 16px; font-weight: 500; font-variant-numeric: tabular-nums; }
   .head .hdate { color: var(--dim); font-size: 12px; }
   .keyhint { color: var(--dim); font-size: 12px; margin-top: 4px; }
+  .update-note { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; margin-bottom: 14px;
+    padding: 8px 12px; border: var(--border-w, 1px) solid var(--cyan); background: var(--bg-panel);
+    color: var(--fg); font-size: 13px; }
+  .update-note[hidden] { display: none; }
+  .update-note a { color: var(--cyan); }
+  .update-note button { margin-left: auto; background: none; border: 0; color: var(--dim);
+    font: inherit; cursor: pointer; text-decoration: underline; text-underline-offset: 3px; }
+  .brand-foot { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: 18px; padding-top: 10px;
+    border-top: var(--border-w, 1px) solid var(--border); color: var(--dim); font-size: 12px; }
+  .brand-foot a { color: var(--dim); }
+  .brand-foot a:hover, .brand-foot a:focus-visible { color: var(--fg-bright); }
+  .brand-foot b { color: var(--fg); font-weight: 500; }
   .keyhint b { color: var(--cyan); font-weight: 500; cursor: pointer; }
 
   /* ---- grid: 6-col; panels are normal (2), wide (3), or full (6) ---- */
@@ -532,6 +544,12 @@
 <body>
 <div class="wrap">
 
+  <div class="update-note" id="updnote" role="status" hidden>
+    <span>servitals updated to <b id="updver"></b>.</span>
+    <a href="https://github.com/shri-studio/servitals/blob/main/CHANGELOG.md" target="_blank" rel="noopener">See what's new</a>
+    <button type="button" id="upddismiss">dismiss</button>
+  </div>
+
   <div class="head">
     <div>
       <div class="title"><span id="statusdot" class="dot"></span><span id="hostname">servitals</span></div>
@@ -636,6 +654,13 @@
     <span><span class="ps1" id="ps1">visitor@host</span>:~$ <span class="cursor"></span></span>
     <span id="lastupdate">&mdash;</span>
   </div>
+
+  <footer class="brand-foot" id="brandfoot">
+    <span><b>servitals</b> <span id="sv-version"></span></span>
+    <a href="https://github.com/shri-studio/servitals" target="_blank" rel="noopener">source</a>
+    <a href="https://github.com/shri-studio/servitals/blob/main/CHANGELOG.md" target="_blank" rel="noopener">what's new</a>
+    <a href="https://github.com/shri-studio/servitals/blob/main/LICENSE" target="_blank" rel="noopener">AGPL-3.0</a>
+  </footer>
 </div>
 
 <!-- settings -->
@@ -859,6 +884,20 @@ function deepMerge(a, b) {
   return a;
 }
 function saveConfig() { lsSet("cfg", JSON.stringify(cfg)); }
+
+/* ------------------------------------------------------------------ version */
+// Footer shows the running version; after an update, a one-time note says so.
+function applyVersion(v) {
+  if (!v || v === "unknown") return;
+  $("#sv-version").textContent = v;
+  const seen = lsGet("version");
+  if (seen && seen !== v) {
+    $("#updver").textContent = v;
+    $("#updnote").hidden = false;
+    $("#upddismiss").onclick = () => { $("#updnote").hidden = true; };
+  }
+  lsSet("version", v);
+}
 
 /* ------------------------------------------------------------------ theme */
 function currentTheme() {
@@ -1518,6 +1557,7 @@ document.addEventListener("visibilitychange", () => {
   try {
     const w = await (await fetch("/__ctl/whoami")).json();
     ctlAllowed = !!w.controls;
+    applyVersion(w.version);
   } catch (e) { ctlAllowed = false; }
   if (dockerData) renderDocker();
 

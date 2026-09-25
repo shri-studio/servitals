@@ -3,7 +3,9 @@ name: servitals
 
 services:
   gateway:
-    build: ./hub
+    build:
+      context: .
+      dockerfile: hub/Dockerfile
     image: servitals-gateway:local
     container_name: servitals-gateway
     restart: unless-stopped

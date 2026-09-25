@@ -1,3 +1,7 @@
-node_modules
-*.log
-.DS_Store
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# The gateway image builds from the repository root (it needs VERSION).
+# Allow-list: send only what the image uses, never data/, .env or .git.
+*
+!hub/server.js
+!hub/lib/
+!VERSION

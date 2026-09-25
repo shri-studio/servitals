@@ -17,6 +17,8 @@ All notable changes to this project are documented here. The format follows
   to `data/audit.log`.
 
 ### Added
+- Product name, version and source link in the dashboard footer, and a
+  one-time notice after an update. The version is shown only after login.
 - scrypt password hashes (`bin/servitals-ctl hash-password`).
 - `bin/servitals-ctl` for bans, unban, whitelist and password hashing.
 - License: AGPL-3.0-or-later.

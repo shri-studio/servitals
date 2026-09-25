@@ -42,8 +42,10 @@ AUTH_USER=admin
 AUTH_PASS=$PASS
 DISKS=/
 EOF
-# unique container names so a running install is never touched
-sed -i 's/container_name: servitals-/container_name: servitals-smoke-/' docker-compose.yml
+# unique container names and subnet, so a running install on this host is
+# never touched and its pinned network (172.31.250.0/24) does not collide
+sed -i -e 's/container_name: servitals-/container_name: servitals-smoke-/' \
+       -e 's#172\.31\.250\.#172.31.251.#g' docker-compose.yml
 
 docker compose -p "$PROJECT" up -d --build
 
@@ -68,10 +70,11 @@ grep -q sv_session "$jar" || fail "no sv_session cookie"
 page=$(curl -fsS -b "$jar" "$BASE/")
 grep -q '<title>servitals</title>' <<<"$page" || fail "page not served through nginx"
 
-# host connections arrive from the network gateway 172.31.250.1, a trusted proxy:
+# host connections arrive from the network gateway 172.31.251.1, a trusted proxy:
 # without a header the client is proxy-only (not LAN), with one it is the header's address
 who=$(curl -fsS -b "$jar" "$BASE/__ctl/whoami")
 [ "$(echo "$who" | jq -r .lan)" = false ] || fail "proxy-only request treated as LAN: $who"
+[ "$(echo "$who" | jq -r .version)" = "$(cat VERSION)" ] || fail "image reports the wrong version: $who"
 who=$(curl -fsS -b "$jar" -H 'X-Forwarded-For: 203.0.113.50' "$BASE/__ctl/whoami")
 [ "$(echo "$who" | jq -r .ip)" = 203.0.113.50 ] || fail "forwarded address not used: $who"
 

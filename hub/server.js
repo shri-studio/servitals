@@ -21,6 +21,7 @@ const { createLogger } = require("./lib/log");
 const { verifyPassword, describeHash } = require("./lib/password");
 const { createClientResolver, parseCidrList, isWhitelisted } = require("./lib/clientip");
 const { originAllowed, requestIsHttps } = require("./lib/origin");
+const { VERSION } = require("./lib/version");
 
 const UP        = process.env.UPSTREAM     || "http://web:80";
 const DOCKER_SOCK = process.env.DOCKER_SOCK || "/var/run/docker.sock";
@@ -207,7 +208,7 @@ const loginPage = (msg) => SHELL(SITE + " · login", `
     <button type="submit">login</button>
     ${msg ? `<div class="msg ${msg.cls}">${msg.text}</div>` : ""}
   </form>
-  <div class="foot">failed attempts are rate-limited; ${MAX_FAILS} failures block this IP</div>`);
+  <div class="foot">servitals · failed attempts are rate-limited; ${MAX_FAILS} failures block this IP</div>`);
 
 const bannedPage = (ip, b) => SHELL(SITE + " · blocked", `
   <h1>${SITE} · access blocked</h1>
@@ -375,7 +376,7 @@ async function handle(req, res) {
 
     // does this client get container controls?
     if (req.url === "/__ctl/whoami") {
-      return json(200, { ip, lan: wl, controls: (!CTL_LAN_ONLY || wl) });
+      return json(200, { ip, lan: wl, controls: (!CTL_LAN_ONLY || wl), version: VERSION });
     }
 
     // persist the dashboard config (title, favicon, panels, weather, clocks…)
@@ -436,7 +437,7 @@ process.on("SIGTERM", () => server.close(() => process.exit(0)));
 
 server.listen(PORT, () => {
   log.info("server.start", {
-    port: PORT, upstream: UP, user: USER, max_fails: MAX_FAILS,
+    version: VERSION, port: PORT, upstream: UP, user: USER, max_fails: MAX_FAILS,
     ban: BAN_HOURS > 0 ? BAN_HOURS + "h" : "permanent",
     trusted_proxies: trustedProxies, proxy_header: PROXY_HEADER,
     container_controls: CTL_LAN_ONLY ? "LAN only" : "any authed",
