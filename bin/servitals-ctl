@@ -7,6 +7,7 @@
 #   servitals-ctl hash-password        print an AUTH_PASS_HASH value
 #   servitals-ctl docker enable        let the hub control containers (root-equivalent)
 #   servitals-ctl docker disable       take that access away again
+#   servitals-ctl import-docker <dir>  copy settings, login and disks from a Docker install
 # State: STATE_DIR, else DATA_DIR, else ./data of a Docker checkout, else /var/lib/servitals.
 set -euo pipefail
 
@@ -23,6 +24,7 @@ fi
 BANS="$DATA_DIR/bans.json"
 WL="$DATA_DIR/whitelist.txt"
 UNIT=servitals.service
+ETC_DIR="${ETC_DIR:-/etc/servitals}"
 
 die() { echo "servitals-ctl: $*" >&2; exit 1; }
 
@@ -118,11 +120,76 @@ cmd_docker() {  # enable|disable
   echo "docker access ${1}d for $UNIT"
 }
 
+env_get() {  # file key -> value of the last KEY= line, quotes and CR removed; never sourced
+  awk -v k="$2" 'index($0, k "=") == 1 { v = substr($0, length(k) + 2) } END { print v }' "$1" \
+    | tr -d '\r' | sed -e "s/^'\(.*\)'$/\1/" -e 's/^"\(.*\)"$/\1/'
+}
+
+env_set() {  # file key value: replace KEY= (or a commented "# KEY=") line, else append
+  local f=$1 k=$2 v=$3 tmp line done=0
+  tmp=$(mktemp "$f.XXXXXX")
+  while IFS= read -r line || [ -n "$line" ]; do
+    if [ "$done" = 0 ] && { [[ $line == "$k="* ]] || [[ $line == "# $k="* ]]; }; then
+      printf '%s=%s\n' "$k" "$v"; done=1
+    else
+      printf '%s\n' "$line"
+    fi
+  done < "$f" > "$tmp"
+  [ "$done" = 1 ] || printf '%s=%s\n' "$k" "$v" >> "$tmp"
+  chmod --reference="$f" "$tmp"; chown --reference="$f" "$tmp" 2>/dev/null || true
+  mv "$tmp" "$f"
+}
+
+copy_state() {  # src name: into DATA_DIR, owned like DATA_DIR, private
+  [ -f "$1" ] || return 0
+  install -m 600 "$1" "$DATA_DIR/$2"
+  chown --reference="$DATA_DIR" "$DATA_DIR/$2" 2>/dev/null || true
+  echo "  $2"
+}
+
+cmd_import_docker() {
+  [ $# -eq 1 ] || die "usage: servitals-ctl import-docker <docker-install-dir>"
+  local src=$1 env hub="$ETC_DIR/hub.env" agent="$ETC_DIR/agent.env" v pw hash lan
+  env="$src/.env"
+  [ -f "$env" ] || [ -f "$src/www/config.json" ] || [ -d "$src/data" ] \
+    || die "$src is not a servitals Docker install (no .env, www/config.json or data/)"
+  [ -d "$DATA_DIR" ] || die "state directory $DATA_DIR does not exist (start the hub once)"
+  echo "state -> $DATA_DIR"
+  if [ -f "$src/data/config.json" ]; then copy_state "$src/data/config.json" config.json
+  else copy_state "$src/www/config.json" config.json; fi
+  copy_state "$src/data/whitelist.txt" whitelist.txt
+  copy_state "$src/data/bans.json" bans.json
+  [ -f "$env" ] || return 0
+  if [ -f "$hub" ]; then
+    echo "login and lockout -> $hub"
+    for v in AUTH_USER MAX_FAILS BAN_HOURS SESSION_HOURS SITE_NAME; do
+      [ -z "$(env_get "$env" "$v")" ] || { env_set "$hub" "$v" "$(env_get "$env" "$v")"; echo "  $v"; }
+    done
+    hash=$(env_get "$env" AUTH_PASS_HASH)
+    if [ -z "$hash" ]; then
+      pw=$(env_get "$env" AUTH_PASS)
+      # the old plain password is stored only as a hash
+      [ -z "$pw" ] || hash=$(printf '%s' "$pw" | node "$ROOT/hub/lib/password.js")
+    fi
+    [ -z "$hash" ] || { env_set "$hub" AUTH_PASS_HASH "$hash"; echo "  AUTH_PASS_HASH"; }
+    lan=$(env_get "$env" CTL_LAN_ONLY)
+    [ "$lan" != 0 ] || echo "  note: CTL_LAN_ONLY stays $(env_get "$hub" CTL_LAN_ONLY) (the Docker install had 0: container controls for any logged-in user)"
+  fi
+  if [ -f "$agent" ]; then
+    echo "disks and network -> $agent"
+    for v in DISKS NET_IFACE; do
+      [ -z "$(env_get "$env" "$v")" ] || { env_set "$agent" "$v" "$(env_get "$env" "$v")"; echo "  $v"; }
+    done
+  fi
+  echo "restart to apply: systemctl restart servitals servitals-agent"
+}
+
 case "${1:-}" in
+  import-docker) shift; cmd_import_docker "$@" ;;
   docker)        shift; cmd_docker "$@" ;;
   bans)          shift; cmd_bans "$@" ;;
   unban)         shift; cmd_unban "$@" ;;
   whitelist)     shift; cmd_whitelist "$@" ;;
   hash-password) shift; cmd_hash_password "$@" ;;
-  *) sed -n '3,10p' "$0" | sed 's/^# \{0,1\}//'; exit 1 ;;
+  *) sed -n '3,11p' "$0" | sed 's/^# \{0,1\}//'; exit 1 ;;
 esac
