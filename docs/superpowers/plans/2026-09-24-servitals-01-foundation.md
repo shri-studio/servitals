@@ -1999,10 +1999,13 @@ PROJECT="servitals-smoke"
 cleanup() {
   if [ "${SMOKE_KEEP:-0}" = "1" ]; then
     echo "SMOKE_KEEP=1: stack left running on $BASE (user admin, password $PASS)"
-    echo "tear down with: (cd $WORK && docker compose -p $PROJECT down -v) && rm -rf $WORK"
+    echo "tear down with: (cd $WORK && docker compose -p $PROJECT down -v) &&" \
+         "docker run --rm -v $WORK:/w alpine:3.20 rm -rf /w/data /w/www && rm -rf $WORK"
     return
   fi
   (cd "$WORK" && docker compose -p "$PROJECT" down -v --remove-orphans >/dev/null 2>&1) || true
+  # the containers write data/ and www/ as root; delete those through a container
+  docker run --rm -v "$WORK:/w" alpine:3.20 rm -rf /w/data /w/www >/dev/null 2>&1 || true
   rm -rf "$WORK"
 }
 trap cleanup EXIT
@@ -2045,7 +2048,9 @@ code=$(curl -s -o /dev/null -w '%{http_code}' -c "$jar" -H "Origin: $BASE" -X PO
 [ "$code" = 302 ] || fail "login: expected 302, got $code"
 grep -q sv_session "$jar" || fail "no sv_session cookie"
 
-curl -fsS -b "$jar" "$BASE/" | grep -q '<title>servitals</title>' || fail "page not served through nginx"
+# capture first: `curl | grep -q` fails under pipefail when grep exits early
+page=$(curl -fsS -b "$jar" "$BASE/")
+grep -q '<title>servitals</title>' <<<"$page" || fail "page not served through nginx"
 
 # host connections arrive from the network gateway 172.31.250.1, a trusted proxy:
 # without a header the client is proxy-only (not LAN), with one it is the header's address
