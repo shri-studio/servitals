@@ -128,4 +128,21 @@ test("a hung statvfs is cut off", () => {
   assert.deepStrictEqual(json(r), []);
 });
 
+
+test("a statvfs that ignores SIGTERM is killed", () => {
+  const stub = fs.mkdtempSync(path.join(os.tmpdir(), "sv-stub-"));
+  fs.writeFileSync(path.join(stub, "stat"), "#!/bin/bash\ntrap '' TERM\nsleep 10 & wait\n", { mode: 0o755 });
+  const started = Date.now();
+  const r = runGroup(fakeHost(BASE), "disks_json", {
+    DISKS: "/srv", STAT_TIMEOUT: "1", PATH: `${stub}:${process.env.PATH}`,
+  });
+  assert.ok(Date.now() - started < 5000, `took ${Date.now() - started} ms`);
+  assert.deepStrictEqual(json(r), []);
+});
+
+test("a STAT_TIMEOUT that is not a number falls back to 5 s", () => {
+  const d = json(runGroup(fakeHost(BASE), "disks_json", { DISKS: "/srv", STAT_TIMEOUT: "soon" }));
+  assert.strictEqual(d.length, 1);
+});
+
 module.exports = { fakeHost, runGroup, BASE, json };

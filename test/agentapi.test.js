@@ -148,3 +148,20 @@ test("the latest snapshot and the local node survive a restart", async () => {
   } finally { await b.stop(); }
   fs.rmSync(dir, { recursive: true, force: true });
 });
+
+test("a second refresh within 5 s of a wake does not wake the agent again", async () => {
+  await withHub(async (hub, c) => {
+    const cookie = cookieFrom(await login(hub.port));
+    const first = signed(hub, c, { method: "GET", path: WAIT, headers: { "x-servitals-wait": "30" } });
+    await new Promise((r) => setTimeout(r, 300));
+    assert.strictEqual(JSON.parse((await ctlPost(hub.port, cookie, "/__ctl/refresh")).body).woke, true);
+    assert.strictEqual((await first).status, 200);
+    // the agent re-arms at once, before its push has landed
+    const started = Date.now();
+    const second = signed(hub, c, { method: "GET", path: WAIT, headers: { "x-servitals-wait": "5" } });
+    await new Promise((r) => setTimeout(r, 300));
+    assert.strictEqual(JSON.parse((await ctlPost(hub.port, cookie, "/__ctl/refresh")).body).woke, false);
+    assert.strictEqual((await second).status, 204, "left waiting, not woken twice");
+    assert.ok(Date.now() - started >= 4500);
+  });
+});

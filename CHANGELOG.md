@@ -60,4 +60,8 @@ All notable changes to this project are documented here. The format follows
    the gateway, set `TRUSTED_PROXIES` to its address.
 4. Optionally replace `AUTH_PASS` with `AUTH_PASS_HASH` from
    `bin/servitals-ctl hash-password`.
-5. `docker compose up -d --build`. `data/` is kept.
+5. The gateway needs the new `LOCAL_HUB_URL` and `WWW_DIR` lines and the
+   `./www:/www:ro` mount, and the agent service and `volumes:` block are new:
+   take the whole `services:` section from the example.
+6. `docker compose up -d --build`. `data/` is kept; `www/config.json` moves
+   into it on the first start.

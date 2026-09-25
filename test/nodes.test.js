@@ -56,3 +56,11 @@ test("local-agent.env text", () => {
   assert.strictEqual(localAgentEnv("http://127.0.0.1:20002", "abcdefghijkl", "ab".repeat(32)),
     `HUB_URL=http://127.0.0.1:20002\nNODE_ID=abcdefghijkl\nNODE_SECRET=${"ab".repeat(32)}\n`);
 });
+
+test("a nodes.json that does not parse is never overwritten", () => {
+  const f = tmpfile();
+  fs.writeFileSync(f, '{ "abcdefghijkl": { "secret": "x", "local": true }, }');
+  const before = fs.readFileSync(f, "utf8");
+  assert.throws(() => createNodeStore(f).ensureLocal("h"), /does not parse/);
+  assert.strictEqual(fs.readFileSync(f, "utf8"), before);
+});

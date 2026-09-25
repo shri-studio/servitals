@@ -5,7 +5,7 @@ const assert = require("node:assert");
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
-const { startHub, request, login, cookieFrom, ctlPost } = require("./helpers/hub");
+const { startHub, runHubUntilExit, request, login, cookieFrom, ctlPost } = require("./helpers/hub");
 const { writeFileAtomic } = require("../hub/lib/fsutil");
 
 async function withHub(env, fn) {
@@ -82,5 +82,15 @@ test("the gateway creates the local node and its agent credentials", async () =>
     assert.strictEqual(again.split("\n")[1], text.split("\n")[1], "same node id after a restart");
     assert.match(again, /^HUB_URL=http:\/\/gateway:8080$/m);
   } finally { await second.stop(); }
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test("a broken nodes.json stops the gateway instead of replacing the nodes", async () => {
+  const dir = tmpdir();
+  fs.writeFileSync(path.join(dir, "nodes.json"), "{ not json");
+  const r = await runHubUntilExit({ STATE_DIR: dir });
+  assert.strictEqual(r.code, 1);
+  assert.match(r.logs, /nodes\.unreadable/);
+  assert.strictEqual(fs.readFileSync(path.join(dir, "nodes.json"), "utf8"), "{ not json");
   fs.rmSync(dir, { recursive: true, force: true });
 });

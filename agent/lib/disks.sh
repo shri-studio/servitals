@@ -13,7 +13,8 @@ mount_info() {  # $1 = mountpoint -> "fstype source" of its LAST mountinfo line
 
 disks_json() {
   local lines="" m p info fstype src base parent model rota
-  local bs blocks bfree bavail size used avail pct
+  local bs blocks bfree bavail size used avail pct t="${STAT_TIMEOUT:-5}"
+  [[ $t =~ ^[0-9]+$ ]] && [ "$t" -ge 1 ] || t=5
   IFS=',' read -ra MS <<< "$DISKS"
   for m in "${MS[@]}"; do
     m=$(echo "$m" | xargs)
@@ -30,7 +31,8 @@ disks_json() {
 
     # statvfs: %S block size, %b total, %f free, %a avail. A dead network share
     # can block here forever, so bound it; a share that does not answer is left out.
-    read -r bs blocks bfree bavail < <(timeout "${STAT_TIMEOUT:-5}" stat -f -c '%S %b %f %a' "$p" 2>/dev/null || echo "0 0 0 0")
+    # -k 1: KILL a stat that ignores TERM; read -t: never wait on the pipe longer than that
+    read -r -t $((t + 2)) bs blocks bfree bavail < <(timeout -k 1 "$t" stat -f -c '%S %b %f %a' "$p" 2>/dev/null || echo "0 0 0 0")
     [ "${blocks:-0}" -gt 0 ] || continue
     size=$(( bs * blocks ))
     avail=$(( bs * bavail ))

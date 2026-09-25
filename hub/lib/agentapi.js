@@ -65,6 +65,7 @@ function readLimited(req, max) {
 function createAgentApi({ nodes, log, onSnapshot, maxBody = 256 * 1024, now = Date.now }) {
   const lastTs = new Map();     // "<id> <endpoint>" -> last accepted TS
   const lastPush = new Map();   // id -> hub time of the last stored push
+  const lastWake = new Map();   // id -> hub time of the last wake sent
   const waiters = new Map();    // id -> { res, secret, ts, timer }
   const seen = new Set();       // ids that pushed since this process started
 
@@ -149,6 +150,7 @@ function createAgentApi({ nodes, log, onSnapshot, maxBody = 256 * 1024, now = Da
   function wake(id) {
     const w = waiters.get(id);
     if (!w) return false;
+    lastWake.set(id, now());
     finishWait(id, w, 200);
     return true;
   }
@@ -157,6 +159,7 @@ function createAgentApi({ nodes, log, onSnapshot, maxBody = 256 * 1024, now = Da
     handle,
     wake,
     lastPushAt: (id) => lastPush.get(id) || 0,
+    lastWakeAt: (id) => lastWake.get(id) || 0,
     close() { for (const [id, w] of [...waiters]) finishWait(id, w, 204); },
   };
 }

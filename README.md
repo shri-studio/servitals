@@ -83,11 +83,14 @@ docker compose up -d --build
 Open `http://<host>:<PORT>` (default `20002`) and log in. The first snapshot
 takes a few seconds — the panels show "connecting…" until then.
 
-**Upgrading an existing Docker install:** copy the `agent` service and the
-`volumes:` block from `docker-compose.example.yml` into your
-`docker-compose.yml`, remove `REFRESH_FILE` from the gateway, then
-`docker compose up -d --build`. The gateway moves `www/config.json` into
-`data/` on its first start.
+**Upgrading an existing Docker install:** replace the whole `services:`
+section of your `docker-compose.yml` with the one from
+`docker-compose.example.yml` (then re-apply your own edits), and add its
+`volumes:` block. The gateway needs its new `LOCAL_HUB_URL` and `WWW_DIR`
+lines and the `./www:/www:ro` mount; without `LOCAL_HUB_URL` the agent
+container tries to reach the gateway on its own loopback and the dashboard
+stays empty. Then `docker compose up -d --build`. The gateway moves
+`www/config.json` into `data/` on its first start.
 
 `docker-compose.yml`, `.env` and `www/config.json` are git-ignored — the
 `*.example` files are the templates, so your edits stay local and never
@@ -102,9 +105,32 @@ from any other address are ignored, so nobody can fake a LAN address. If the
 proxy runs in another container, set `TRUSTED_PROXIES` to that container's
 address.
 
+## Native install (systemd, no Docker)
+
+Until the Ubuntu packages exist, install from a checkout. The layout,
+users and units are the ones the packages will use.
+
+```bash
 sudo apt install nodejs jq curl vnstat
 git clone https://github.com/shri-studio/servitals && cd servitals
 sudo packaging/install-local.sh          # asks for the admin password
+```
+
+| what | where |
+| --- | --- |
+| hub settings | `/etc/servitals/hub.env` (then `sudo systemctl restart servitals`) |
+| agent settings | `/etc/servitals/agent.env` (then `sudo systemctl restart servitals-agent`) |
+| hub state | `/var/lib/servitals` |
+| logs | `journalctl -u servitals -u servitals-agent` |
+| one sample, printed | `servitals-agent test` |
+
+Containers: the agent needs the Docker socket to list them and the hub
+needs it for the restart/stop/logs buttons. **The `docker` group can take
+over the host as root**, so both are off until you turn them on:
+`sudo servitals-agent docker enable`, `sudo servitals-ctl docker enable`.
+
+Upgrade: `git pull && sudo packaging/install-local.sh`.
+Remove: `sudo packaging/install-local.sh --uninstall` (keeps settings and state).
 
 ## Authentication & lockout
 

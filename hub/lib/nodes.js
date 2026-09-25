@@ -15,16 +15,22 @@ const newNodeId = () => [...crypto.randomBytes(12)].map((b) => B32[b & 31]).join
 function createNodeStore(file) {
   let nodes = {};
   let mtime = -1;
+  let unreadable = false;   // the file exists but never parsed: never overwrite it
 
   function load() {
     let st;
-    try { st = fs.statSync(file); } catch (_) { nodes = {}; mtime = -1; return nodes; }
+    try { st = fs.statSync(file); } catch (_) { nodes = {}; mtime = -1; unreadable = false; return nodes; }
     if (st.mtimeMs === mtime) return nodes;
     try {
       const parsed = JSON.parse(fs.readFileSync(file, "utf8"));
-      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) nodes = parsed;
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("not an object");
+      nodes = parsed;
       mtime = st.mtimeMs;
-    } catch (_) { /* half-written or bad hand edit: keep the last good copy */ }
+      unreadable = false;
+    } catch (_) {
+      // half-written or bad hand edit: keep the last good copy; with none, refuse to write
+      if (mtime === -1) unreadable = true;
+    }
     return nodes;
   }
 
@@ -46,6 +52,7 @@ function createNodeStore(file) {
   function ensureLocal(name) {
     const existing = localId();
     if (existing) return { id: existing, created: false };
+    if (unreadable) throw new Error(`${file} exists but does not parse; fix or remove it`);
     const id = newNodeId();
     nodes[id] = { name, secret: crypto.randomBytes(32).toString("hex"), local: true, created: Date.now() };
     save();

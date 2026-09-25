@@ -52,6 +52,12 @@ push() {  # $1 = snapshot file; 0 when the hub stored it
   api_call POST /api/v1/agent/push "$1" "$out" && return 0
   if [ "$API_STATUS" = 401 ] && [ "$(api_error "$out")" = replay ]; then
     api_call POST /api/v1/agent/push "$1" "$out" && return 0   # a fresh timestamp, once
+  elif [ "$API_STATUS" = 429 ]; then
+    # inside the hub's 5 s push limit (a restart, a wake right after a push): wait it out once
+    local wait_s
+    wait_s=$(awk 'tolower($1) == "retry-after:" { v = $2 + 0 } END { print (v >= 1 && v <= 5) ? v : 5 }' "$out.h" 2>/dev/null)
+    sleep "${wait_s:-5}"
+    api_call POST /api/v1/agent/push "$1" "$out" && return 0
   fi
   agent_log warn agent.push_failed status="$API_STATUS" error="$(api_error "$out")"
   return 1

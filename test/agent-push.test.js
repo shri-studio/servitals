@@ -168,3 +168,15 @@ test("the agent reconnects after a hub restart", { timeout: 90000 }, async () =>
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("a push inside the hub's 5 s limit waits it out instead of failing", { timeout: 60000 }, async () => {
+  const hub = await startHub();
+  try {
+    const env = agentEnv({ ONCE: "1", CREDENTIALS_FILE: path.join(hub.dataDir, "local-agent.env") });
+    const run = () => spawnSync("bash", [AGENT], { env: { ...env, STATE_DIR: tmp() }, encoding: "utf8", timeout: 30000 });
+    assert.strictEqual(run().status, 0);
+    const second = run();   // e.g. the agent restarted right after a push
+    assert.strictEqual(second.status, 0, second.stdout + second.stderr);
+    assert.doesNotMatch(second.stdout, /push_failed/);
+  } finally { await hub.stop(); }
+});

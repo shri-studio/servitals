@@ -118,7 +118,13 @@ if (!fs.existsSync(CONFIG_F) && fs.existsSync(LEGACY_CONFIG)) {
 /* ---------- nodes: the hub's own host is the local node ---------- */
 const nodes = createNodeStore(path.join(DATA, "nodes.json"));
 const LOCAL_HUB_URL = process.env.LOCAL_HUB_URL || `http://127.0.0.1:${PORT}`;
-const localNode = nodes.ensureLocal(os.hostname().slice(0, 64));
+let localNode;
+try { localNode = nodes.ensureLocal(os.hostname().slice(0, 64)); }
+catch (e) {
+  // never replace paired nodes because of a bad hand edit
+  log.error("nodes.unreadable", { file: path.join(DATA, "nodes.json"), error: e.message });
+  process.exit(1);
+}
 if (localNode.created) log.audit("node.added", { node: localNode.id, local: true });
 // the local agent's credentials: Docker mounts this file, the installer copies it
 writeFileAtomic(path.join(DATA, "local-agent.env"),
@@ -441,7 +447,9 @@ async function handle(req, res) {
     if (req.method === "POST" && req.url === "/__ctl/refresh") {
       const id = nodes.localId();
       const fresh = !!id && Date.now() - agentApi.lastPushAt(id) < 5000;
-      const woke = !!id && !fresh && agentApi.wake(id);
+      // a wake in the last 5 s is still being answered (other tabs, a double click)
+      const pending = !!id && Date.now() - agentApi.lastWakeAt(id) < 5000;
+      const woke = !!id && !fresh && !pending && agentApi.wake(id);
       return json(200, { ok: true, woke, fresh });
     }
 
