@@ -48,6 +48,8 @@ check "gateway RssAnon (idle)" "$anon" 40960 "kB"
 # the Docker CLI briefly adds ~29 MB; sub-project 2 replaces it with
 # `curl --unix-socket`.)
 out=$(mktemp)
+state=$(mktemp -d)
+export STATE_DIR="$state"
 stub=$(mktemp -d)
 printf '#!/bin/sh\nexit 1\n' > "$stub/docker"; chmod +x "$stub/docker"
 export PATH="$stub:$PATH"
@@ -65,6 +67,6 @@ else
   echo "FAIL  agent peak RSS: /usr/bin/time not installed (apt install time)"
   fail=1
 fi
-rm -rf "$out" "$stub"
+rm -rf "$out" "$stub" "$state"
 
 exit "$fail"
