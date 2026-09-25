@@ -1,0 +1,97 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# servitals-ctl: admin commands for the gateway's state files.
+#   servitals-ctl bans                 list blocked IPs and the whitelist
+#   servitals-ctl unban <ip>           remove a block (takes effect immediately)
+#   servitals-ctl whitelist <ip|cidr>  never block this address again (also unbans)
+#   servitals-ctl hash-password        print an AUTH_PASS_HASH value
+# DATA_DIR defaults to ./data next to this script's parent (Docker install).
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+DATA_DIR="${DATA_DIR:-$ROOT/data}"
+BANS="$DATA_DIR/bans.json"
+WL="$DATA_DIR/whitelist.txt"
+
+die() { echo "servitals-ctl: $*" >&2; exit 1; }
+
+# write stdin to $1 atomically, keeping the original file's mode
+atomic_write() {
+  local dst=$1 tmp
+  tmp=$(mktemp "$dst.XXXXXX")
+  cat > "$tmp"
+  chmod --reference="$dst" "$tmp" 2>/dev/null || chmod 644 "$tmp"
+  mv "$tmp" "$dst"
+}
+
+valid_addr() {  # IPv4, IPv4/0-32, or an exact IPv6 address (optionally /128); pure bash
+  local a=${1%%/*} bits="" o
+  [[ $1 == */* ]] && bits=${1#*/}
+  if [[ $a =~ ^([0-9]{1,3})\.([0-9]{1,3})\.([0-9]{1,3})\.([0-9]{1,3})$ ]]; then
+    for o in "${BASH_REMATCH[@]:1}"; do [ "$o" -le 255 ] || return 1; done
+    [ -z "$bits" ] || [[ $bits =~ ^([0-9]|[12][0-9]|3[0-2])$ ]]
+  elif [[ $a =~ ^[0-9A-Fa-f:]+$ && $a == *:*:* ]]; then
+    [ -z "$bits" ] || [ "$bits" = 128 ]
+  else
+    return 1
+  fi
+}
+
+cmd_bans() {
+  echo "== blocked =="
+  if [ -s "$BANS" ] && jq -e 'length > 0' "$BANS" >/dev/null 2>&1; then
+    jq -r 'to_entries[] | "\(.key)  since \(.value.at / 1000 | strftime("%Y-%m-%d %H:%M UTC"))  \(if .value.until == 0 then "(permanent)" else "until " + (.value.until / 1000 | strftime("%Y-%m-%d %H:%M UTC")) end)"' "$BANS"
+  else
+    echo "(none)"
+  fi
+  echo
+  echo "== whitelist =="
+  grep -v '^#' "$WL" 2>/dev/null | grep -v '^[[:space:]]*$' || echo "(none)"
+}
+
+cmd_unban() {
+  [ $# -eq 1 ] || die "usage: servitals-ctl unban <ip>"
+  [ -f "$BANS" ] || { echo "no bans file"; return 0; }
+  jq --arg ip "$1" 'del(.[$ip])' "$BANS" | atomic_write "$BANS"
+  echo "unbanned $1"
+}
+
+cmd_whitelist() {
+  [ $# -eq 1 ] || die "usage: servitals-ctl whitelist <ip|cidr>"
+  valid_addr "$1" || die "not an IP address or CIDR: $1"
+  touch "$WL"
+  if grep -qxF "$1" "$WL"; then
+    echo "$1 already whitelisted"
+  else
+    { cat "$WL"; echo "$1"; } | atomic_write "$WL"
+    echo "whitelisted $1"
+  fi
+  cmd_unban "$1" >/dev/null 2>&1 || true
+}
+
+cmd_hash_password() {
+  local pw pw2
+  if [ -t 0 ]; then
+    read -rsp "new password: " pw; echo >&2
+    read -rsp "again: " pw2; echo >&2
+    [ "$pw" = "$pw2" ] || die "passwords differ"
+  else
+    IFS= read -r pw || true
+  fi
+  [ "${#pw}" -ge 8 ] || die "use at least 8 characters"
+  if command -v node >/dev/null 2>&1; then
+    printf '%s' "$pw" | node "$ROOT/hub/lib/password.js"
+  else
+    printf '%s' "$pw" | docker compose -f "$ROOT/docker-compose.yml" run --rm -T --no-deps gateway node lib/password.js
+  fi
+  [ -t 1 ] && echo "put this in .env as AUTH_PASS_HASH='…' (single quotes) and remove AUTH_PASS" >&2
+  return 0
+}
+
+case "${1:-}" in
+  bans)          shift; cmd_bans "$@" ;;
+  unban)         shift; cmd_unban "$@" ;;
+  whitelist)     shift; cmd_whitelist "$@" ;;
+  hash-password) shift; cmd_hash_password "$@" ;;
+  *) sed -n '3,8p' "$0" | sed 's/^# \{0,1\}//'; exit 1 ;;
+esac
