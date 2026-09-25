@@ -24,6 +24,8 @@ const { originAllowed, requestIsHttps } = require("./lib/origin");
 const { VERSION } = require("./lib/version");
 const { createStatic } = require("./lib/static");
 const { writeFileAtomic } = require("./lib/fsutil");
+const os = require("os");
+const { createNodeStore, localAgentEnv } = require("./lib/nodes");
 
 const UP        = process.env.UPSTREAM     || "";   // unset: serve WWW_DIR directly (native install)
 const WWW_DIR   = path.resolve(process.env.WWW_DIR || path.join(__dirname, "..", "www"));
@@ -112,6 +114,15 @@ if (!fs.existsSync(CONFIG_F) && fs.existsSync(LEGACY_CONFIG)) {
     log.info("config.migrated", { from: LEGACY_CONFIG, to: CONFIG_F });
   } catch (e) { log.warn("config.migrate_failed", { from: LEGACY_CONFIG, error: e.code || String(e) }); }
 }
+
+/* ---------- nodes: the hub's own host is the local node ---------- */
+const nodes = createNodeStore(path.join(DATA, "nodes.json"));
+const LOCAL_HUB_URL = process.env.LOCAL_HUB_URL || `http://127.0.0.1:${PORT}`;
+const localNode = nodes.ensureLocal(os.hostname().slice(0, 64));
+if (localNode.created) log.audit("node.added", { node: localNode.id, local: true });
+// the local agent's credentials: Docker mounts this file, the installer copies it
+writeFileAtomic(path.join(DATA, "local-agent.env"),
+  localAgentEnv(LOCAL_HUB_URL, localNode.id, nodes.get(localNode.id).secret), 0o600);
 
 const readJSON = (f) => { try { return JSON.parse(fs.readFileSync(f, "utf8")); } catch { return {}; } };
 const writeJSON = (f, o) => fs.writeFileSync(f, JSON.stringify(o, null, 2) + "\n");

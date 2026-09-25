@@ -69,9 +69,9 @@ function baseEnv(port, dataDir, upstreamPort) {
   };
 }
 
-async function startHub(env = {}) {
-  const port = await freePort();
-  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "sv-hub-"));
+async function startHub(env = {}, { dataDir: keepDir, port: fixedPort } = {}) {
+  const port = fixedPort || await freePort();
+  const dataDir = keepDir || fs.mkdtempSync(path.join(os.tmpdir(), "sv-hub-"));
   const upstream = await startUpstream();
   const child = spawn(process.execPath, [SERVER], {
     env: { ...baseEnv(port, dataDir, upstream.address().port), ...env },
@@ -98,7 +98,7 @@ async function startHub(env = {}) {
         await new Promise((r) => child.once("exit", r));
       }
       upstream.close();
-      fs.rmSync(dataDir, { recursive: true, force: true });
+      if (!keepDir) fs.rmSync(dataDir, { recursive: true, force: true });
     },
   };
 }

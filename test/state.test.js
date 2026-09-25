@@ -62,3 +62,25 @@ test("an old www/config.json is copied to the state dir once", async () => {
   });
   fs.rmSync(www, { recursive: true, force: true });
 });
+
+test("the gateway creates the local node and its agent credentials", async () => {
+  const dir = tmpdir();
+  const first = await startHub({}, { dataDir: dir });
+  const envFile = path.join(dir, "local-agent.env");
+  let text;
+  try {
+    text = fs.readFileSync(envFile, "utf8");
+    assert.match(text, new RegExp(`^HUB_URL=http://127\\.0\\.0\\.1:${first.port}\\nNODE_ID=[a-z2-7]{12}\\nNODE_SECRET=[0-9a-f]{64}\\n$`));
+    assert.strictEqual(fs.statSync(envFile).mode & 0o777, 0o600);
+    assert.strictEqual(fs.statSync(path.join(dir, "nodes.json")).mode & 0o777, 0o600);
+    const secret = /^NODE_SECRET=(.*)$/m.exec(text)[1];
+    assert.ok(!first.logs().includes(secret), "the secret is never logged");
+  } finally { await first.stop(); }
+  const second = await startHub({ LOCAL_HUB_URL: "http://gateway:8080" }, { dataDir: dir });
+  try {
+    const again = fs.readFileSync(envFile, "utf8");
+    assert.strictEqual(again.split("\n")[1], text.split("\n")[1], "same node id after a restart");
+    assert.match(again, /^HUB_URL=http:\/\/gateway:8080$/m);
+  } finally { await second.stop(); }
+  fs.rmSync(dir, { recursive: true, force: true });
+});
