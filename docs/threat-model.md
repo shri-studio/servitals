@@ -29,6 +29,7 @@ These hold in every version. A change that breaks one needs its own review.
 | --- | --- | --- | --- |
 | client IP identity | anyone reaching the port directly | forge a LAN address, skip lockout, get container control | proxy headers honoured only from peers in `TRUSTED_PROXIES` (loopback by default); a proxy's own address is never whitelisted; compose pins its gateway address |
 | hosted outbound requests | hosted user | SSRF into the hosting network or cloud metadata | destination resolved, private and special ranges refused, IP pinned, no redirects |
+| proxy credentials | anyone reading logs or status pages | use of the organisation's proxy | credentials only in env files (0640/0600); logs and the UI show the proxy host, never `user:password` |
 | backup files | anyone who copies one | admin hash, node secrets, channel tokens | written 0600; `--encrypt` option; hosted backups always encrypted |
 | admin login | internet bots | dashboard access | scrypt; per-IP lockout after `MAX_FAILS`; LAN whitelist; 800 ms delay on failure; TOTP on hosted |
 | browser session | XSS, CSRF | act as the admin | escaping plus schema validation; `HttpOnly`, `SameSite=Lax`, `Secure` on HTTPS; `Origin` check on state changes; strict CSP (no inline script or style) |

@@ -75,7 +75,8 @@ existing Cloudflare tunnel, or a public address with TLS. Cloudflare's
 free-plan Bot Fight Mode cannot be bypassed with WAF rules and blocks `curl`
 POSTs, so the tunnel guide tells users to turn it off for the hub hostname or
 use Tailscale. Agents send extra headers from `HUB_HEADERS` for Cloudflare
-Access service tokens.
+Access service tokens. `docs/networking.md` (section 15.1) covers every
+setup with step-by-step instructions.
 
 ## 4. Architecture
 
@@ -199,6 +200,14 @@ coreutils, `jq`, `curl` and `vnstat` for the agent.
   `"mounted": false` instead of repeating the parent filesystem.
 - Default heartbeat `INTERVAL=60`. The agent pushes after every tick and
   immediately after a wake.
+- Proxies: `curl` honours `HTTPS_PROXY`, `HTTP_PROXY` and `NO_PROXY` from
+  `agent.env`. The agent always appends `localhost,127.0.0.1,::1` to
+  `NO_PROXY`, so the hub host's own agent never goes through the proxy even
+  when an admin sets `NO_PROXY` without them. `join`'s test push uses the
+  same settings.
+- Proxies and firewalls often cut idle connections before 55 seconds.
+  `WAIT_SECONDS` in `agent.env` (5 to 55, default 55) makes the agent ask the
+  hub for a shorter long-poll hold with the `X-Servitals-Wait` header.
 - The wait loop runs as a background subshell. When the hub answers
   `sample`, it touches the existing trigger file, which the main loop already
   watches, so the tick logic does not change.
@@ -359,6 +368,24 @@ URL (`Suggests: apprise`).
 
 - All outbound calls use Node's `http`/`https` modules, not `fetch`, so the
   hub behaves the same on Node 18 (noble) and Node 22.
+- **Outbound proxy.** Node's `http`/`https` modules ignore `HTTPS_PROXY` on
+  Node 18 and 22 (Node 24's `NODE_USE_ENV_PROXY` is too new), so the hub has
+  its own zero-dependency implementation in `hub/lib/proxy.js`, used by every
+  outbound call (alert channels, Web Push, relay, Apprise API):
+  - reads `HTTPS_PROXY`, `HTTP_PROXY` and `NO_PROXY` (upper or lower case)
+    from `hub.env`;
+  - `https://` destinations go through an HTTP `CONNECT` tunnel, then TLS to
+    the destination with normal certificate checks (the proxy never sees the
+    content); `http://` destinations use an absolute-form request through the
+    proxy;
+  - only `http://` proxy URLs, with optional `user:password@` credentials sent
+    as `Proxy-Authorization: Basic`;
+  - `NO_PROXY` entries: host names and domain suffixes (`.example.com`), IPv4
+    CIDRs, exact IPv6 addresses, and `*`; `localhost`, `127.0.0.1` and `::1`
+    are always direct;
+  - proxy credentials are never logged; logs show the proxy host only;
+  - on the hosted service the SSRF guard checks the final destination, not
+    the proxy.
 
 - Every channel has a "send test" button and reports its last error.
 - Secrets in channel settings (tokens, SMTP password) are stored in state
@@ -484,8 +511,8 @@ itself and `https://api.open-meteo.com` for the weather panel.
 
 | file | kind | owner | contents |
 | --- | --- | --- | --- |
-| `/etc/servitals/hub.env` | conffile | package | port, bind address, `TRUSTED_PROXIES`, whitelist, lockout, session length, `CTL_LAN_ONLY`, `CTL_DOCKER`, log settings |
-| `/etc/servitals/agent.env` | conffile | package | interval, metric group toggles, `DISKS`, `NET_IFACE`, `HUB_HEADERS`, log settings |
+| `/etc/servitals/hub.env` | conffile | package | port, bind address, `TRUSTED_PROXIES`, `HTTPS_PROXY`/`NO_PROXY`, whitelist, lockout, session length, `CTL_LAN_ONLY`, `CTL_DOCKER`, log settings |
+| `/etc/servitals/agent.env` | conffile | package | interval, metric group toggles, `DISKS`, `NET_IFACE`, `HUB_HEADERS`, `HTTPS_PROXY`/`NO_PROXY`, log settings |
 | `/etc/servitals/agent-credentials.env` | state, 0600 | `join` / postinst | `HUB_URL`, `NODE_ID`, `NODE_SECRET` |
 | `/etc/servitals/conf.d/*.json` | admin files | admin | config as code: tags, rules, channels, units, defaults |
 | `/var/lib/servitals/` | state | hub | `admin.json`, `secret`, `nodes.json`, `config.json`, `bans.json`, `fails.json`, `whitelist.txt`, `snapshots/`, `history/`, `alerts/`, `vapid.json`, `push-subscriptions.json`, `relay.json`, `audit.log`, `backups/` |
@@ -670,6 +697,27 @@ per-account settings, so a paid tier would not need a redesign.
 - If the hosted service is unreachable the relay backs off and drops, not
   queues, old snapshots. The local hub is unaffected.
 
+### 15.1 Networking guide (`docs/networking.md`)
+
+A user-facing guide, written with sub-project 4. Principle first: agents
+only make outbound HTTPS requests, so a watched server needs no public
+address and no open port; only the hub must be reachable by its agents.
+
+| situation | what to do |
+| --- | --- |
+| all servers on one LAN | agents use the hub's LAN address |
+| servers on different sites | Tailscale or WireGuard; agents use the hub's private overlay address (recommended) |
+| hub behind a Cloudflare tunnel | agents use the tunnel hostname; turn off Bot Fight Mode for it; Access needs a service token in `HUB_HEADERS` |
+| hub behind a reverse proxy | TLS at the proxy; set `TRUSTED_PROXIES` to the proxy's address |
+| server with no outbound internet except one allowed destination | allow outbound 443 to the hub hostname only |
+| server that reaches the internet through an HTTP proxy | `HTTPS_PROXY` in `agent.env` (and in `hub.env` for a hub that sends alerts or relays); lower `WAIT_SECONDS` if the proxy drops idle connections |
+| many private servers in a closed network | run a self-hosted hub inside it; only that hub goes out, relaying chosen nodes to the hosted service |
+| phone notifications (Web Push) | the hub must be served over HTTPS (tunnel, Tailscale certificate, or reverse proxy) |
+
+The guide ends with troubleshooting that maps each `servitals-agent join`
+result (`unreachable`, `clock skew`, `bad secret`, `unsupported protocol`) and
+each protocol error code to its likely cause and fix.
+
 ## 16. Release and CI
 
 - Versions: semver (`1.4.2`), tags `v1.4.2`, Debian `1.4.2-1`, PPA
@@ -723,6 +771,9 @@ Enforced in CI; a breach fails the build. Memory figures are steady state
   groups against fixture `/proc` and `/sys` trees.
 - Conformance: the vectors in `docs/protocol.md` run against the bash agent
   and the hub; the hosted service runs the same suite.
+- Proxy tests: a local `CONNECT` proxy in the test suite checks tunnelled
+  HTTPS, absolute-form HTTP, `Proxy-Authorization`, `NO_PROXY` matching and
+  that credentials never reach the logs.
 - Security tests: signature failure modes, replay, skew, oversize, schema
   rejection, XSS strings in every snapshot field rendered by the page
   (Playwright), secrets absent from logs, container control refused for
@@ -740,9 +791,9 @@ works on its own.
 | 1 | Foundation: rename, LICENSE, source layout, logging, scrypt, `TRUSTED_PROXIES` and `Origin` checks, CI skeleton, budget checks | CI green; Docker install still works renamed; forged proxy headers no longer grant LAN privileges |
 | 2 | Native mode: gateway static serving, agent fixes and groups, local agent over the API, state paths | both run as system units on this host with the hardening in 13.2 |
 | 3 | Debian packaging and PPA pipeline | `apt install servitals` from the PPA on a clean noble and resolute container; autopkgtest passes |
-| 4 | Multi-node: protocol, pairing, wake, validation, fleet UI, styles registry with the v1 styles, customization, config as code, backup and rotation CLI | a second machine joins, shows in the fleet grid, survives hub restarts |
+| 4 | Multi-node: protocol, pairing, wake, validation, fleet UI, styles registry with the v1 styles, customization, config as code, backup and rotation CLI, `docs/networking.md` | a second machine joins, shows in the fleet grid, survives hub restarts; the agent works through `HTTPS_PROXY` |
 | 5 | Metrics: Ubuntu, processes, disk I/O, fans, battery | panels render in every style; budget holds |
-| 6 | History and alerts with all channels, Web Push, routing | a disk rule fires, notifies ntfy and Web Push, resolves |
+| 6 | History and alerts with all channels, Web Push, routing, outbound proxy (`hub/lib/proxy.js`) | a disk rule fires, notifies ntfy and Web Push, resolves; the same works through an HTTP proxy |
 | 7 | Hosted service | signup to live node on a staging domain; security tests pass |
 | 8 | Relay | a self-hosted node appears in a hosted account and wakes from it |
 

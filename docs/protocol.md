@@ -89,7 +89,10 @@ it like a network error. A `204` has an empty body.
 
 ### 5.2 `GET /api/v1/agent/wait`
 
-- Long poll. The hub holds the request up to 55 seconds.
+- Long poll. The hub holds the request up to 55 seconds, or up to the value
+  of the optional `X-Servitals-Wait` request header (whole seconds, clamped
+  to 5..55) for agents behind proxies that drop idle connections. The header
+  is not part of the signature; it can only shorten the hold.
 - `200 {"sample": true}` when someone asked for fresh data.
 - `204` when the time ran out.
 - A new wait from a node that already has one open replaces it: the older
