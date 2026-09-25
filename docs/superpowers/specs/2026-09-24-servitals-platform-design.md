@@ -718,6 +718,18 @@ per-account settings, so a paid tier would not need a redesign.
   Self-hosted hubs skip this guard, since LAN destinations are the point
   there.
 
+### 14.5.1 Landing page
+
+- `hosted/site/index.html` is the public landing page, served at `/` to
+  visitors who are not logged in. It is not packaged in the `.deb`.
+- Terminal and retro look: CRT navy background, tuned ANSI palette, block
+  ASCII logo, VT323 headlines, a btop-style dashboard that restyles live, and
+  a guided three-step demo of code-based linking with sample data.
+- Before launch (listed in `hosted/site/README.md`): self-hosted fonts (no
+  Google Fonts, to keep the no-trackers promise), CSS and JS in files for
+  the strict CSP, real signup links, and a check that every command on the
+  page matches the released agent.
+
 ### 14.6 Operations
 
 - One VPS, Docker Compose with the hosted image and Caddy for TLS.
