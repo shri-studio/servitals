@@ -127,3 +127,23 @@ test("passwords and cookies never reach the logs", async () => {
     assert.match(all, /event=auth\.login_ok/);
   });
 });
+
+test("without UPSTREAM the gateway serves www itself, after login only", async () => {
+  await withHub({ UPSTREAM: "" }, async (hub) => {
+    const anon = await request(hub.port, { path: "/" });
+    assert.match(anon.body, /authentication required/);
+    const cookie = cookieFrom(await login(hub.port));
+    const page = await request(hub.port, { path: "/", headers: { cookie } });
+    assert.strictEqual(page.status, 200);
+    assert.match(page.body, /<title>servitals<\/title>/);
+    const dot = await request(hub.port, { path: "/.env", headers: { cookie } });
+    assert.strictEqual(dot.status, 404);
+    assert.match(hub.logs(), /upstream=static:/);
+  });
+});
+
+test("a missing WWW_DIR stops the gateway at startup", async () => {
+  const r = await runHubUntilExit({ UPSTREAM: "", WWW_DIR: "/nonexistent/www" });
+  assert.strictEqual(r.code, 1);
+  assert.match(r.logs, /config\.www_missing/);
+});

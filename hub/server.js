@@ -22,8 +22,11 @@ const { verifyPassword, describeHash } = require("./lib/password");
 const { createClientResolver, parseCidrList, isWhitelisted } = require("./lib/clientip");
 const { originAllowed, requestIsHttps } = require("./lib/origin");
 const { VERSION } = require("./lib/version");
+const { createStatic } = require("./lib/static");
 
-const UP        = process.env.UPSTREAM     || "http://web:80";
+const UP        = process.env.UPSTREAM     || "";   // unset: serve WWW_DIR directly (native install)
+const WWW_DIR   = path.resolve(process.env.WWW_DIR || path.join(__dirname, "..", "www"));
+const BIND_ADDR = process.env.BIND_ADDR    || "";   // unset: all addresses
 const DOCKER_SOCK = process.env.DOCKER_SOCK || "/var/run/docker.sock";
 const CTL_LAN_ONLY = process.env.CTL_LAN_ONLY !== "0";   // control actions: whitelisted IPs only
 const REFRESH_FILE = process.env.REFRESH_FILE || "/www/.refresh";
@@ -48,6 +51,14 @@ const log = createLogger({
   journal: !!process.env.JOURNAL_STREAM,
   auditFile: path.join(DATA, "audit.log"),
 });
+let serveStatic = null;
+if (!UP) {
+  try { serveStatic = createStatic(WWW_DIR); }
+  catch (e) {
+    log.error("config.www_missing", { www_dir: WWW_DIR, error: e.code || String(e) });
+    process.exit(1);
+  }
+}
 
 // TRUST_PROXY from an old .env: "0" means trust nobody, anything else maps to
 // the loopback default. TRUSTED_PROXIES wins when both are set.
@@ -424,7 +435,7 @@ async function handle(req, res) {
     return json(404, { error: "unknown control" });
   }
 
-  if (authed) return proxy(req, res);
+  if (authed) return UP ? proxy(req, res) : serveStatic(req, res);
 
   res.writeHead(200, { "content-type": "text/html" });
   res.end(loginPage(null));
@@ -435,9 +446,10 @@ process.on("unhandledRejection", (e) => log.error("process.unhandled_rejection",
 process.on("uncaughtException",  (e) => log.error("process.uncaught_exception", { error: String(e && e.stack || e) }));
 process.on("SIGTERM", () => server.close(() => process.exit(0)));
 
-server.listen(PORT, () => {
+server.listen(PORT, BIND_ADDR || undefined, () => {
   log.info("server.start", {
-    version: VERSION, port: PORT, upstream: UP, user: USER, max_fails: MAX_FAILS,
+    version: VERSION, port: PORT, bind: BIND_ADDR || "*", upstream: UP || `static:${WWW_DIR}`,
+    user: USER, max_fails: MAX_FAILS,
     ban: BAN_HOURS > 0 ? BAN_HOURS + "h" : "permanent",
     trusted_proxies: trustedProxies, proxy_header: PROXY_HEADER,
     container_controls: CTL_LAN_ONLY ? "LAN only" : "any authed",
