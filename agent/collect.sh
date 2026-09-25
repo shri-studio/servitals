@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# systemdashboard metrics collector
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# servitals agent: metrics collector
 # Runs inside the `agent` container. Reads host metrics via a read-only
 # bind mount of / at $HOST_ROOT (rslave propagation) plus the docker socket,
 # and writes a single JSON snapshot to $OUT_FILE on every tick.
@@ -343,8 +344,13 @@ collect() {
     > "$OUT.tmp" 2>/dev/null && mv "$OUT.tmp" "$OUT"
 }
 
-echo "systemdashboard agent: HOST=$HOST OUT=$OUT INTERVAL=${INTERVAL}s DISKS=$DISKS"
+echo "servitals agent: HOST=$HOST OUT=$OUT INTERVAL=${INTERVAL}s DISKS=$DISKS"
 IFACE=$(pick_iface)
+# single tick for tests and budget checks: sample once, write, exit
+if [ "${ONCE:-0}" = "1" ]; then
+  collect
+  exit $?
+fi
 while true; do
   collect || echo "tick failed: $(date -Is)"
   # sleep INTERVAL, but wake early if something touches the trigger file
