@@ -11,7 +11,7 @@ test("ONCE=1 writes one snapshot of this host and exits", () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sv-agent-"));
   const out = path.join(dir, "data.json");
   const r = spawnSync("bash", [path.join(__dirname, "..", "agent", "collect.sh")], {
-    env: { ...process.env, HOST_ROOT: "/", OUT_FILE: out, ONCE: "1", DISKS: "/", DOCKER_HOST: "unix:///nonexistent", STATE_DIR: dir },
+    env: { ...process.env, HOST_ROOT: "/", OUT_FILE: out, ONCE: "1", DISKS: "/", DOCKER_SOCK: "/nonexistent", STATE_DIR: dir },
     timeout: 30000,
   });
   assert.strictEqual(r.status, 0, r.stderr.toString());

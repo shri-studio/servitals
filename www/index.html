@@ -1206,7 +1206,7 @@ function renderDocker() {
     const main = stats
       ? name
         + `<span class="scpubar${(c.cpu || 0) > 0.5 ? "" : " flat"}"><i style="width:${(c.cpu || 0) > 0.5 ? clamp(c.cpu, 1, 100) : 0}%"></i></span>`
-        + `<span class="scpu ${cpuHl}">${c.cpu.toFixed(c.cpu < 10 ? 1 : 0)}%</span>`
+        + `<span class="scpu ${cpuHl}">${c.cpu == null ? "–" : c.cpu.toFixed(c.cpu < 10 ? 1 : 0) + "%"}</span>`
         + `<span class="smem ${memCls}" title="resident memory · ${memRel.toFixed(0)}% of the largest">${fmtBytes(c.mem)}</span>`
       : name + `<span class="sstate">${esc(c.state)}</span>`;
     return `<div class="svc ${cpuClass(c.cpu)}${open}" data-name="${esc(c.name)}" `

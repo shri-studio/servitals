@@ -43,30 +43,26 @@ kill "$pid"; wait "$pid" 2>/dev/null || true
 rm -rf "$data"
 check "gateway RssAnon (idle)" "$anon" 40960 "kB"
 
-# 4. agent tick CPU and peak memory, Docker off. A stub `docker` first in PATH
-# makes the agent behave as on a host without Docker access. (With Docker on,
-# the Docker CLI briefly adds ~29 MB; sub-project 2 replaces it with
-# `curl --unix-socket`.)
+# 4. agent tick CPU and peak memory, Docker off (no socket at DOCKER_SOCK, so
+# no curl process either). curl itself peaks near 13 MB RSS, but about 11 MB of
+# that is shared library pages; its RssAnon is about 1.6 MB (measured 2026-09-25).
 out=$(mktemp)
 state=$(mktemp -d)
-export STATE_DIR="$state"
-stub=$(mktemp -d)
-printf '#!/bin/sh\nexit 1\n' > "$stub/docker"; chmod +x "$stub/docker"
-export PATH="$stub:$PATH"
+export DOCKER_SOCK=/nonexistent STATE_DIR="$state"
 TIMEFORMAT='%U %S'
-cpu=$( { time HOST_ROOT=/ OUT_FILE="$out" ONCE=1 DISKS=/ DOCKER_HOST=unix:///nonexistent \
+cpu=$( { time HOST_ROOT=/ OUT_FILE="$out" ONCE=1 DISKS=/ \
           bash agent/collect.sh >/dev/null 2>&1; } 2>&1 | awk '{printf "%d", ($1 + $2) * 1000}')
 check "agent tick CPU (user+sys)" "$cpu" 400 "ms"
 if [ -x /usr/bin/time ]; then
   tfile=$(mktemp)
   /usr/bin/time -f '%M' -o "$tfile" env HOST_ROOT=/ OUT_FILE="$out" ONCE=1 DISKS=/ \
-    DOCKER_HOST=unix:///nonexistent bash agent/collect.sh >/dev/null 2>&1
+    bash agent/collect.sh >/dev/null 2>&1
   peak=$(tail -n 1 "$tfile"); rm -f "$tfile"
   check "agent peak RSS (whole process tree)" "$peak" 10240 "kB"
 else
   echo "FAIL  agent peak RSS: /usr/bin/time not installed (apt install time)"
   fail=1
 fi
-rm -rf "$out" "$stub" "$state"
+rm -rf "$out" "$state"
 
 exit "$fail"
