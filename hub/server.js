@@ -1,19 +1,26 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
 "use strict";
 /*
- * systemdashboard auth gateway — zero dependencies.
+ * servitals gateway — zero dependencies.
  *
- * - login form + HMAC-signed session cookie
+ * - login form + HMAC-signed session cookie (sv_session)
  * - after MAX_FAILS failed logins an IP is banned (BAN_HOURS=0 => until unbanned)
  * - whitelisted IPs / CIDRs can never be banned and skip login-count tracking
- * - ban list and whitelist are plain files under /data, re-read every request
+ * - client IPs from proxy headers only when the peer is in TRUSTED_PROXIES
+ * - state-changing requests need a same-origin Origin header
+ * - ban list and whitelist are plain files under DATA_DIR, re-read every request
  *
- * unban:      remove the entry from data/bans.json     (or: bin/unban <ip>)
- * whitelist:  add a line to data/whitelist.txt         (or: bin/whitelist <ip>)
+ * unban:      servitals-ctl unban <ip>
+ * whitelist:  servitals-ctl whitelist <ip|cidr>
  */
 const http = require("http");
 const crypto = require("crypto");
 const fs = require("fs");
 const path = require("path");
+const { createLogger } = require("./lib/log");
+const { verifyPassword, describeHash } = require("./lib/password");
+const { createClientResolver, parseCidrList, isWhitelisted } = require("./lib/clientip");
+const { originAllowed, requestIsHttps } = require("./lib/origin");
 
 const UP        = process.env.UPSTREAM     || "http://web:80";
 const DOCKER_SOCK = process.env.DOCKER_SOCK || "/var/run/docker.sock";
@@ -21,16 +28,50 @@ const CTL_LAN_ONLY = process.env.CTL_LAN_ONLY !== "0";   // control actions: whi
 const REFRESH_FILE = process.env.REFRESH_FILE || "/www/.refresh";
 const USER      = process.env.AUTH_USER    || "admin";
 const PASS      = process.env.AUTH_PASS    || "";
-const PASS_HASH = process.env.AUTH_PASS_HASH || "";           // sha256 hex, optional
+const PASS_HASH = process.env.AUTH_PASS_HASH || "";           // scrypt:… (or legacy sha256 hex)
 const MAX_FAILS = parseInt(process.env.MAX_FAILS || "3", 10);
 const BAN_HOURS = parseFloat(process.env.BAN_HOURS || "0");   // 0 => permanent
 const SESSION_HOURS = parseFloat(process.env.SESSION_HOURS || "720");
-const TRUST_PROXY   = process.env.TRUST_PROXY !== "0";
-const SITE   = process.env.SITE_NAME || "systemdashboard";
+const PUBLIC_URL = process.env.PUBLIC_URL || "";
+const PROXY_HEADER = (process.env.PROXY_HEADER || "x-forwarded-for").toLowerCase();
+const SITE   = process.env.SITE_NAME || "servitals";
 const PORT   = parseInt(process.env.PORT || "8080", 10);
 const DATA   = process.env.DATA_DIR || "/data";
 const SEED_WHITELIST = (process.env.WHITELIST ||
   "127.0.0.1,::1,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16").split(",").map(s => s.trim());
+
+fs.mkdirSync(DATA, { recursive: true });
+const log = createLogger({
+  level: process.env.LOG_LEVEL || "info",
+  format: process.env.LOG_FORMAT === "json" ? "json" : "logfmt",
+  journal: !!process.env.JOURNAL_STREAM,
+  auditFile: path.join(DATA, "audit.log"),
+});
+
+// TRUST_PROXY from an old .env: "0" means trust nobody, anything else maps to
+// the loopback default. TRUSTED_PROXIES wins when both are set.
+let trustedProxies = process.env.TRUSTED_PROXIES;
+if (trustedProxies === undefined && process.env.TRUST_PROXY !== undefined) {
+  trustedProxies = process.env.TRUST_PROXY === "0" ? "" : "127.0.0.1,::1";
+  log.warn("config.trust_proxy_deprecated", { hint: "set TRUSTED_PROXIES instead", trusted_proxies: trustedProxies });
+}
+if (trustedProxies === undefined) trustedProxies = "127.0.0.1,::1";
+const resolveClient = createClientResolver({ trustedProxies, proxyHeader: PROXY_HEADER });
+
+if (!PASS && !PASS_HASH) {
+  log.error("auth.no_password", { hint: "set AUTH_PASS_HASH (servitals-ctl hash-password) or AUTH_PASS" });
+  process.exit(1);
+}
+if (PASS_HASH && describeHash(PASS_HASH) === "invalid") {
+  log.error("auth.bad_hash", { hint: "AUTH_PASS_HASH is neither scrypt:… nor 64 hex characters" });
+  process.exit(1);
+}
+if (PASS_HASH && describeHash(PASS_HASH) === "sha256") {
+  log.warn("auth.legacy_hash", { hint: "replace with servitals-ctl hash-password" });
+}
+if (!PASS_HASH) {
+  log.warn("auth.plain_password", { hint: "store a hash instead: servitals-ctl hash-password" });
+}
 
 const BANS_F  = path.join(DATA, "bans.json");
 const WL_F    = path.join(DATA, "whitelist.txt");
@@ -38,7 +79,6 @@ const FAILS_F = path.join(DATA, "fails.json");
 const SECRET_F = path.join(DATA, "secret");
 
 /* ---------- state files ---------- */
-fs.mkdirSync(DATA, { recursive: true });
 if (!fs.existsSync(SECRET_F)) fs.writeFileSync(SECRET_F, crypto.randomBytes(32).toString("hex"), { mode: 0o600 });
 if (!fs.existsSync(BANS_F))  fs.writeFileSync(BANS_F, "{}\n");
 if (!fs.existsSync(FAILS_F)) fs.writeFileSync(FAILS_F, "{}\n");
@@ -61,39 +101,8 @@ const escHtml = (s) => String(s == null ? "" : s)
   .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
   .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
 
-/* ---------- ip helpers ---------- */
-// only accept something that actually looks like an IP; anything else (e.g. a
-// spoofed header with markup) collapses to null — not a trackable identity.
-const IP_RE = /^[0-9a-fA-F:.]{2,45}$/;
-function safeIp(ip) {
-  ip = (ip || "").replace(/^::ffff:/, "").trim();
-  return IP_RE.test(ip) ? ip : null;
-}
-function clientIp(req) {
-  // proxy headers are forgeable — only honour them when we sit behind a trusted
-  // proxy / tunnel (TRUST_PROXY). Otherwise the socket peer is the only truth.
-  if (TRUST_PROXY) {
-    const cf = req.headers["cf-connecting-ip"];
-    if (cf) return safeIp(cf);
-    const xff = req.headers["x-forwarded-for"];
-    if (xff) return safeIp(String(xff).split(",")[0]);
-  }
-  return safeIp(req.socket.remoteAddress);
-}
-function v4ToInt(ip) {
-  const p = ip.split(".");
-  if (p.length !== 4) return null;
-  return ((+p[0] << 24) >>> 0) + (+p[1] << 16) + (+p[2] << 8) + (+p[3]);
-}
-function inCidr(ip, cidr) {
-  if (!cidr.includes("/")) return ip === cidr;
-  const [net, bitsStr] = cidr.split("/");
-  const a = v4ToInt(ip), b = v4ToInt(net), bits = parseInt(bitsStr, 10);
-  if (a === null || b === null) return false;
-  const mask = bits === 0 ? 0 : (~0 << (32 - bits)) >>> 0;
-  return (a & mask) === (b & mask);
-}
-function whitelisted(ip) { return !!ip && readWL().some(e => inCidr(ip, e)); }
+/* ---------- client identity ---------- */
+function whitelisted(client) { return isWhitelisted(client, parseCidrList(readWL())); }
 
 /* ---------- ban / fail tracking ----------
    ip is null when the address didn't parse (only possible from a forged proxy
@@ -159,11 +168,10 @@ function getCookie(req, name) {
 }
 
 /* ---------- password check ---------- */
-function checkPass(u, p) {
-  const passOk = PASS_HASH
-    ? eq(sha256(p || ""), Buffer.from(PASS_HASH, "hex"))
-    : eq(p, PASS);
-  return eq(u, USER) && passOk;
+async function checkPass(u, p) {
+  const userOk = eq(u, USER);
+  const passOk = PASS_HASH ? await verifyPassword(p || "", PASS_HASH) : eq(p, PASS);
+  return userOk && passOk;
 }
 
 /* ---------- pages ---------- */
@@ -210,7 +218,7 @@ const bannedPage = (ip, b) => SHELL(SITE + " · blocked", `
                 : "Blocked until an administrator removes it."}
     </div>
   </div>
-  <div class="foot">admin: <code>bin/unban ${escHtml(ip)}</code></div>`);
+  <div class="foot">admin: <code>servitals-ctl unban ${escHtml(ip)}</code></div>`);
 
 /* ---------- proxy ---------- */
 function proxy(req, res) {
@@ -282,7 +290,7 @@ function stripAnsi(s) {
 
 const server = http.createServer((req, res) => {
   handle(req, res).catch((err) => {
-    console.error("request handler error:", err && err.stack || err);
+    log.error("http.error", { error: String(err && err.stack || err) });
     try {
       if (!res.headersSent) res.writeHead(500, { "content-type": "text/plain" });
       res.end("internal error");
@@ -291,8 +299,9 @@ const server = http.createServer((req, res) => {
 });
 
 async function handle(req, res) {
-  const ip = clientIp(req);
-  const wl = whitelisted(ip);
+  const client = resolveClient(req);
+  const ip = client.ip;
+  const wl = whitelisted(client);
 
   if (!wl) {
     const b = banInfo(ip);
@@ -302,14 +311,26 @@ async function handle(req, res) {
   // health check, no auth
   if (req.url === "/__auth/health") { res.writeHead(200); return res.end("ok"); }
 
+  // CSRF: state-changing browser requests must come from our own origin
+  const stateChange = req.method === "POST" && req.url && (
+    req.url === "/__auth/login" || req.url === "/__auth/logout" || req.url.startsWith("/__ctl/"));
+  if (stateChange && !originAllowed(req, { publicUrl: PUBLIC_URL, peerTrusted: client.peerTrusted })) {
+    log.warn("auth.origin_refused", { ip, url: req.url, origin: req.headers.origin || "" });
+    res.writeHead(403, { "content-type": "text/plain" });
+    return res.end("cross-origin request refused");
+  }
+  const secure = requestIsHttps(req, { publicUrl: PUBLIC_URL, peerTrusted: client.peerTrusted }) ? "; Secure" : "";
+
   if (req.method === "POST" && req.url === "/__auth/login") {
     const body = await readBody(req);
     const params = new URLSearchParams(body);
-    const ok = checkPass(params.get("username") || "", params.get("password") || "");
+    const user = params.get("username") || "";
+    const ok = await checkPass(user, params.get("password") || "");
     if (ok) {
       clearFails(ip);
+      log.audit("auth.login_ok", { ip, user });
       res.writeHead(302, {
-        "set-cookie": `sd_session=${makeCookie()}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${SESSION_HOURS * 3600}`,
+        "set-cookie": `sv_session=${makeCookie()}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${SESSION_HOURS * 3600}${secure}`,
         location: "/",
       });
       return res.end();
@@ -318,19 +339,28 @@ async function handle(req, res) {
     let msg = { cls: "err", text: "invalid credentials" };
     if (!wl) {
       const r = recordFail(ip);
-      if (r.banned) { res.writeHead(403, { "content-type": "text/html" }); return res.end(bannedPage(ip, banInfo(ip) || {})); }
+      log.audit("auth.login_fail", { ip, user, remaining: r.remaining });
+      if (r.banned) {
+        log.audit("auth.banned", { ip, hours: BAN_HOURS });
+        res.writeHead(403, { "content-type": "text/html" });
+        return res.end(bannedPage(ip, banInfo(ip) || {}));
+      }
       msg = { cls: "warn", text: `invalid credentials — ${r.remaining} attempt${r.remaining === 1 ? "" : "s"} left before this IP is blocked` };
+    } else {
+      log.audit("auth.login_fail", { ip, user, whitelisted: true });
     }
     res.writeHead(401, { "content-type": "text/html" });
     return res.end(loginPage(msg));
   }
 
   if (req.url === "/__auth/logout") {
-    res.writeHead(302, { "set-cookie": "sd_session=; Path=/; Max-Age=0", location: "/" });
+    if (req.method !== "POST") { res.writeHead(405, { allow: "POST" }); return res.end("POST only"); }
+    log.audit("auth.logout", { ip });
+    res.writeHead(302, { "set-cookie": `sv_session=; Path=/; Max-Age=0${secure}`, location: "/" });
     return res.end();
   }
 
-  const authed = validCookie(getCookie(req, "sd_session"));
+  const authed = validCookie(getCookie(req, "sv_session"));
 
   // ---- control endpoints (require a session; restart also requires LAN) ----
   if (req.url && req.url.startsWith("/__ctl/")) {
@@ -363,6 +393,7 @@ async function handle(req, res) {
         const dst = process.env.CONFIG_FILE || "/www/config.json";
         fs.writeFileSync(dst + ".tmp", JSON.stringify(obj, null, 2) + "\n");
         fs.renameSync(dst + ".tmp", dst);
+        log.audit("config.saved", { ip });
         return json(200, { ok: true });
       } catch (e) { return json(500, { error: String(e) }); }
     }
@@ -384,6 +415,7 @@ async function handle(req, res) {
       }
       if (req.method !== "POST") return json(405, { error: "POST only" });
       const r = await dockerApi("POST", `/containers/${name}/${action}?t=10`);
+      log.audit("ctl.container", { ip, action, name, status: r.status });
       return json(r.status < 300 ? 200 : r.status,
         r.status < 300 ? { ok: true, action, name }
                        : { error: r.buf.toString("utf8") || `docker ${r.status}` });
@@ -398,11 +430,15 @@ async function handle(req, res) {
 }
 
 // a gateway should stay up: log and keep serving rather than exit on a stray throw
-process.on("unhandledRejection", (e) => console.error("unhandledRejection:", e && e.stack || e));
-process.on("uncaughtException",  (e) => console.error("uncaughtException:",  e && e.stack || e));
+process.on("unhandledRejection", (e) => log.error("process.unhandled_rejection", { error: String(e && e.stack || e) }));
+process.on("uncaughtException",  (e) => log.error("process.uncaught_exception", { error: String(e && e.stack || e) }));
+process.on("SIGTERM", () => server.close(() => process.exit(0)));
 
 server.listen(PORT, () => {
-  console.log(`auth gateway on :${PORT} -> ${UP}  user=${USER}  max_fails=${MAX_FAILS}  ` +
-    `ban=${BAN_HOURS > 0 ? BAN_HOURS + "h" : "permanent"}  trust_proxy=${TRUST_PROXY}  ` +
-    `container-controls=${CTL_LAN_ONLY ? "LAN only" : "any authed"}`);
+  log.info("server.start", {
+    port: PORT, upstream: UP, user: USER, max_fails: MAX_FAILS,
+    ban: BAN_HOURS > 0 ? BAN_HOURS + "h" : "permanent",
+    trusted_proxies: trustedProxies, proxy_header: PROXY_HEADER,
+    container_controls: CTL_LAN_ONLY ? "LAN only" : "any authed",
+  });
 });
