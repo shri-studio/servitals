@@ -874,8 +874,13 @@ works on its own.
 
 ## 22. Verify before release
 
-- A system-unit run of the agent with the full hardening set (only the user
-  manager was tested).
+- ~~A system-unit run of the agent with the full hardening set~~ Verified
+  2026-09-25 on the development host (resolute): both units active with the
+  13.2 set, cifs-on-autofs and 17 containers reported. `systemd-analyze
+  security` exposure: hub 7.8, agent 7.9. The 13.2 set leaves many options
+  off (`CapabilityBoundingSet=`, `RestrictAddressFamilies=`,
+  `SystemCallFilter=`, `PrivateDevices=`, `ProtectKernelModules=` and others);
+  tighten these with sub-project 3 packaging.
 - Press Start 2P: its OFL **does** carry the Reserved Font Name "Press Start
   2P" (checked 2026-09-24). Before the Debian upload, decide whether the
   bundled WOFF2 subset counts as a modified version under Debian's font
