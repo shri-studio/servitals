@@ -1,29 +1,37 @@
-name: systemdashboard
+# SPDX-License-Identifier: AGPL-3.0-or-later
+name: servitals
 
 services:
-  auth:
+  gateway:
     build: ./hub
-    image: systemdashboard-auth:local
-    container_name: systemdashboard-auth
+    image: servitals-gateway:local
+    container_name: servitals-gateway
     restart: unless-stopped
     ports:
       # BIND_ADDR=127.0.0.1 in .env when only a local reverse proxy / tunnel
-      # should reach the gateway (proxy headers are trusted — see TRUST_PROXY).
+      # should reach the gateway.
       - "${BIND_ADDR:-0.0.0.0}:${PORT:-20002}:8080"
     environment:
       - UPSTREAM=http://web:80
       - AUTH_USER=${AUTH_USER:-admin}
-      - AUTH_PASS=${AUTH_PASS:?set AUTH_PASS in .env}
+      - AUTH_PASS=${AUTH_PASS:-}
+      - AUTH_PASS_HASH=${AUTH_PASS_HASH:-}
       - MAX_FAILS=${MAX_FAILS:-3}
       - BAN_HOURS=${BAN_HOURS:-0}
       - SESSION_HOURS=${SESSION_HOURS:-720}
-      - TRUST_PROXY=${TRUST_PROXY:-1}
+      # Proxy headers are trusted only from these peers. 172.31.250.1 is this
+      # network's gateway: a tunnel or proxy on the host connects from it.
+      - TRUSTED_PROXIES=${TRUSTED_PROXIES:-172.31.250.1}
+      - PROXY_HEADER=${PROXY_HEADER:-x-forwarded-for}
+      - PUBLIC_URL=${PUBLIC_URL:-}
       - SITE_NAME=${SITE_NAME:-homeserver}
       - WHITELIST=${WHITELIST:-127.0.0.1,::1,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16}
       # container start/stop/restart/logs from the UI: "1" = whitelisted IPs
       # (LAN) only, "0" = any logged-in user. refresh trigger is always allowed.
       - CTL_LAN_ONLY=${CTL_LAN_ONLY:-1}
       - REFRESH_FILE=/www/.refresh
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+      - LOG_FORMAT=${LOG_FORMAT:-logfmt}
     volumes:
       - ./data:/data
       - ./www:/www                                 # write the .refresh trigger
@@ -33,7 +41,7 @@ services:
 
   web:
     image: nginx:alpine
-    container_name: systemdashboard-web
+    container_name: servitals-web
     restart: unless-stopped
     expose:
       - "80"
@@ -43,8 +51,8 @@ services:
 
   agent:
     build: ./agent
-    image: systemdashboard-agent:local
-    container_name: systemdashboard-agent
+    image: servitals-agent:local
+    container_name: servitals-agent
     restart: unless-stopped
     environment:
       - HOST_ROOT=/host
@@ -64,3 +72,12 @@ services:
         read_only: true
         bind:
           propagation: rslave
+
+networks:
+  default:
+    ipam:
+      config:
+        # fixed so TRUSTED_PROXIES can name the gateway address; change both
+        # if this range clashes with another network on the host
+        - subnet: 172.31.250.0/24
+          gateway: 172.31.250.1

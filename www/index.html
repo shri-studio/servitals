@@ -1,9 +1,10 @@
 <!DOCTYPE html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
 <html lang="en" data-theme="dark">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>systemdashboard</title>
+<title>servitals</title>
 <link rel="icon" id="favicon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' fill='%23000'/%3E%3Crect x='2' y='9' width='2' height='5' fill='%236bd88a'/%3E%3Crect x='5' y='6' width='2' height='8' fill='%236bd88a'/%3E%3Crect x='8' y='3' width='2' height='11' fill='%236bd88a'/%3E%3Crect x='11' y='7' width='2' height='7' fill='%236bd88a'/%3E%3C/svg%3E">
 <style>
   @font-face {
@@ -150,6 +151,9 @@
   }
   :root[data-theme="dark"][data-style="8bit"] body::after { mix-blend-mode: overlay; }
 
+  .logout-form { display: inline; }
+  .linkbtn { background: none; border: 0; padding: 0; font: inherit; color: var(--dim); cursor: pointer; }
+  .linkbtn:hover, .linkbtn:focus-visible { color: var(--fg-bright); }
   * { margin: 0; padding: 0; box-sizing: border-box; }
 
   html, body { background: var(--bg); }
@@ -530,13 +534,13 @@
 
   <div class="head">
     <div>
-      <div class="title"><span id="statusdot" class="dot"></span><span id="hostname">systemdashboard</span></div>
+      <div class="title"><span id="statusdot" class="dot"></span><span id="hostname">servitals</span></div>
       <div class="meta" id="hostmeta">connecting&hellip;</div>
     </div>
     <div class="right">
       <div class="hclock" id="headclock">--:--:--</div>
       <div class="hdate" id="headdate">&mdash;</div>
-      <div class="keyhint"><b id="btn-refresh">[r] refresh</b> &nbsp; <b id="btn-settings">[s] settings</b> &nbsp; <b id="btn-theme">[t] theme</b> &nbsp; <b id="btn-style">[y] style</b> &nbsp; <a href="/__auth/logout" style="color:var(--dim)">[logout]</a></div>
+      <div class="keyhint"><b id="btn-refresh">[r] refresh</b> &nbsp; <b id="btn-settings">[s] settings</b> &nbsp; <b id="btn-theme">[t] theme</b> &nbsp; <b id="btn-style">[y] style</b> &nbsp; <form method="post" action="/__auth/logout" class="logout-form"><button type="submit" class="linkbtn">[logout]</button></form></div>
     </div>
   </div>
 
@@ -788,7 +792,21 @@ function sparkSvg(pcts) {
 }
 
 /* ------------------------------------------------------------------ config */
-const LS_KEY = "sysdash.cfg";
+// per-browser settings; values stored under the pre-rename prefix move over once
+function lsGet(key) {
+  try {
+    const v = localStorage.getItem("servitals." + key);
+    if (v !== null) return v;
+    const old = localStorage.getItem("sysdash." + key); // legacy-name
+    if (old !== null) {
+      localStorage.setItem("servitals." + key, old);
+      localStorage.removeItem("sysdash." + key); // legacy-name
+    }
+    return old;
+  } catch (e) { return null; }
+}
+function lsSet(key, value) { try { localStorage.setItem("servitals." + key, value); } catch (e) {} }
+function lsDel(key) { try { localStorage.removeItem("servitals." + key); } catch (e) {} }
 let DEFAULTS = {};
 let cfg = {};
 
@@ -797,7 +815,7 @@ async function loadConfig() {
     DEFAULTS = await (await fetch("config.json?t=" + Date.now())).json();
   } catch (e) { DEFAULTS = {}; }
   DEFAULTS = Object.assign({
-    title: "systemdashboard", favicon: "", refreshSec: 60,
+    title: "servitals", favicon: "", refreshSec: 60,
     weather: [], clocks: [], disks: {},
     panels: { mem: 1, cpu: 1, temp: 1, storage: 1, network: 1, docker: 1, clocks: 1, weather: 1 },
     panelOrder: ["mem", "cpu", "temp", "storage", "network", "docker", "clocks", "weather"],
@@ -806,7 +824,7 @@ async function loadConfig() {
   }, DEFAULTS);
 
   let saved = null;
-  try { saved = JSON.parse(localStorage.getItem(LS_KEY) || "null"); } catch (e) {}
+  try { saved = JSON.parse(lsGet("cfg") || "null"); } catch (e) {}
   cfg = saved ? deepMerge(structuredClone(DEFAULTS), saved) : structuredClone(DEFAULTS);
   // make sure every panel appears exactly once in the order list
   const known = Object.keys(DEFAULTS.panels);
@@ -815,7 +833,7 @@ async function loadConfig() {
 }
 
 function applyBranding() {
-  const name = cfg.title || "systemdashboard";
+  const name = cfg.title || "servitals";
   document.title = name;
   if (cfg.favicon) $("#favicon").href = cfg.favicon;
 }
@@ -840,7 +858,7 @@ function deepMerge(a, b) {
   }
   return a;
 }
-function saveConfig() { localStorage.setItem(LS_KEY, JSON.stringify(cfg)); }
+function saveConfig() { lsSet("cfg", JSON.stringify(cfg)); }
 
 /* ------------------------------------------------------------------ theme */
 function currentTheme() {
@@ -851,11 +869,11 @@ function toggleTheme() {
   const next = currentTheme() === "dark" ? "light" : "dark";
   document.documentElement.setAttribute("data-theme", next);
   $("#btn-theme").textContent = `[t] ${next}`;
-  try { localStorage.setItem("sysdash.theme", next); } catch (e) {}
+  lsSet("theme", next);
 }
 (function initTheme() {
   let t = null;
-  try { t = localStorage.getItem("sysdash.theme"); } catch (e) {}
+  t = lsGet("theme");
   if (t === "light" || t === "dark") document.documentElement.setAttribute("data-theme", t);
 })();
 
@@ -868,11 +886,11 @@ function toggleStyle() {
   if (next === "classic") document.documentElement.removeAttribute("data-style");
   else document.documentElement.setAttribute("data-style", next);
   $("#btn-style").textContent = `[y] ${next}`;
-  try { localStorage.setItem("sysdash.style", next); } catch (e) {}
+  lsSet("style", next);
 }
 (function initStyle() {
   let s = null;
-  try { s = localStorage.getItem("sysdash.style"); } catch (e) {}
+  s = lsGet("style");
   if (STYLES.includes(s) && s !== "classic") document.documentElement.setAttribute("data-style", s);
 })();
 
@@ -1396,7 +1414,7 @@ async function wxSearch() {
 }
 
 async function saveSettings() {
-  cfg.title = $("#cfg-name").value.trim() || "systemdashboard";
+  cfg.title = $("#cfg-name").value.trim() || "servitals";
   cfg.refreshSec = clamp(+$("#cfg-refresh").value || 60, 5, 900);
   // panels/order/size/favicon are already updated live by the settings widgets
 
@@ -1415,7 +1433,7 @@ async function saveSettings() {
       method: "POST", headers: { "content-type": "application/json" },
       body: JSON.stringify(payload),
     });
-    if (r.ok) { try { localStorage.removeItem(LS_KEY); } catch (e) {} toast("settings saved"); return; }
+    if (r.ok) { lsDel("cfg"); toast("settings saved"); return; }
     const j = await r.json().catch(() => ({}));
     saveConfig(); toast(j.error ? "saved locally — " + j.error : "saved to this browser only");
   } catch (e) {
@@ -1559,7 +1577,7 @@ document.addEventListener("visibilitychange", () => {
   };
   $("#cfg-save").onclick = saveSettings;
   $("#cfg-reset").onclick = () => {
-    localStorage.removeItem(LS_KEY);
+    lsDel("cfg");
     cfg = structuredClone(DEFAULTS);
     applyBranding(); openSettings(); renderClocks(); applyLayout(); renderWeather(true); startLoop();
   };
