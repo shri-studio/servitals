@@ -44,11 +44,11 @@ test("client identity follows the trusted-proxy rules", async () => {
   await withHub({}, async (hub) => {
     const cookie = cookieFrom(await login(hub.port));
     // loopback is a trusted proxy by default: without a header it is proxy-only
-    const self = await whoami(hub, cookie); delete self.version;
+    const self = await whoami(hub, cookie); delete self.version; delete self.user;
     assert.deepStrictEqual(self, { ip: "127.0.0.1", lan: false, controls: false });
     assert.strictEqual((await whoami(hub, cookie, { "x-forwarded-for": "192.168.1.5" })).lan, true);
     const spoof = await whoami(hub, cookie, { "x-forwarded-for": "192.168.1.5, 203.0.113.7" });
-    delete spoof.version;
+    delete spoof.version; delete spoof.user;
     assert.deepStrictEqual(spoof, { ip: "203.0.113.7", lan: false, controls: false });
   });
 });

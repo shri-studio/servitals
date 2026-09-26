@@ -27,6 +27,7 @@ const { writeFileAtomic } = require("./lib/fsutil");
 const os = require("os");
 const { createNodeStore, localAgentEnv } = require("./lib/nodes");
 const { createAgentApi } = require("./lib/agentapi");
+const { createAdminStore, USER_RE } = require("./lib/admin");
 
 const UP        = process.env.UPSTREAM     || "";   // unset: serve WWW_DIR directly (native install)
 const WWW_DIR   = path.resolve(process.env.WWW_DIR || path.join(__dirname, "..", "www"));
@@ -74,18 +75,25 @@ if (trustedProxies === undefined && process.env.TRUST_PROXY !== undefined) {
 if (trustedProxies === undefined) trustedProxies = "127.0.0.1,::1";
 const resolveClient = createClientResolver({ trustedProxies, proxyHeader: PROXY_HEADER });
 
-if (!PASS && !PASS_HASH) {
-  log.error("auth.no_password", { hint: "set AUTH_PASS_HASH (servitals-ctl hash-password) or AUTH_PASS" });
+/* ---------- admin login: STATE_DIR/admin.json wins over the environment ---------- */
+const admin = createAdminStore(path.join(DATA, "admin.json"));
+if (admin.isBroken() && !admin.load()) {
+  log.error("auth.admin_unreadable", { file: path.join(DATA, "admin.json"), hint: "fix it or run servitals-ctl passwd" });
   process.exit(1);
 }
-if (PASS_HASH && describeHash(PASS_HASH) === "invalid") {
+const ADMIN_FILE_LOGIN = !!admin.load();
+if (!ADMIN_FILE_LOGIN && !PASS && !PASS_HASH) {
+  log.error("auth.no_password", { hint: "run servitals-ctl passwd, or set AUTH_PASS_HASH (servitals-ctl hash-password)" });
+  process.exit(1);
+}
+if (!ADMIN_FILE_LOGIN && PASS_HASH && describeHash(PASS_HASH) === "invalid") {
   log.error("auth.bad_hash", { hint: "AUTH_PASS_HASH is neither scrypt:… nor 64 hex characters" });
   process.exit(1);
 }
-if (PASS_HASH && describeHash(PASS_HASH) === "sha256") {
+if (!ADMIN_FILE_LOGIN && PASS_HASH && describeHash(PASS_HASH) === "sha256") {
   log.warn("auth.legacy_hash", { hint: "replace with servitals-ctl hash-password" });
 }
-if (!PASS_HASH) {
+if (!ADMIN_FILE_LOGIN && !PASS_HASH) {
   log.warn("auth.plain_password", { hint: "store a hash instead: servitals-ctl hash-password" });
 }
 
@@ -202,17 +210,26 @@ function eq(a, b) { return crypto.timingSafeEqual(sha256(a), sha256(b)); }
 
 /* ---------- session cookie ---------- */
 function sign(data) { return crypto.createHmac("sha256", SECRET).update(data).digest("base64url"); }
+// the current login: admin.json when present, else the environment (gen 0)
+function creds() {
+  return admin.load() || { user: USER, hash: PASS_HASH, plain: PASS, gen: 0 };
+}
+// sessions name the user and the login generation: a new name or password ends them
 function makeCookie() {
+  const c = creds();
   const exp = Date.now() + SESSION_HOURS * 3600e3;
-  const payload = Buffer.from(JSON.stringify({ u: USER, exp })).toString("base64url");
+  const payload = Buffer.from(JSON.stringify({ u: c.user, g: c.gen, exp })).toString("base64url");
   return `${payload}.${sign(payload)}`;
 }
 function validCookie(c) {
   if (!c) return false;
   const [payload, mac] = c.split(".");
   if (!payload || !mac || !eq(mac, sign(payload))) return false;
-  try { return JSON.parse(Buffer.from(payload, "base64url").toString()).exp > Date.now(); }
-  catch { return false; }
+  try {
+    const s = JSON.parse(Buffer.from(payload, "base64url").toString());
+    const now = creds();
+    return s.exp > Date.now() && s.u === now.user && (s.g || 0) === now.gen;
+  } catch { return false; }
 }
 function getCookie(req, name) {
   const raw = req.headers.cookie || "";
@@ -225,8 +242,9 @@ function getCookie(req, name) {
 
 /* ---------- password check ---------- */
 async function checkPass(u, p) {
-  const userOk = eq(u, USER);
-  const passOk = PASS_HASH ? await verifyPassword(p || "", PASS_HASH) : eq(p, PASS);
+  const c = creds();
+  const userOk = eq(u, c.user);
+  const passOk = c.hash ? await verifyPassword(p || "", c.hash) : eq(p, c.plain);
   return userOk && passOk;
 }
 
@@ -455,7 +473,7 @@ async function handle(req, res) {
 
     // does this client get container controls?
     if (req.url === "/__ctl/whoami") {
-      return json(200, { ip, lan: wl, controls: (!CTL_LAN_ONLY || wl), version: VERSION });
+      return json(200, { ip, lan: wl, controls: (!CTL_LAN_ONLY || wl), version: VERSION, user: creds().user });
     }
 
     // persist the dashboard config (title, favicon, panels, weather, clocks…)
@@ -519,7 +537,7 @@ process.on("SIGTERM", () => {
 server.listen(PORT, BIND_ADDR || undefined, () => {
   log.info("server.start", {
     version: VERSION, port: PORT, bind: BIND_ADDR || "*", upstream: UP || `static:${WWW_DIR}`,
-    user: USER, max_fails: MAX_FAILS,
+    user: creds().user, login: ADMIN_FILE_LOGIN ? "admin.json" : "env", max_fails: MAX_FAILS,
     ban: BAN_HOURS > 0 ? BAN_HOURS + "h" : "permanent",
     trusted_proxies: trustedProxies, proxy_header: PROXY_HEADER,
     container_controls: CTL_LAN_ONLY ? "LAN only" : "any authed",
