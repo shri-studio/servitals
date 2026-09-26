@@ -66,7 +66,8 @@ install -m 644 "$SRC/VERSION" "$AGENT_LIB/VERSION"
 install -m 755 "$SRC/bin/servitals-ctl" "$SRC/bin/servitals-agent" /usr/bin/
 
 # 3. system users
-install -m 644 "$SRC/packaging/sysusers/servitals.conf" "$SRC/packaging/sysusers/servitals-agent.conf" /usr/lib/sysusers.d/
+install -m 644 "$SRC/debian/servitals.sysusers" /usr/lib/sysusers.d/servitals.conf
+install -m 644 "$SRC/debian/servitals-agent.sysusers" /usr/lib/sysusers.d/servitals-agent.conf
 systemd-sysusers /usr/lib/sysusers.d/servitals.conf /usr/lib/sysusers.d/servitals-agent.conf
 
 # 4. configuration, first install only
@@ -111,7 +112,8 @@ if [ -n "$IMPORT" ]; then
 fi
 
 # 6. units
-install -m 644 "$SRC/packaging/systemd/servitals.service" "$SRC/packaging/systemd/servitals-agent.service" "$UNITS/"
+# the same units the package ships (debian/ is their only copy)
+install -m 644 "$SRC/debian/servitals.service" "$SRC/debian/servitals-agent.service" "$UNITS/"
 systemctl daemon-reload
 systemctl enable servitals.service servitals-agent.service
 systemctl restart servitals.service

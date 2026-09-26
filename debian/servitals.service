@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 [Unit]
 Description=servitals dashboard hub
-Documentation=https://github.com/shri-studio/servitals
+Documentation=man:servitals(8) https://github.com/shri-studio/servitals
 After=network-online.target
 Wants=network-online.target
 
@@ -16,14 +16,31 @@ StateDirectory=servitals
 StateDirectoryMode=0750
 ReadWritePaths=/var/lib/servitals
 UMask=0077
+# MemoryDenyWriteExecute= stays off: Node's JIT needs writable code pages
+ProtectProc=invisible
+ProcSubset=pid
 NoNewPrivileges=yes
 ProtectSystem=strict
 ProtectHome=read-only
 PrivateTmp=yes
+PrivateDevices=yes
 ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
 ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
 RestrictSUIDSGID=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
 LockPersonality=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @resources
+SystemCallErrorNumber=EPERM
 Restart=on-failure
 RestartSec=5
 

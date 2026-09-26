@@ -1,10 +1,10 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 [Unit]
 Description=servitals agent (metrics collector)
-Documentation=https://github.com/shri-studio/servitals
+Documentation=man:servitals-agent(1) https://github.com/shri-studio/servitals
 After=network-online.target servitals.service
 Wants=network-online.target
-# not paired yet: stay down instead of crash-looping (the installer or `join` starts it)
+# not paired yet: stay down instead of crash-looping (the hub package pairs the local agent)
 ConditionPathExists=/etc/servitals/agent-credentials.env
 
 [Service]
@@ -18,14 +18,29 @@ ExecStart=/usr/bin/servitals-agent run
 StateDirectory=servitals-agent
 StateDirectoryMode=0700
 UMask=0077
+MemoryDenyWriteExecute=yes
 NoNewPrivileges=yes
 ProtectSystem=strict
 ProtectHome=read-only
 PrivateTmp=yes
+PrivateDevices=yes
 ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
 ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
 RestrictSUIDSGID=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
 LockPersonality=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @resources
+SystemCallErrorNumber=EPERM
 Restart=on-failure
 RestartSec=10
 
