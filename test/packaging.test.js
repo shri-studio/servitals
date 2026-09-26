@@ -75,3 +75,12 @@ test("maintainer scripts keep the debhelper token and never chown recursively", 
     assert.doesNotMatch(s, /chown\s+-R/, f);
   }
 });
+
+test("shell scripts parse", () => {
+  for (const f of ["packaging/install-local.sh", "packaging/build-deb.sh", "packaging/autopkgtest.sh",
+                   "packaging/ppa-upload.sh", "debian/servitals.postinst", "debian/servitals.postrm",
+                   "debian/servitals-agent.postrm", "debian/tests/smoke", "debian/tests/purge"]) {
+    const r = spawnSync("bash", ["-n", path.join(ROOT, f)], { encoding: "utf8" });
+    assert.strictEqual(r.status, 0, `${f}: ${r.stderr}`);
+  }
+});
