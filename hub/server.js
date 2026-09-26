@@ -18,7 +18,7 @@ const crypto = require("crypto");
 const fs = require("fs");
 const path = require("path");
 const { createLogger } = require("./lib/log");
-const { verifyPassword, describeHash } = require("./lib/password");
+const { verifyPassword, describeHash, hashPassword } = require("./lib/password");
 const { createClientResolver, parseCidrList, isWhitelisted } = require("./lib/clientip");
 const { originAllowed, requestIsHttps } = require("./lib/origin");
 const { VERSION } = require("./lib/version");
@@ -474,6 +474,36 @@ async function handle(req, res) {
     // does this client get container controls?
     if (req.url === "/__ctl/whoami") {
       return json(200, { ip, lan: wl, controls: (!CTL_LAN_ONLY || wl), version: VERSION, user: creds().user });
+    }
+
+    // change the admin name and/or password: the current password is required;
+    // every other session ends (the login generation goes up)
+    if (req.method === "POST" && req.url === "/__ctl/account") {
+      let body;
+      try { body = JSON.parse(await readBodyN(req, 4096)); } catch { return json(400, { error: "invalid json" }); }
+      const current = creds();
+      const user = body && typeof body.user === "string" && body.user !== "" ? body.user : current.user;
+      const password = body && typeof body.password === "string" ? body.password : "";
+      if (!USER_RE.test(user)) return json(400, { error: "name: 1-64 letters, digits, dot, dash or underscore" });
+      if (password !== "" && password.length < 8) return json(400, { error: "password: at least 8 characters" });
+      if (!(await checkPass(current.user, body && typeof body.current === "string" ? body.current : ""))) {
+        await new Promise((r) => setTimeout(r, 800));
+        if (!wl) recordFail(ip);
+        log.audit("auth.account_denied", { ip });
+        return json(403, { error: "current password is wrong" });
+      }
+      if (!password && current.hash && describeHash(current.hash) !== "scrypt") {
+        return json(400, { error: "choose a new password: the current one is stored in an old format" });
+      }
+      const hash = password ? await hashPassword(password) : (current.hash || await hashPassword(current.plain));
+      try { admin.save({ user, hash, gen: current.gen + 1 }); }
+      catch (e) { return json(500, { error: "could not save the login: " + (e.code || e.message) }); }
+      log.audit("auth.account_changed", { ip, user, password_changed: password !== "" });
+      res.writeHead(200, {
+        "content-type": "application/json",
+        "set-cookie": `sv_session=${makeCookie()}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${SESSION_HOURS * 3600}${secure}`,
+      });
+      return res.end(JSON.stringify({ ok: true, user }));
     }
 
     // persist the dashboard config (title, favicon, panels, weather, clocks…)

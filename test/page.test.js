@@ -25,3 +25,11 @@ test("disks without a configured label get a readable default", () => {
 test("a configured label still wins", () => {
   assert.match(HTML, /meta\.label \|\| diskLabel\(dk\.mount\)/);
 });
+
+test("the settings panel has the login section wired up", () => {
+  for (const id of ["acct-user", "acct-new", "acct-new2", "acct-current", "acct-save", "acct-msg"]) {
+    assert.ok(HTML.includes(`id="${id}"`), `missing #${id}`);
+  }
+  assert.match(HTML, /\$\("#acct-save"\)\.onclick = saveAccount;/);
+  assert.match(HTML, /fetch\("\/__ctl\/account"/);
+});

@@ -54,3 +54,52 @@ test("a broken admin.json stops the gateway", async () => {
   assert.match(r.logs, /auth\.admin_unreadable/);
   fs.rmSync(dir, { recursive: true, force: true });
 });
+
+test("changing the login needs the current password and ends other sessions", async () => {
+  const hub = await startHub();
+  try {
+    const mine = cookieFrom(await login(hub.port));
+    const other = cookieFrom(await login(hub.port));
+    const wrong = await account(hub.port, mine, { current: "nope", user: "owner", password: "brand-new-pass" });
+    assert.strictEqual(wrong.status, 403);
+    assert.ok(!fs.existsSync(path.join(hub.dataDir, "admin.json")));
+    const fails = JSON.parse(fs.readFileSync(path.join(hub.dataDir, "fails.json"), "utf8"));
+    assert.strictEqual(fails["127.0.0.1"].n, 1, "a wrong current password counts toward the lockout");
+    assert.strictEqual((await account(hub.port, mine, { current: "correct horse battery", user: "a b" })).status, 400);
+    assert.strictEqual((await account(hub.port, mine, { current: "correct horse battery", password: "short" })).status, 400);
+    const ok = await account(hub.port, mine, { current: "correct horse battery", user: "owner", password: "brand-new-pass" });
+    assert.strictEqual(ok.status, 200, ok.body);
+    assert.deepStrictEqual(JSON.parse(ok.body), { ok: true, user: "owner" });
+    const fresh = cookieFrom(ok);
+    assert.strictEqual((await whoami(hub.port, fresh)).status, 200, "this browser stays logged in");
+    assert.strictEqual((await whoami(hub.port, other)).status, 401, "other sessions end");
+    assert.strictEqual((await whoami(hub.port, mine)).status, 401, "the old cookie ends too");
+    assert.strictEqual((await login(hub.port, { user: "owner", pass: "brand-new-pass" })).status, 302);
+    const saved = JSON.parse(fs.readFileSync(path.join(hub.dataDir, "admin.json"), "utf8"));
+    assert.strictEqual(saved.gen, 1);
+    assert.strictEqual(await verifyPassword("brand-new-pass", saved.hash), true);
+    assert.ok(!hub.logs().includes("brand-new-pass") && !hub.logs().includes("correct horse battery"));
+    assert.match(hub.logs(), /auth\.account_changed/);
+    assert.match(hub.logs(), /auth\.account_denied/);
+  } finally { await hub.stop(); }
+});
+
+test("renaming alone keeps the password", async () => {
+  const hub = await startHub();
+  try {
+    const c = cookieFrom(await login(hub.port));
+    assert.strictEqual((await account(hub.port, c, { current: "correct horse battery", user: "renamed" })).status, 200);
+    assert.strictEqual((await login(hub.port, { user: "renamed", pass: "correct horse battery" })).status, 302);
+  } finally { await hub.stop(); }
+});
+
+test("an old sha256 login must pick a new password to move to admin.json", async () => {
+  const legacy = require("node:crypto").createHash("sha256").update("legacy-pass-1").digest("hex");
+  const hub = await startHub({ AUTH_PASS: "", AUTH_PASS_HASH: legacy });
+  try {
+    const c = cookieFrom(await login(hub.port, { pass: "legacy-pass-1" }));
+    const r = await account(hub.port, c, { current: "legacy-pass-1", user: "admin2" });
+    assert.strictEqual(r.status, 400);
+    assert.match(JSON.parse(r.body).error, /new password/);
+  } finally { await hub.stop(); }
+});
