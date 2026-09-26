@@ -117,3 +117,27 @@ test("import-docker refuses a directory that is not a Docker install", () => {
   assert.notStrictEqual(r.status, 0);
   assert.match(r.stderr, /not a servitals Docker install/);
 });
+
+test("servitals-ctl passwd writes admin.json and ends sessions", async () => {
+  const state = tmp();
+  fs.writeFileSync(path.join(state, "initial-password"), "old\n");
+  const first = spawnSync("bash", [path.join(BIN, "servitals-ctl"), "passwd", "--user", "owner"],
+    { env: { PATH: process.env.PATH, STATE_DIR: state }, input: "first-pass-1\n", encoding: "utf8" });
+  assert.strictEqual(first.status, 0, first.stderr);
+  const a = JSON.parse(fs.readFileSync(path.join(state, "admin.json"), "utf8"));
+  assert.strictEqual(a.user, "owner");
+  assert.strictEqual(a.gen, 1);
+  assert.strictEqual(await verifyPassword("first-pass-1", a.hash), true);
+  assert.strictEqual(fs.statSync(path.join(state, "admin.json")).mode & 0o777, 0o600);
+  assert.ok(!fs.existsSync(path.join(state, "initial-password")), "the first password is gone");
+  const second = spawnSync("bash", [path.join(BIN, "servitals-ctl"), "passwd"],
+    { env: { PATH: process.env.PATH, STATE_DIR: state }, input: "second-pass-2\n", encoding: "utf8" });
+  assert.strictEqual(second.status, 0, second.stderr);
+  const b = JSON.parse(fs.readFileSync(path.join(state, "admin.json"), "utf8"));
+  assert.deepStrictEqual([b.user, b.gen], ["owner", 2], "keeps the name, raises the generation");
+  for (const [args, input] of [[["passwd", "--user", "bad name"], "long-enough-1\n"], [["passwd"], "short\n"]]) {
+    const r = spawnSync("bash", [path.join(BIN, "servitals-ctl"), ...args],
+      { env: { PATH: process.env.PATH, STATE_DIR: state }, input, encoding: "utf8" });
+    assert.notStrictEqual(r.status, 0, args.join(" "));
+  }
+});

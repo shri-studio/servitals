@@ -8,6 +8,7 @@
 #   servitals-ctl docker enable        let the hub control containers (root-equivalent)
 #   servitals-ctl docker disable       take that access away again
 #   servitals-ctl import-docker <dir>  copy settings, login and disks from a Docker install
+#   servitals-ctl passwd [--user NAME] set the admin password (and name); ends every session
 # State: STATE_DIR, else DATA_DIR, else ./data of a Docker checkout, else /var/lib/servitals.
 set -euo pipefail
 
@@ -184,12 +185,47 @@ cmd_import_docker() {
   echo "restart to apply: systemctl restart servitals servitals-agent"
 }
 
+cmd_passwd() {  # [--user NAME]
+  local user="" pw pw2 hash gen f="$DATA_DIR/admin.json" tmp
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --user) user=${2:-}; shift 2 ;;
+      *) die "usage: servitals-ctl passwd [--user NAME]" ;;
+    esac
+  done
+  [ -d "$DATA_DIR" ] || die "state directory $DATA_DIR does not exist"
+  if [ -z "$user" ]; then
+    user=$(jq -r '.user // empty' "$f" 2>/dev/null || true)
+    [ -n "$user" ] || user=$(env_get "$ETC_DIR/hub.env" AUTH_USER 2>/dev/null || true)
+    [ -n "$user" ] || user="admin"
+  fi
+  [[ $user =~ ^[A-Za-z0-9._-]{1,64}$ ]] || die "name: 1-64 letters, digits, dot, dash or underscore"
+  if [ -t 0 ]; then
+    read -rsp "new password for $user: " pw; echo >&2
+    read -rsp "again: " pw2; echo >&2
+    [ "$pw" = "$pw2" ] || die "passwords differ"
+  else
+    IFS= read -r pw || true
+  fi
+  [ "${#pw}" -ge 8 ] || die "use at least 8 characters"
+  hash=$(printf '%s' "$pw" | node "$ROOT/hub/lib/password.js")
+  gen=$(( $(jq -r '.gen // 0' "$f" 2>/dev/null || echo 0) + 1 ))
+  tmp=$(mktemp "$f.XXXXXX")
+  chmod 600 "$tmp"
+  jq -n --arg u "$user" --arg h "$hash" --argjson g "$gen" '{user: $u, hash: $h, gen: $g}' > "$tmp"
+  chown --reference="$DATA_DIR" "$tmp" 2>/dev/null || true
+  mv "$tmp" "$f"
+  rm -f "$DATA_DIR/initial-password"   # no longer the password
+  echo "login is now $user; every session has ended (no restart needed)"
+}
+
 case "${1:-}" in
+  passwd) shift; cmd_passwd "$@" ;;
   import-docker) shift; cmd_import_docker "$@" ;;
   docker)        shift; cmd_docker "$@" ;;
   bans)          shift; cmd_bans "$@" ;;
   unban)         shift; cmd_unban "$@" ;;
   whitelist)     shift; cmd_whitelist "$@" ;;
   hash-password) shift; cmd_hash_password "$@" ;;
-  *) sed -n '3,11p' "$0" | sed 's/^# \{0,1\}//'; exit 1 ;;
+  *) sed -n '3,12p' "$0" | sed 's/^# \{0,1\}//'; exit 1 ;;
 esac
