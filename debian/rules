@@ -1,0 +1,8 @@
+#!/usr/bin/make -f
+%:
+	dh $@
+
+# the hub starts from postinst, after the first-run setup has created a login
+override_dh_installsystemd:
+	dh_installsystemd -pservitals --no-start
+	dh_installsystemd -pservitals-agent

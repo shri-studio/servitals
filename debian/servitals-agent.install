@@ -1,0 +1,5 @@
+agent/collect.sh usr/lib/servitals-agent/
+agent/lib/*.sh usr/lib/servitals-agent/lib/
+VERSION usr/lib/servitals-agent/
+bin/servitals-agent usr/bin/
+packaging/etc/agent.env etc/servitals/

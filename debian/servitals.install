@@ -1,0 +1,8 @@
+hub/server.js usr/share/servitals/hub/
+hub/lib/*.js usr/share/servitals/hub/lib/
+VERSION usr/share/servitals/
+www/index.html usr/share/servitals/www/
+www/config.example.json usr/share/servitals/www/
+www/fonts/*.woff2 usr/share/servitals/www/fonts/
+bin/servitals-ctl usr/bin/
+packaging/etc/hub.env etc/servitals/

@@ -1,0 +1,31 @@
+Source: servitals
+Section: admin
+Priority: optional
+Maintainer: Rishabha Garg <rishabha.garg06@gmail.com>
+Build-Depends: debhelper-compat (= 13), dh-sequence-installsysusers
+Standards-Version: 4.6.2
+Homepage: https://github.com/shri-studio/servitals
+Vcs-Browser: https://github.com/shri-studio/servitals
+Vcs-Git: https://github.com/shri-studio/servitals.git
+
+Package: servitals
+Architecture: all
+Depends: ${misc:Depends}, nodejs (>= 18), jq, servitals-agent (= ${source:Version})
+Suggests: apprise
+Description: tiny terminal-styled dashboard for home servers
+ servitals shows the health of one or more Linux servers on a single page:
+ memory, CPU, temperatures, disks, network traffic and containers. It is a
+ small Node.js gateway with no dependencies outside Node.js itself, a login
+ with lockout, and container controls for the local host.
+ .
+ This package contains the hub (web gateway) and the servitals-ctl admin
+ tool. The local agent is paired automatically.
+
+Package: servitals-agent
+Architecture: all
+Depends: ${misc:Depends}, jq, curl
+Recommends: vnstat
+Description: metrics agent for the servitals dashboard
+ A small bash agent that samples memory, CPU, temperatures, disks, network
+ traffic and Docker containers, and pushes signed snapshots to a servitals
+ hub over HTTP(S). It only makes outbound connections.

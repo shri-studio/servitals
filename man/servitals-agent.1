@@ -1,0 +1,39 @@
+.\" SPDX-License-Identifier: AGPL-3.0-or-later
+.TH SERVITALS-AGENT 1 2026-09-26 servitals "User Commands"
+.SH NAME
+servitals-agent \- metrics agent for the servitals dashboard
+.SH SYNOPSIS
+.B servitals-agent
+.RB { run | test }
+.br
+.B servitals-agent docker
+.RB { enable | disable }
+.SH DESCRIPTION
+The agent samples memory, CPU, temperatures, disks, network traffic and
+Docker containers every INTERVAL seconds, and at once when the hub asks,
+and pushes signed snapshots to the hub. It only makes outbound
+connections and never runs anything the hub sends.
+.SH COMMANDS
+.TP
+.B run
+Run the agent (the systemd unit uses this).
+.TP
+.B test
+Sample once with the settings from /etc/servitals/agent.env and print the
+snapshot. Nothing is sent.
+.TP
+.BR "docker enable" | disable
+Add or remove the docker group for the agent, to list containers.
+.B The docker group can take over the host as root.
+.SH FILES
+.TP
+.I /etc/servitals/agent.env
+INTERVAL, DISKS (auto or a list of mountpoints), NET_IFACE, COLLECT_*
+switches, STAT_TIMEOUT, WAIT_SECONDS, HTTPS_PROXY, NO_PROXY, LOG_LEVEL.
+.TP
+.I /etc/servitals/agent-credentials.env
+HUB_URL, NODE_ID and NODE_SECRET (mode 0600). The servitals package writes
+it for the agent on the same host.
+.SH SEE ALSO
+.BR servitals (8),
+.BR servitals-ctl (1)

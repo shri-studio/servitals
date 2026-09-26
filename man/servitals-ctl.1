@@ -1,0 +1,44 @@
+.\" SPDX-License-Identifier: AGPL-3.0-or-later
+.TH SERVITALS-CTL 1 2026-09-26 servitals "User Commands"
+.SH NAME
+servitals-ctl \- administer the servitals hub
+.SH SYNOPSIS
+.B servitals-ctl
+.I command
+.RI [ arguments ]
+.SH COMMANDS
+.TP
+.BR passwd " [" \-\-user
+.IR NAME ]
+Set the admin password, and the name with
+.BR \-\-user .
+Reads the password twice from the terminal, or one line from standard
+input. Every session ends; no restart is needed.
+.TP
+.B bans
+List blocked addresses and the whitelist.
+.TP
+.BI unban " ip"
+Remove a block.
+.TP
+.BI whitelist " ip|cidr"
+Never block this address again; also unbans it.
+.TP
+.B hash-password
+Print a password hash for AUTH_PASS_HASH (Docker installs).
+.TP
+.BR "docker enable" | disable
+Add or remove the docker group for the hub, for the container buttons.
+.B The docker group can take over the host as root.
+.TP
+.BI import-docker " dir"
+Copy the login, dashboard settings, whitelist, bans and disk list from a
+Docker install in
+.IR dir .
+.SH ENVIRONMENT
+.TP
+.B STATE_DIR
+The hub's state directory (default /var/lib/servitals).
+.SH SEE ALSO
+.BR servitals (8),
+.BR servitals-agent (1)

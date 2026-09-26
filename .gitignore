@@ -11,3 +11,4 @@ docker-compose.yml
 .codegraph/
 .superpowers/
 .claude/worktrees/
+build/

@@ -1,0 +1,2 @@
+# Distributed through a Launchpad PPA; not in Debian yet (ITP after 1.0, spec section 16).
+servitals-agent: initial-upload-closes-no-bugs [usr/share/doc/servitals-agent/changelog.Debian.gz:1]

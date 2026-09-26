@@ -1,0 +1,48 @@
+.\" SPDX-License-Identifier: AGPL-3.0-or-later
+.TH SERVITALS 8 2026-09-26 servitals "System Administration"
+.SH NAME
+servitals \- tiny terminal-styled dashboard hub for home servers
+.SH SYNOPSIS
+.B systemctl
+.RB { start | stop | restart | status }
+.B servitals
+.SH DESCRIPTION
+The
+.B servitals
+service is a small Node.js gateway. It serves the dashboard page behind a
+login with per-address lockout, receives signed snapshots from
+.BR servitals-agent (1)
+over
+.IR /api/v1/agent/push ,
+and wakes agents for fresh data when someone is looking.
+.PP
+It runs as the system user
+.B _servitals
+under a hardened systemd unit and listens on port 20002 by default.
+.SH FILES
+.TP
+.I /etc/servitals/hub.env
+Settings: PORT, BIND_ADDR, TRUSTED_PROXIES, PROXY_HEADER, PUBLIC_URL,
+MAX_FAILS, BAN_HOURS, SESSION_HOURS, CTL_LAN_ONLY, LOG_LEVEL, LOG_FORMAT.
+Restart the service after editing.
+.TP
+.I /var/lib/servitals/admin.json
+The admin login (name, password hash). Change it with
+.B servitals-ctl passwd
+or in the dashboard settings.
+.TP
+.I /var/lib/servitals/initial-password
+The random first password, until the login is changed.
+.TP
+.I /var/lib/servitals/
+Other state: sessions key, bans, whitelist, nodes, snapshots, audit.log.
+.SH SECURITY
+Proxy headers are trusted only from TRUSTED_PROXIES (loopback by default).
+Container controls need the docker group, which can take over the host as
+root; they stay off until
+.B servitals-ctl docker enable
+and are limited to whitelisted (LAN) clients while CTL_LAN_ONLY=1.
+.SH SEE ALSO
+.BR servitals-ctl (1),
+.BR servitals-agent (1),
+.BR journalctl (1)

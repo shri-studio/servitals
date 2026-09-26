@@ -61,3 +61,9 @@ test("dashboard has the branding footer and the update notice", () => {
   // .update-note sets display:flex, which would override the hidden attribute
   assert.match(html, /\.update-note\[hidden\]\s*\{\s*display:\s*none/, "hidden update note must stay hidden");
 });
+
+test("the Debian version follows VERSION", () => {
+  const upstream = fs.readFileSync(path.join(ROOT, "VERSION"), "utf8").trim().replace(/-/g, "~");
+  const first = fs.readFileSync(path.join(ROOT, "debian", "changelog"), "utf8").split("\n")[0];
+  assert.match(first, new RegExp(`^servitals \\(${upstream.replace(/[.~]/g, "\\$&")}-\\d+\\) [a-z]+; urgency=`));
+});

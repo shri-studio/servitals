@@ -1,0 +1,7 @@
+# The dashboard page and its WOFF2 fonts are served by the hub to browsers;
+# they are web assets, not documentation or system fonts (spec section 13.1).
+servitals: package-contains-documentation-outside-usr-share-doc [usr/share/servitals/www/index.html]
+servitals: font-in-non-font-package [usr/share/servitals/www/fonts/*]
+servitals: font-outside-font-dir [usr/share/servitals/www/fonts/*]
+# Distributed through a Launchpad PPA; not in Debian yet (ITP after 1.0, spec section 16).
+servitals: initial-upload-closes-no-bugs [usr/share/doc/servitals/changelog.Debian.gz:1]

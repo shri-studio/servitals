@@ -62,3 +62,8 @@ test("default env files", () => {
   assert.match(read("packaging/etc/hub.env"), /^# AUTH_PASS_HASH=/m);
   assert.match(read("packaging/etc/agent.env"), /^INTERVAL=60$/m);
 });
+
+test("each package has a man page for each command", () => {
+  assert.deepStrictEqual(read("debian/servitals.manpages").trim().split("\n"), ["man/servitals.8", "man/servitals-ctl.1"]);
+  assert.deepStrictEqual(read("debian/servitals-agent.manpages").trim().split("\n"), ["man/servitals-agent.1"]);
+});
