@@ -105,9 +105,30 @@ from any other address are ignored, so nobody can fake a LAN address. If the
 proxy runs in another container, set `TRUSTED_PROXIES` to that container's
 address.
 
+## Install on Ubuntu (24.04 and 26.04)
+
+```bash
+sudo add-apt-repository ppa:prabzo/servitals
+sudo apt install servitals
+sudo cat /var/lib/servitals/initial-password
+```
+
+Open `http://<host>:20002`, log in as `admin` with that password, then
+change the name and password under settings → login (or
+`sudo servitals-ctl passwd --user <name>`). The package pairs the local
+agent and starts both services. `man servitals`, `man servitals-ctl` and
+`man servitals-agent` describe the rest; settings live in
+`/etc/servitals/hub.env` and `/etc/servitals/agent.env`.
+
+Coming from `packaging/install-local.sh`: run
+`sudo packaging/install-local.sh --uninstall`, then install the package
+with `sudo apt install -o Dpkg::Options::=--force-confold servitals` to
+keep your `hub.env`. Login, node and agent credentials are kept. Turn
+Docker access back on afterwards (`sudo servitals-agent docker enable`).
+
 ## Native install (systemd, no Docker)
 
-Until the Ubuntu packages exist, install from a checkout. The layout,
+To run a checkout without the packages (development), install it in the same layout: The layout,
 users and units are the ones the packages will use.
 
 ```bash

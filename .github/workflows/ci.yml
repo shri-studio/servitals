@@ -17,7 +17,7 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y shellcheck
       - name: shellcheck
         run: |
-          shellcheck -S warning agent/collect.sh agent/lib/*.sh bin/servitals-agent packaging/install-local.sh
+          shellcheck -S warning agent/collect.sh agent/lib/*.sh bin/servitals-agent packaging/install-local.sh packaging/*.sh packaging/docker/*.sh test/deb-migrate.sh debian/servitals.postinst debian/servitals.postrm debian/servitals-agent.postrm debian/tests/smoke debian/tests/purge
           shellcheck -S error bin/servitals-ctl bin/bans bin/unban bin/whitelist test/budget.sh test/compose-smoke.sh
       - name: node --check
         run: for f in hub/server.js hub/lib/*.js test/*.js test/helpers/*.js; do node --check "$f"; done
@@ -58,3 +58,16 @@ jobs:
         run: bash test/compose-smoke.sh
       - name: Native installer smoke test (Ubuntu container)
         run: bash test/install-smoke.sh
+
+  deb:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Build and lint the packages (noble, resolute)
+        run: packaging/build-deb.sh
+      - name: autopkgtest on booted testbeds
+        run: packaging/autopkgtest.sh
+      - name: Move from install-local.sh to the packages
+        run: bash test/deb-migrate.sh resolute
+      - name: PPA source packages (dry run)
+        run: packaging/ppa-upload.sh ppa:prabzo/servitals

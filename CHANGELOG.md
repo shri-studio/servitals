@@ -7,6 +7,11 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- Ubuntu packages `servitals` and `servitals-agent` (noble, resolute) with a
+  random first password in `/var/lib/servitals/initial-password`, the local
+  agent paired on install, man pages, and autopkgtests.
+- Change the admin name and password under settings → login or with
+  `servitals-ctl passwd [--user NAME]`; both end every other session.
 - Native install without Docker: hardened systemd units, `_servitals` and
   `_servitals-agent` system users, `/etc/servitals/*.env`, and
   `packaging/install-local.sh`.
@@ -30,6 +35,10 @@ All notable changes to this project are documented here. The format follows
 - License: AGPL-3.0-or-later.
 
 ### Changed
+- The admin login can live in `STATE_DIR/admin.json`, which wins over
+  `AUTH_USER`/`AUTH_PASS_HASH`.
+- The systemd units are hardened further: `systemd-analyze security` rates
+  them 1.4 (hub) and 1.5 (agent), down from 7.8 and 7.9.
 - State lives in `STATE_DIR` (`/var/lib/servitals` natively, `./data` in
   Docker); `config.json` moves there from `www/`.
 - The agent lists containers through the Docker API with `curl` and reads
