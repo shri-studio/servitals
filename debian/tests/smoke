@@ -1,0 +1,40 @@
+#!/bin/sh
+# Installed packages on a booted system: the hub and the local agent run under
+# their hardened units, the first password works, passwd ends old sessions,
+# and reconfiguring keeps the login and the node.
+set -eu
+B=http://127.0.0.1:20002
+fail() { echo "FAIL: $*"; journalctl -u servitals -u servitals-agent --no-pager | tail -40; exit 1; }
+wait_for() { i=0; while ! sh -c "$1"; do i=$((i + 1)); [ "$i" -lt 60 ] || return 1; sleep 1; done; }
+login() {
+	curl -s -o /dev/null -w '%{http_code}' -c /tmp/jar -H "Origin: $B" \
+		--data-urlencode "username=$1" --data-urlencode "password=$2" "$B/__auth/login"
+}
+
+wait_for "curl -fsS $B/__auth/health >/dev/null 2>&1" || fail "hub not healthy"
+wait_for "systemctl is-active --quiet servitals-agent" || fail "agent not running"
+[ "$(stat -c '%a %U' /var/lib/servitals/initial-password)" = "600 _servitals" ] || fail "initial-password mode or owner"
+[ "$(stat -c '%a %U' /etc/servitals/agent-credentials.env)" = "600 _servitals-agent" ] || fail "agent credentials mode or owner"
+pw=$(cat /var/lib/servitals/initial-password)
+[ "$(login admin "$pw")" = 302 ] || fail "first login with the initial password"
+wait_for "curl -fsS -b /tmp/jar $B/data.json 2>/dev/null | jq -e .host.name >/dev/null" || fail "no snapshot from the local agent"
+
+printf 'another-pass-1\n' | servitals-ctl passwd --user owner
+[ "$(curl -s -o /dev/null -w '%{http_code}' -b /tmp/jar "$B/__ctl/whoami")" = 401 ] || fail "old session survived passwd"
+[ "$(login owner another-pass-1)" = 302 ] || fail "login after passwd"
+[ ! -e /var/lib/servitals/initial-password ] || fail "initial-password kept after passwd"
+
+node_id=$(sed -n 's/^NODE_ID=//p' /etc/servitals/agent-credentials.env)
+dpkg-reconfigure servitals >/dev/null
+wait_for "curl -fsS $B/__auth/health >/dev/null 2>&1" || fail "hub not back after reconfigure"
+[ "$(login owner another-pass-1)" = 302 ] || fail "login lost on reconfigure"
+[ "$(sed -n 's/^NODE_ID=//p' /etc/servitals/agent-credentials.env)" = "$node_id" ] || fail "node changed on reconfigure"
+
+# the hardening holds: systemd rates both units 2.0 or lower ("OK")
+for u in servitals servitals-agent; do
+	line=$(systemd-analyze security "$u.service" --no-pager | tail -n 1)
+	echo "$line"
+	score=$(echo "$line" | awk '{ for (i = 1; i <= NF; i++) if ($i ~ /^[0-9]+\.[0-9]+$/) print $i }')
+	awk -v s="$score" 'BEGIN { exit !(s != "" && s + 0 <= 2.0) }' || fail "$u exposure $score is above 2.0"
+done
+echo "smoke: ok"

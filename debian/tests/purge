@@ -1,0 +1,16 @@
+#!/bin/sh
+# Purging removes each package's state. The agent's credentials go with the
+# hub only when they point at this host's hub; the agent's own purge always
+# removes them.
+set -eu
+fail() { echo "FAIL: $*"; exit 1; }
+f=/etc/servitals/agent-credentials.env
+sed -i 's|^HUB_URL=.*|HUB_URL=https://hub.example.org|' "$f"
+apt-get purge -y servitals >/dev/null
+[ ! -e /var/lib/servitals ] || fail "/var/lib/servitals kept"
+[ -e "$f" ] || fail "credentials for another hub removed with the local hub"
+apt-get purge -y servitals-agent >/dev/null
+[ ! -e /var/lib/servitals-agent ] || fail "/var/lib/servitals-agent kept"
+[ ! -e "$f" ] || fail "agent credentials kept"
+[ ! -e /etc/servitals ] || fail "/etc/servitals kept"
+echo "purge: ok"

@@ -1,0 +1,10 @@
+#!/bin/sh
+set -e
+
+if [ "$1" = purge ]; then
+	rm -rf /var/lib/servitals-agent /etc/systemd/system/servitals-agent.service.d
+	rm -f /etc/servitals/agent-credentials.env
+	rmdir /etc/servitals 2>/dev/null || true
+fi
+
+#DEBHELPER#

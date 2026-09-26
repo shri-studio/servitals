@@ -1,0 +1,14 @@
+#!/bin/sh
+set -e
+
+if [ "$1" = purge ]; then
+	rm -rf /var/lib/servitals /etc/systemd/system/servitals.service.d
+	# the local agent's credentials point at this hub: remove them with it
+	f=/etc/servitals/agent-credentials.env
+	if [ -f "$f" ] && grep -Eq '^HUB_URL=https?://(127\.0\.0\.1|localhost|\[::1\])(:[0-9]+)?/?$' "$f"; then
+		rm -f "$f"
+	fi
+	rmdir /etc/servitals 2>/dev/null || true
+fi
+
+#DEBHELPER#

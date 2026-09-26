@@ -1,0 +1,23 @@
+#!/bin/sh
+set -e
+
+#DEBHELPER#
+
+if [ "$1" = configure ]; then
+	# first run: a random admin password and the local node (both idempotent)
+	install -d -m 0750 -o _servitals -g _servitals /var/lib/servitals
+	node /usr/share/servitals/hub/lib/bootstrap.js /var/lib/servitals /etc/servitals
+	for f in admin.json initial-password nodes.json local-agent.env; do
+		if [ -e "/var/lib/servitals/$f" ]; then chown _servitals:_servitals "/var/lib/servitals/$f"; fi
+	done
+	# pair the local agent, unless it already reports to some hub
+	if [ ! -e /etc/servitals/agent-credentials.env ]; then
+		install -m 0600 -o _servitals-agent -g _servitals-agent \
+			/var/lib/servitals/local-agent.env /etc/servitals/agent-credentials.env
+	fi
+	if [ -d /run/systemd/system ]; then
+		deb-systemd-invoke restart servitals.service >/dev/null || true
+		deb-systemd-invoke try-restart servitals-agent.service >/dev/null || true
+		deb-systemd-invoke start servitals-agent.service >/dev/null || true
+	fi
+fi

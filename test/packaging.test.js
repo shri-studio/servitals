@@ -67,3 +67,11 @@ test("each package has a man page for each command", () => {
   assert.deepStrictEqual(read("debian/servitals.manpages").trim().split("\n"), ["man/servitals.8", "man/servitals-ctl.1"]);
   assert.deepStrictEqual(read("debian/servitals-agent.manpages").trim().split("\n"), ["man/servitals-agent.1"]);
 });
+
+test("maintainer scripts keep the debhelper token and never chown recursively", () => {
+  for (const f of ["debian/servitals.postinst", "debian/servitals.postrm", "debian/servitals-agent.postrm"]) {
+    const s = read(f);
+    assert.match(s, /^#DEBHELPER#$/m, f);
+    assert.doesNotMatch(s, /chown\s+-R/, f);
+  }
+});

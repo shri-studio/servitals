@@ -1,0 +1,7 @@
+Tests: smoke
+Depends: servitals, curl, jq
+Restrictions: needs-root, isolation-container, allow-stderr
+
+Tests: purge
+Depends: servitals, curl
+Restrictions: needs-root, isolation-container, breaks-testbed, allow-stderr
