@@ -20,6 +20,24 @@ load_credentials() {  # $1 = file with HUB_URL, NODE_ID, NODE_SECRET; parsed, ne
   [[ $HUB_URL =~ ^https?://[^[:space:]]+$ && $NODE_ID =~ ^[a-z2-7]{12}$ && $NODE_SECRET =~ ^[0-9a-f]{64}$ ]]
 }
 
+# extra request headers, e.g. a Cloudflare Access service token:
+#   HUB_HEADERS="CF-Access-Client-Id: <id>; CF-Access-Client-Secret: <secret>"
+# Values are sent, never logged. HUB_CA_FILE trusts a private CA for an HTTPS hub.
+hub_args() {
+  HUB_ARGS=()
+  local part name value
+  if [ -n "${HUB_HEADERS:-}" ]; then
+    IFS=';' read -ra parts <<< "$HUB_HEADERS"
+    for part in "${parts[@]}"; do
+      name=$(printf '%s' "${part%%:*}" | xargs)
+      value=$(printf '%s' "${part#*:}" | sed 's/^ *//; s/ *$//')
+      [[ $name =~ ^[A-Za-z0-9-]{1,64}$ && $part == *:* ]] || { agent_log error agent.bad_hub_headers; continue; }
+      HUB_ARGS+=(-H "$name: $value")
+    done
+  fi
+  if [ -n "${HUB_CA_FILE:-}" ]; then HUB_ARGS+=(--cacert "$HUB_CA_FILE"); fi
+}
+
 now_ms() { local t; t=$(date +%s%N); echo "${t:0:13}"; }
 
 api_error() { jq -r '.error // empty' "$1" 2>/dev/null | head -c 40; }
@@ -36,7 +54,7 @@ api_call() {
   API_STATUS=$(curl -sS -o "$out" -D "$out.h" -w '%{http_code}' -X "$method" --max-time 20 \
     -H "X-Servitals-Proto: 1" -H "X-Servitals-Agent: $AGENT_NAME" -H "X-Servitals-Node: $NODE_ID" \
     -H "X-Servitals-Ts: $ts" -H "X-Servitals-Sig: $sig" \
-    -H "Content-Type: application/json" -H "Expect:" \
+    -H "Content-Type: application/json" -H "Expect:" "${HUB_ARGS[@]}" \
     --data-binary @"$body" "$@" "$HUB_URL$path" 2>/dev/null) || API_STATUS=000
   case "$API_STATUS" in 2??) ;; *) return 1 ;; esac
   got=$(awk 'tolower($1) == "x-servitals-sig:" { v = $2 } END { print v }' "$out.h" | tr -d '\r')
@@ -48,18 +66,26 @@ api_call() {
 }
 
 push() {  # $1 = snapshot file; 0 when the hub stored it
-  local out="$STATE/push.out"
-  api_call POST /api/v1/agent/push "$1" "$out" && return 0
-  if [ "$API_STATUS" = 401 ] && [ "$(api_error "$out")" = replay ]; then
-    api_call POST /api/v1/agent/push "$1" "$out" && return 0   # a fresh timestamp, once
+  local out="$STATE/push.out" err small
+  api_call POST /api/v1/agent/push "$1" "$out"
+  err=$(api_error "$out")
+  if [ "$API_STATUS" = 401 ] && [ "$err" = replay ]; then
+    api_call POST /api/v1/agent/push "$1" "$out"   # a fresh timestamp, once
   elif [ "$API_STATUS" = 429 ]; then
     # inside the hub's 5 s push limit (a restart, a wake right after a push): wait it out once
     local wait_s
     wait_s=$(awk 'tolower($1) == "retry-after:" { v = $2 + 0 } END { print (v >= 1 && v <= 5) ? v : 5 }' "$out.h" 2>/dev/null)
     sleep "${wait_s:-5}"
-    api_call POST /api/v1/agent/push "$1" "$out" && return 0
+    api_call POST /api/v1/agent/push "$1" "$out"
+  elif [ "$API_STATUS" = 413 ]; then
+    # too large: send it again without the optional lists (protocol 5.5)
+    small="$STATE/snapshot.small.json"
+    jq -c 'del(.docker, .processes)' "$1" > "$small" 2>/dev/null && api_call POST /api/v1/agent/push "$small" "$out"
   fi
-  agent_log warn agent.push_failed status="$API_STATUS" error="$(api_error "$out")"
+  err=$(api_error "$out")
+  printf '%s %s %s\n' "$(date +%s)" "$API_STATUS" "${err:--}" > "$STATE/last-push"
+  case "$API_STATUS" in 2??) return 0 ;; esac
+  agent_log warn agent.push_failed status="$API_STATUS" error="$err"
   return 1
 }
 
@@ -75,6 +101,11 @@ wait_loop() {  # background: touch $TRIGGER whenever the hub asks for a sample
       if [ "$API_STATUS" = 200 ] && grep -q '"sample":true' "$out"; then touch "$TRIGGER"; fi
     else
       agent_log warn agent.wait_failed status="$API_STATUS" error="$(api_error "$out")" retry_in="$backoff"
+      # a revoked or unknown node, or a protocol this hub does not speak: stop
+      # asking until someone changes the credentials (protocol 5.5)
+      case "$API_STATUS:$(api_error "$out")" in
+        401:unknown_node|426:*) sleep 600; continue ;;
+      esac
       sleep "$backoff"
       backoff=$((backoff * 2))
       [ "$backoff" -gt "$INTERVAL" ] && backoff=$INTERVAL

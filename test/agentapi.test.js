@@ -31,7 +31,7 @@ function signed(hub, c, { method = "POST", path: p = PUSH, body = "", ts = nextT
     },
   }).then((r) => ({ ...r, ts }));
 }
-const snap = (extra = {}) => JSON.stringify({ ts: Math.floor(Date.now() / 1000), interval: 60, host: { name: "t" }, ...extra });
+const snap = (extra = {}) => JSON.stringify({ schema: 1, ts: Date.now(), interval: 60, host: { name: "t", os: "linux" }, ...extra });
 const err = (r) => JSON.parse(r.body).error;
 const replyOk = (r, c) => r.headers["x-servitals-sig"] === signReply(c.secret, r.ts, r.body);
 
@@ -71,8 +71,11 @@ test("refusals follow the protocol", async () => {
     assert.deepStrictEqual([badSig.status, err(badSig)], [401, "bad_signature"]);
     assert.strictEqual((await signed(hub, c, { body: snap(), path: PUSH + "?x=1" })).status, 400);
     assert.strictEqual((await signed(hub, c, { method: "GET", body: "" })).status, 405);
-    for (const [body, where] of [["[1]", "$"], ["nope", "$"], ['{"host":{}}', "$.ts"],
-                                 ['{"ts":1,"host":"x"}', "$.host"], ['{"ts":1,"host":{},"interval":1}', "$.interval"]]) {
+    for (const [body, where] of [["[1]", "$"], ["nope", "$"],
+                                 ['{"schema":2,"ts":1,"interval":60,"host":{"name":"x"}}', "$.schema"],
+                                 ['{"schema":1,"interval":60,"host":{"name":"x"}}', "$.ts"],
+                                 ['{"schema":1,"ts":1,"interval":60,"host":"x"}', "$.host"],
+                                 ['{"schema":1,"ts":1,"interval":1,"host":{"name":"x"}}', "$.interval"]]) {
       const bad = await signed(hub, c, { body });
       assert.deepStrictEqual([bad.status, err(bad), JSON.parse(bad.body).path], [422, "invalid_snapshot", where], body);
     }
@@ -164,4 +167,33 @@ test("a second refresh within 5 s of a wake does not wake the agent again", asyn
     assert.strictEqual((await second).status, 204, "left waiting, not woken twice");
     assert.ok(Date.now() - started >= 4500);
   });
+});
+
+test("an address that keeps failing authentication is slowed down", async () => {
+  await withHub(async (hub, c) => {
+    for (let i = 0; i < 30; i++) {
+      assert.strictEqual((await signed(hub, c, { body: snap(), secret: "ab".repeat(32) })).status, 401);
+    }
+    const blocked = await signed(hub, c, { body: snap() });
+    assert.strictEqual(blocked.status, 429, "even a good request waits out the minute");
+    assert.ok(Number(blocked.headers["retry-after"]) > 0);
+  });
+});
+
+test("a captured push cannot be replayed after a hub restart", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sv-api-"));
+  const a = await startHub({}, { dataDir: dir });
+  const c = creds(a);
+  const body = snap();
+  let first;
+  try {
+    first = await signed(a, c, { body });
+    assert.strictEqual(first.status, 200);
+  } finally { await a.stop(); }
+  const b = await startHub({}, { dataDir: dir });
+  try {
+    const again = await signed(b, c, { body, ts: first.ts });
+    assert.deepStrictEqual([again.status, JSON.parse(again.body).error], [401, "replay"]);
+    assert.strictEqual(fs.statSync(path.join(dir, "replay.json")).mode & 0o777, 0o600);
+  } finally { await b.stop(); fs.rmSync(dir, { recursive: true, force: true }); }
 });

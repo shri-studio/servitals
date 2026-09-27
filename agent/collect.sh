@@ -19,16 +19,14 @@ DISKS="${DISKS:-auto}"   # "auto": every real filesystem; or a comma-separated l
 VNSTAT_DB="$HOST/var/lib/vnstat"
 NCPU=$(grep -c '^processor' "$HOST/proc/cpuinfo" 2>/dev/null || echo 1)
 [ "${NCPU:-0}" -gt 0 ] 2>/dev/null || NCPU=1
-# delta counters, trend, wake trigger; systemd's StateDirectory= sets STATE_DIRECTORY
+# cpu delta counters, wake trigger, last push; systemd's StateDirectory= sets STATE_DIRECTORY
 STATE="${STATE_DIR:-${STATE_DIRECTORY:-/var/lib/servitals-agent}}"
 mkdir -p "$STATE"
 CREDENTIALS_FILE="${CREDENTIALS_FILE:-/etc/servitals/agent-credentials.env}"
 AGENT_VERSION=$(cat "$HERE/VERSION" "$HERE/../VERSION" 2>/dev/null | head -n 1)
 AGENT_NAME="bash/${AGENT_VERSION:-unknown}"
 SNAP="${OUT_FILE:-$STATE/snapshot.json}"
-TREND_FILE="$STATE/trend"   # sparkline history (last 60 samples)
 TRIGGER="$STATE/wake"       # the wait loop touches it when the hub asks for a sample
-touch "$TREND_FILE" 2>/dev/null || true
 # the hub host's own agent must never go through a proxy
 export NO_PROXY="${NO_PROXY:+$NO_PROXY,}localhost,127.0.0.1,::1"
 export no_proxy="$NO_PROXY"
@@ -52,16 +50,14 @@ collect() {  # $1 = destination file
     net=$(net_json "$IFACE")
   fi
   if on "${COLLECT_DOCKER:-1}"; then docker=$(docker_json); fi
-  trend_row "$cpu" "$mem" "$temp"
 
   jq -cn \
     --argjson host "$host" --argjson mem "$mem" --argjson cpu "$cpu" \
     --argjson temp "$temp" --argjson disks "$disks" --argjson net "${net:-null}" \
-    --argjson docker "$docker" --rawfile trend "$TREND_FILE" \
-    --argjson interval "$INTERVAL" \
-    '{ts:(now|floor), interval:$interval, host:$host, mem:$mem, cpu:$cpu, temp:$temp,
-      disks:$disks, net:$net, docker:$docker,
-      trend: ($trend / "\n" | map(select(length > 0) | fromjson?))}' \
+    --argjson docker "$docker" --argjson interval "$INTERVAL" --arg agent "$AGENT_NAME" \
+    '{schema: 1, ts: (now * 1000 | floor), interval: $interval, agent: $agent,
+      host: ($host + {os: "linux"}), mem: $mem, cpu: $cpu, temp: $temp,
+      disks: $disks, net: $net, docker: $docker}' \
     > "$1.tmp" 2>/dev/null && mv "$1.tmp" "$1"
 }
 
@@ -81,6 +77,7 @@ if [ -z "${OUT_FILE:-}" ]; then
     sleep 2   # Docker: the gateway writes the file on its first start
   done
   hmac_init "$NODE_SECRET"
+  hub_args
   agent_log info agent.hub url="$HUB_URL" node="$NODE_ID"
 fi
 IFACE=$(pick_iface)

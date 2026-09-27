@@ -27,6 +27,8 @@ const { writeFileAtomic } = require("./lib/fsutil");
 const os = require("os");
 const { createNodeStore, localAgentEnv } = require("./lib/nodes");
 const { createAgentApi } = require("./lib/agentapi");
+const { view: snapshotView } = require("./lib/snapshot");
+const fleet = require("./lib/fleet");
 const { createAdminStore, USER_RE } = require("./lib/admin");
 
 const UP        = process.env.UPSTREAM     || "";   // unset: serve WWW_DIR directly (native install)
@@ -141,17 +143,37 @@ writeFileAtomic(path.join(DATA, "local-agent.env"),
 /* ---------- agent API and the latest snapshot per node ---------- */
 const SNAP_DIR = path.join(DATA, "snapshots");
 fs.mkdirSync(SNAP_DIR, { recursive: true });
-const latest = new Map();   // node id -> raw snapshot bytes
-try { latest.set(localNode.id, fs.readFileSync(path.join(SNAP_DIR, localNode.id + ".json"))); }
-catch (_) { /* no snapshot yet */ }
+// node id -> { snap (validated, as pushed), view (what the page reads), at (hub ms) }
+const latest = new Map();
+for (const n of nodes.list()) {
+  try {
+    const rec = JSON.parse(fs.readFileSync(path.join(SNAP_DIR, n.id + ".json"), "utf8"));
+    if (rec && rec.snap && rec.view && rec.at) latest.set(n.id, rec);   // older formats: wait for a push
+  } catch (_) { /* no snapshot yet */ }
+}
 const agentApi = createAgentApi({
   nodes, log,
-  onSnapshot(id, snap, raw) {
-    latest.set(id, raw);
-    try { writeFileAtomic(path.join(SNAP_DIR, id + ".json"), raw); }
+  replayFile: path.join(DATA, "replay.json"),
+  clientIp: (req) => resolveClient(req).ip,
+  onSnapshot(id, snap) {
+    const prev = latest.get(id);
+    const rec = { snap, view: snapshotView(snap, prev && prev.snap, prev ? prev.view.trend : []), at: Date.now() };
+    latest.set(id, rec);
+    try { writeFileAtomic(path.join(SNAP_DIR, id + ".json"), JSON.stringify(rec)); }
     catch (e) { log.warn("api.snapshot_write_failed", { node: id, error: e.code || String(e) }); }
   },
 });
+const nodeStatus = (id) => {
+  const rec = latest.get(id);
+  return fleet.status(rec && rec.at, rec && rec.snap.interval);
+};
+// wake one node unless it pushed or was woken in the last 5 s
+function wakeNode(id) {
+  const now = Date.now();
+  const fresh = now - agentApi.lastPushAt(id) < 5000;
+  const pending = now - agentApi.lastWakeAt(id) < 5000;
+  return { fresh, woke: !fresh && !pending && agentApi.wake(id) };
+}
 
 const readJSON = (f) => { try { return JSON.parse(fs.readFileSync(f, "utf8")); } catch { return {}; } };
 const writeJSON = (f, o) => fs.writeFileSync(f, JSON.stringify(o, null, 2) + "\n");
@@ -450,9 +472,9 @@ async function handle(req, res) {
 
   // the local node's latest snapshot, where the page and old scripts expect it
   if (authed && req.method === "GET" && pathname === "/data.json") {
-    const snap = latest.get(nodes.localId());
-    res.writeHead(snap ? 200 : 503, { "content-type": "application/json", "cache-control": "no-store" });
-    return res.end(snap || '{"error":"no snapshot yet"}');
+    const rec = latest.get(nodes.localId());
+    res.writeHead(rec ? 200 : 503, { "content-type": "application/json", "cache-control": "no-store" });
+    return res.end(rec ? JSON.stringify(rec.view) : '{"error":"no snapshot yet"}');
   }
 
   // ---- control endpoints (require a session; restart also requires LAN) ----
@@ -462,13 +484,39 @@ async function handle(req, res) {
 
     // ask the local agent to sample now — harmless, any authed user. Within 5 s
     // of a push the data is fresh and a wake would only earn a 429.
-    if (req.method === "POST" && req.url === "/__ctl/refresh") {
-      const id = nodes.localId();
-      const fresh = !!id && Date.now() - agentApi.lastPushAt(id) < 5000;
-      // a wake in the last 5 s is still being answered (other tabs, a double click)
-      const pending = !!id && Date.now() - agentApi.lastWakeAt(id) < 5000;
-      const woke = !!id && !fresh && !pending && agentApi.wake(id);
-      return json(200, { ok: true, woke, fresh });
+    if (req.method === "POST" && pathname === "/__ctl/refresh") {
+      const which = new URL(req.url, "http://x").searchParams.get("node");
+      if (which === "all") {
+        let woke = 0;
+        for (const n of nodes.list()) if (wakeNode(n.id).woke) woke++;
+        return json(200, { ok: true, woke });
+      }
+      const id = which || nodes.localId();
+      if (!id || !nodes.get(id)) return json(404, { error: "no such node" });
+      const r = wakeNode(id);
+      return json(200, { ok: true, woke: r.woke, fresh: r.fresh });
+    }
+
+    // the fleet: every node with its status and the numbers a card shows
+    if (req.method === "GET" && pathname === "/__ctl/nodes") {
+      const list = nodes.list().map((n) => {
+        const rec = latest.get(n.id);
+        return { ...n, status: nodeStatus(n.id), lastSeen: rec ? rec.at : null,
+                 interval: rec ? rec.snap.interval : null, summary: rec ? fleet.summary(rec.view) : null };
+      }).sort((a, b) => (b.local - a.local) || a.name.localeCompare(b.name));
+      res.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" });
+      return res.end(JSON.stringify(list));
+    }
+
+    // one node's latest view
+    const nm = /^\/__ctl\/node\/([a-z2-7]{12})$/.exec(pathname);
+    if (req.method === "GET" && nm) {
+      const n = nodes.list().find((x) => x.id === nm[1]);
+      if (!n) return json(404, { error: "no such node" });
+      const rec = latest.get(n.id);
+      if (!rec) return json(503, { error: "no snapshot yet", node: { ...n, status: "waiting" } });
+      res.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" });
+      return res.end(JSON.stringify({ ...rec.view, node: { ...n, status: nodeStatus(n.id), lastSeen: rec.at } }));
     }
 
     // does this client get container controls?
@@ -525,8 +573,13 @@ async function handle(req, res) {
     }
 
     // container lifecycle — whitelisted (LAN) only by default
-    const m = req.url.match(/^\/__ctl\/container\/([^/]+)\/(restart|start|stop|logs)$/);
+    const m = pathname.match(/^\/__ctl\/container\/([^/]+)\/(restart|start|stop|logs)$/);
     if (m) {
+      // only the hub's own host: never a remote node, whatever the page sends (spec 6.4)
+      const target = new URL(req.url, "http://x").searchParams.get("node");
+      if (target && target !== nodes.localId()) {
+        return json(403, { error: "container controls work only on the hub's own host" });
+      }
       if (CTL_LAN_ONLY && !wl) return json(403, { error: "container controls are LAN-only" });
       const name = decodeURIComponent(m[1]), action = m[2];
       if (!SAFE_NAME.test(name)) return json(400, { error: "bad name" });

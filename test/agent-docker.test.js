@@ -35,7 +35,7 @@ async function fakeDocker(dir) {
   return { sock, close: () => new Promise((r) => srv.close(r)) };
 }
 
-test("containers from the API socket, memory and CPU from the cgroup", async () => {
+test("containers from the API socket, memory and the CPU-time counter from the cgroup", async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sv-dk-"));
   const host = path.join(dir, "host");
   const state = path.join(dir, "state");
@@ -50,16 +50,9 @@ test("containers from the API socket, memory and CPU from the cgroup", async () 
     assert.deepStrictEqual(first.map((c) => c.name), ["web", "old"], "running first");
     assert.deepStrictEqual(first[0], {
       name: "web", id: ID1, state: "running", status: "Up 2 hours (healthy)",
-      health: "healthy", cpu: null, mem: 5242880,
+      health: "healthy", cpuUsec: 1000000, mem: 5242880,
     });
-    assert.strictEqual(first[1].mem, null);
-    assert.strictEqual(first[1].health, null);
-    // +0.1 s of CPU: a clear non-zero percentage even on a slow runner
-    fs.writeFileSync(path.join(cg, "cpu.stat"), "usage_usec 1100000\nuser_usec 600000\n");
-    const second = await dockerJson(host, state, api.sock);
-    assert.strictEqual(typeof second[0].cpu, "number");
-    assert.ok(second[0].cpu > 0 && second[0].cpu <= 100, String(second[0].cpu));
-    assert.match(fs.readFileSync(path.join(state, "docker-cpu"), "utf8"), new RegExp(`^${ID1} 1100000 \\d+$`, "m"));
+    assert.deepStrictEqual([first[1].cpuUsec, first[1].mem, first[1].health], [null, null, null]);
   } finally {
     await api.close();
     fs.rmSync(dir, { recursive: true, force: true });

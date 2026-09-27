@@ -12,36 +12,17 @@ pick_iface() {
 }
 
 net_json() {
-  local iface="$1"
+  local iface="$1" rx tx vn
   [ -n "$iface" ] || { echo 'null'; return; }
-
-  # live throughput: bytes/sec, from rx/tx byte counters between ticks
-  local rx tx now prev_rx prev_tx prev_t rx_Bps=0 tx_Bps=0
+  # counters only: the hub derives the live rate from two snapshots
   rx=$(cat "$HOST/sys/class/net/$iface/statistics/rx_bytes" 2>/dev/null || echo 0)
   tx=$(cat "$HOST/sys/class/net/$iface/statistics/tx_bytes" 2>/dev/null || echo 0)
-  now=$(date +%s.%N)
-  if [ -f "$STATE/net" ]; then
-    read -r prev_rx prev_tx prev_t < "$STATE/net"
-    local dt
-    dt=$(awk -v a="$now" -v b="$prev_t" 'BEGIN{printf "%.3f", a-b}')
-    if awk -v d="$dt" 'BEGIN{exit !(d>0.1)}'; then
-      rx_Bps=$(awk -v c="$rx" -v p="$prev_rx" -v d="$dt" 'BEGIN{v=(c-p)/d; printf "%.0f", (v<0?0:v)}')
-      tx_Bps=$(awk -v c="$tx" -v p="$prev_tx" -v d="$dt" 'BEGIN{v=(c-p)/d; printf "%.0f", (v<0?0:v)}')
-    fi
-  fi
-  echo "$rx $tx $now" > "$STATE/net"
-
-  local ep
-  ep=$(date +%s)
+  [[ $rx =~ ^[0-9]+$ ]] || rx=0
+  [[ $tx =~ ^[0-9]+$ ]] || tx=0
 
   # vnStat reads its DB in the reading process's timezone, so the agent's TZ
-  # (from .env) MUST match the host's system timezone — then vnStat's own
-  # day/month buckets roll over at the right local midnight and its `timestamp`
-  # fields are correct epochs. (If .env TZ and the host differ, today/month
-  # boundaries will be off by the offset between them.)
-  vnstat --json --dbdir "$VNSTAT_DB" -i "$iface" 2>/dev/null | jq -c \
-    --argjson rxBps "${rx_Bps:-0}" --argjson txBps "${tx_Bps:-0}" --arg iface "$iface" \
-    --argjson now "$ep" '
+  # must match the host's: then day/month buckets roll over at local midnight.
+  vn=$(vnstat --json --dbdir "$VNSTAT_DB" -i "$iface" 2>/dev/null | jq -c --argjson now "$(date +%s)" '
     .interfaces[0] as $if | ($if.traffic) as $t |
     ( $if.created.timestamp // 0 ) as $created |
 
@@ -60,13 +41,13 @@ net_json() {
           rx, tx }) );
 
     {
-      iface:  $iface,
-      rateRx: $rxBps,
-      rateTx: $txBps,
       today:  summary($t.day),
       month:  summary($t.month),
-      total:  ( $t.total // {rx:0, tx:0} ),
+      total:  ( $t.total // {rx:0, tx:0} | {rx, tx} ),
       days:   bars($t.day;  30; "%m-%d";    "%Y-%m-%d"),
       hours:  bars($t.hour; 24; "%H:00";    "%m-%d %H:00")
-    }' || echo 'null'
+    }' 2>/dev/null)
+  [ -n "$vn" ] || vn=null
+  jq -cn --arg iface "$iface" --argjson rx "$rx" --argjson tx "$tx" --argjson vn "$vn" \
+    '{iface: $iface, rxBytes: $rx, txBytes: $tx, vnstat: $vn}'
 }

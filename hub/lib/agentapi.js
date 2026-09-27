@@ -4,10 +4,15 @@
  * Agent API v1 (docs/protocol.md): POST /api/v1/agent/push and the
  * GET /api/v1/agent/wait long poll. Checks run in the protocol's order, and
  * the last accepted TS is stored only after every check passed.
- * Replay counters are in memory: after a restart the 120 s skew window
- * bounds replays (persisting them is sub-project 4 work).
+ * The last accepted TS per node and endpoint is saved to `replayFile`, so a
+ * restart does not reopen the 120 s window for captured requests. A client
+ * address that keeps failing authentication is slowed down (429) before the
+ * hub reads anything else.
  */
+const fs = require("fs");
 const { verifyRequest, signReply } = require("./agentsig");
+const { validate } = require("./snapshot");
+const { writeFileAtomic } = require("./fsutil");
 
 const MAX_SKEW_MS = 120000;
 const PUSH_MIN_MS = 5000;
@@ -28,17 +33,8 @@ const MESSAGES = {
   rate_limited: "pushing too often",
 };
 
-const isObj = (v) => !!v && typeof v === "object" && !Array.isArray(v);
-
-// Minimal checks for sub-project 2; the full schema (protocol section 6) comes with multi-node.
-function checkSnapshot(s) {
-  if (!isObj(s)) return "$";
-  if (typeof s.ts !== "number" || !Number.isFinite(s.ts)) return "$.ts";
-  if (!isObj(s.host)) return "$.host";
-  if (s.interval !== undefined &&
-      !(typeof s.interval === "number" && s.interval >= 5 && s.interval <= 3600)) return "$.interval";
-  return null;
-}
+const FAIL_LIMIT = 30;          // failed authentications per client address ...
+const FAIL_WINDOW_MS = 60000;   // ... per minute, then 429 until the minute is over
 
 function clampWait(v) {
   const n = parseInt(v, 10);
@@ -62,8 +58,31 @@ function readLimited(req, max) {
   });
 }
 
-function createAgentApi({ nodes, log, onSnapshot, maxBody = 256 * 1024, now = Date.now }) {
+function createAgentApi({ nodes, log, onSnapshot, maxBody = 256 * 1024, now = Date.now,
+                          replayFile = null, clientIp = (req) => req.socket.remoteAddress }) {
   const lastTs = new Map();     // "<id> <endpoint>" -> last accepted TS
+  if (replayFile) {
+    try {
+      for (const [k, v] of Object.entries(JSON.parse(fs.readFileSync(replayFile, "utf8")))) {
+        if (typeof v === "number") lastTs.set(k, v);
+      }
+    } catch (_) { /* first start, or an unreadable file: the skew window still bounds replays */ }
+  }
+  function acceptTs(key, ts) {
+    lastTs.set(key, ts);
+    if (!replayFile) return;
+    try { writeFileAtomic(replayFile, JSON.stringify(Object.fromEntries(lastTs)), 0o600); }
+    catch (e) { log.warn("api.replay_write_failed", { error: e.code || String(e) }); }
+  }
+  const failures = new Map();   // client address -> { n, until }
+  function failed(ip) {
+    const t = now();
+    const f = failures.get(ip);
+    if (!f || f.until < t) failures.set(ip, { n: 1, until: t + FAIL_WINDOW_MS });
+    else f.n++;
+    if (failures.size > 10000) failures.clear();   // bounded memory under a flood
+  }
+  const blocked = (ip) => { const f = failures.get(ip); return !!f && f.until >= now() && f.n >= FAIL_LIMIT; };
   const lastPush = new Map();   // id -> hub time of the last stored push
   const lastWake = new Map();   // id -> hub time of the last wake sent
   const waiters = new Map();    // id -> { res, secret, ts, timer }
@@ -99,25 +118,31 @@ function createAgentApi({ nodes, log, onSnapshot, maxBody = 256 * 1024, now = Da
     if (req.method !== (endpoint === "push" ? "POST" : "GET")) return fail(res, 405, "method_not_allowed");
     if (q >= 0) return fail(res, 400, "query_not_allowed");
 
+    const ip = clientIp(req) || "?";
+    if (blocked(ip)) {
+      return fail(res, 429, "rate_limited", { headers: { "retry-after": String(Math.ceil(FAIL_WINDOW_MS / 1000)) } });
+    }
     const h = req.headers;
     if (h["x-servitals-proto"] !== "1") return fail(res, 426, "unsupported_protocol");
     const id = h["x-servitals-node"] || "";
     const node = NODE_ID.test(id) ? nodes.get(id) : null;
-    if (!node) { log.warn("api.refused", { error: "unknown_node" }); return fail(res, 401, "unknown_node"); }
+    if (!node) { failed(ip); log.warn("api.refused", { error: "unknown_node" }); return fail(res, 401, "unknown_node"); }
     const tsRaw = h["x-servitals-ts"] || "";
     const ts = /^\d{1,16}$/.test(tsRaw) ? Number(tsRaw) : NaN;
     const hubMs = now();
     if (!Number.isFinite(ts) || Math.abs(hubMs - ts) > MAX_SKEW_MS) {
+      failed(ip);
       log.warn("api.refused", { node: id, error: "clock_skew" });
       return fail(res, 401, "clock_skew", { body: { hub_ms: hubMs } });
     }
     const key = `${id} ${endpoint}`;
-    if (ts <= (lastTs.get(key) || 0)) return fail(res, 401, "replay");
+    if (ts <= (lastTs.get(key) || 0)) { failed(ip); return fail(res, 401, "replay"); }
     const tooLarge = () => fail(res, 413, "too_large", { headers: { connection: "close" } });
     if (Number(h["content-length"] || 0) > maxBody) { req.resume(); return tooLarge(); }
     const body = await readLimited(req, maxBody);
     if (body === null) return tooLarge();
     if (!verifyRequest(node.secret, req.method, pathname, tsRaw, body, h["x-servitals-sig"])) {
+      failed(ip);
       log.warn("api.refused", { node: id, error: "bad_signature" });
       return fail(res, 401, "bad_signature");
     }
@@ -127,18 +152,18 @@ function createAgentApi({ nodes, log, onSnapshot, maxBody = 256 * 1024, now = Da
       if (since < PUSH_MIN_MS) {
         return fail(res, 429, "rate_limited", { headers: { "retry-after": String(Math.ceil((PUSH_MIN_MS - since) / 1000)) } });
       }
-      let snap;
-      try { snap = JSON.parse(body.toString("utf8")); } catch (_) { snap = undefined; }
-      const bad = checkSnapshot(snap);
-      if (bad) return fail(res, 422, "invalid_snapshot", { body: { path: bad } });
-      lastTs.set(key, ts);
+      let raw;
+      try { raw = JSON.parse(body.toString("utf8")); } catch (_) { raw = undefined; }
+      const checked = validate(raw);
+      if (!checked.ok) return fail(res, 422, "invalid_snapshot", { body: { path: checked.path } });
+      acceptTs(key, ts);
       lastPush.set(id, hubMs);
       if (!seen.has(id)) { seen.add(id); log.info("api.first_push", { node: id }); }
-      onSnapshot(id, snap, body);
+      onSnapshot(id, checked.value);
       return reply(res, 200, node.secret, tsRaw, { ok: true });
     }
 
-    lastTs.set(key, ts);
+    acceptTs(key, ts);
     const prev = waiters.get(id);
     if (prev) finishWait(id, prev, 204);   // a reconnecting agent is never locked out
     const w = { res, secret: node.secret, ts: tsRaw };
@@ -164,4 +189,4 @@ function createAgentApi({ nodes, log, onSnapshot, maxBody = 256 * 1024, now = Da
   };
 }
 
-module.exports = { createAgentApi, checkSnapshot, clampWait };
+module.exports = { createAgentApi, clampWait, FAIL_LIMIT };
