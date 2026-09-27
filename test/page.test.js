@@ -76,3 +76,9 @@ test("a panel whose group the node does not send is hidden, never left from the 
 test("without vnStat the network panel shows the live rate and says how to get history", () => {
   assert.match(HTML, /install vnstat for today, month and 30-day history/);
 });
+
+test("the node tabs sit at the top, above the header", () => {
+  const tabs = HTML.indexOf('<nav class="tabs hidden" id="tabs"');
+  const head = HTML.indexOf('<div class="head">');
+  assert.ok(tabs > 0 && head > 0 && tabs < head, "tabs before the header bar");
+});
