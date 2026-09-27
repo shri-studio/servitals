@@ -194,3 +194,10 @@ test("saving settings changes everyone's look only when asked to", () => {
   assert.ok(HTML.includes('id="cfg-lookdefault"'));
   assert.match(HTML, /if \(\$\("#cfg-lookdefault"\)\.checked\) \{\n    cfg\.style = currentStyle\(\);/);
 });
+
+test("native controls (checkboxes, dropdown lists) follow the page's light or dark mode", () => {
+  const block = (sel) => HTML.slice(HTML.indexOf(sel + " {"), HTML.indexOf("}", HTML.indexOf(sel + " {")));
+  assert.match(block(":root"), /color-scheme: light;/);
+  assert.match(block(':root[data-theme="dark"]'), /color-scheme: dark;/);
+  assert.match(block(':root:not([data-theme="light"])'), /color-scheme: dark;/, "system dark");
+});

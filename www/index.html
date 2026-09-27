@@ -47,6 +47,7 @@
 
   /* ---- light (default) ---- */
   :root {
+    color-scheme: light;
     --bg:        #f3f3f1;
     --bg-panel:  #fbfbfa;
     --border:    #bebdb2;
@@ -66,6 +67,7 @@
   }
   /* ---- dark (pure black, neutral greys, colour only for data) ---- */
   :root[data-theme="dark"] {
+    color-scheme: dark;
     --bg:        #000000;
     --bg-panel:  #0a0a0b;
     --border:    #26262a;
@@ -85,6 +87,7 @@
   }
   @media (prefers-color-scheme: dark) {
     :root:not([data-theme="light"]) {
+      color-scheme: dark;
       --bg:#000000; --bg-panel:#0a0a0b; --border:#26262a; --dim:#9b9ba3;
       --fg:#dcdce0; --fg-bright:#ffffff; --green:#4fd873; --cyan:#4fd0dc;
       --amber:#e9b84a; --red:#f96a5f; --magenta:#cb96ff; --blue:#5fa4ff;
@@ -93,7 +96,6 @@
   }
 
   /* ---- other styles live in styles/<name>.css and load only when chosen ---- */
-  .modal label.inline { display: inline-flex; align-items: center; gap: 6px; text-transform: none; letter-spacing: 0; margin: 0; }
 
   /* ---- density (spec 10.3): compact, comfortable (default), large ---- */
   :root[data-density="compact"] body { zoom: .88; }
@@ -463,8 +465,9 @@
   }
   .modal h3 .x { color: var(--red); cursor: pointer; }
   .modal .body { padding: 16px; }
-  .modal section { margin-bottom: 20px; }
-  .modal section > label { display: block; color: var(--fg-bright); font-size: 12px; letter-spacing: .1em; text-transform: uppercase; margin-bottom: 8px; }
+  .modal section { margin-bottom: 16px; }
+  .modal section + section { border-top: 1px solid var(--border); padding-top: 16px; }
+  .modal section > label:not(.check) { display: block; color: var(--fg-bright); font-size: 12px; letter-spacing: .1em; text-transform: uppercase; margin-bottom: 8px; }
   .modal .item { display: flex; align-items: center; gap: 8px; margin-bottom: 5px; }
   .modal .item .txt { flex: 1; color: var(--fg); }
   .modal .item .rm { color: var(--red); cursor: pointer; border: var(--border-w, 1px) solid var(--border); padding: 0 7px; }
@@ -473,15 +476,26 @@
     font-family: inherit; font-size: 12px; padding: 5px 8px; width: 100%;
   }
   .modal .addrow { display: flex; gap: 6px; margin-top: 6px; }
-  .modal .addrow button, .modal .btns button {
+  .modal .addrow input { min-width: 0; }
+  #overlay .modal button {
     background: var(--bg); border: var(--border-w, 1px) solid var(--border); color: var(--cyan);
     font-family: inherit; font-size: 12px; padding: 5px 12px; cursor: pointer; white-space: nowrap;
   }
-  .modal .addrow button:hover, .modal .btns button:hover { border-color: var(--cyan); }
+  #overlay .modal button:hover { border-color: var(--cyan); }
+  #overlay .modal input[type=checkbox] { accent-color: var(--cyan); width: 14px; height: 14px; margin: 0; flex: none; }
+  .modal .fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px 10px; }
+  .modal .field { display: flex; flex-direction: column; justify-content: flex-end; gap: 4px; min-width: 0; color: var(--dim); font-size: 11px; letter-spacing: .04em; }
+  .modal .check { display: flex; align-items: center; gap: 8px; margin-top: 12px; color: var(--fg); font-size: 12px; cursor: pointer; }
+  .modal .hint { color: var(--dim); font-size: 11.5px; margin: 0 0 8px; }
+  .modal .indent { margin-left: 22px; }
+  .modal .fields.indent { margin-top: 8px; max-width: 220px; }
+  .modal .hint.indent { margin-top: 6px; }
+  .modal code { color: var(--fg-bright); }
   .modal .toggles { display: flex; flex-wrap: wrap; gap: 6px 16px; }
   .modal .toggles label { color: var(--fg); cursor: pointer; text-transform: none; letter-spacing: 0; font-size: 12px; }
 
-  .favrow { display: flex; align-items: center; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
+  .favrow { display: flex; align-items: center; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+  .favrow .hint { margin: 0; }
   #fav-preview { width: 22px; height: 22px; object-fit: contain; background: var(--bg); border: var(--border-w, 1px) solid var(--border); }
 
   .panelcfg { display: flex; flex-direction: column; gap: 3px; }
@@ -652,11 +666,13 @@
     <h3>config <span class="x" id="settings-close">[esc]</span></h3>
     <div class="body">
       <section>
-        <label>dashboard name &amp; icon</label>
-        <div class="addrow">
-          <input type="text" id="cfg-name" placeholder="shown in the browser tab">
+        <label>dashboard</label>
+        <div class="fields">
+          <label class="field"><span>name</span><input type="text" id="cfg-name" placeholder="shown in the browser tab"></label>
+          <label class="field"><span>refresh every (seconds)</span><input type="number" id="cfg-refresh" min="3" max="600"></label>
         </div>
         <div class="favrow">
+          <span class="hint">icon</span>
           <img id="fav-preview" alt="">
           <button id="fav-upload">upload image</button>
           <input type="file" id="fav-file" accept="image/png,image/jpeg,image/svg+xml,image/webp,image/gif" hidden>
@@ -692,38 +708,33 @@
       </section>
 
       <section>
-        <label>refresh interval (seconds)</label>
-        <input type="number" id="cfg-refresh" min="3" max="600" style="max-width:110px">
+        <label>appearance</label>
+        <p class="hint">changes this browser at once</p>
+        <div class="fields">
+          <label class="field"><span>style</span><select id="cfg-style"></select></label>
+          <label class="field"><span>mode</span><select id="cfg-mode"></select></label>
+          <label class="field"><span>density</span><select id="cfg-density"></select></label>
+        </div>
+        <label class="check"><input type="checkbox" id="cfg-lookdefault"> on save, make this look everyone's default</label>
+        <label class="check"><input type="checkbox" id="cfg-kiosk"> kiosk on every screen: big type, no controls</label>
+        <div class="fields indent">
+          <label class="field"><span>next node every (seconds)</span><input type="number" id="cfg-kiosksec" min="5" max="600"></label>
+        </div>
+        <p class="hint indent">a screen opts out at <code>/?kiosk=0</code></p>
       </section>
 
       <section>
-        <label>appearance &mdash; changes this browser now</label>
-        <div class="addrow">
-          <select id="cfg-style" aria-label="style"></select>
-          <select id="cfg-mode" aria-label="mode"></select>
-          <select id="cfg-density" aria-label="density"></select>
+        <label>login</label>
+        <div class="fields">
+          <label class="field"><span>name</span><input type="text" id="acct-user" autocomplete="username"></label>
+          <label class="field"><span>current password</span><input type="password" id="acct-current" autocomplete="current-password"></label>
+          <label class="field"><span>new password (blank: keep)</span><input type="password" id="acct-new" autocomplete="new-password"></label>
+          <label class="field"><span>new password again</span><input type="password" id="acct-new2" autocomplete="new-password"></label>
         </div>
         <div class="addrow">
-          <label class="inline"><input type="checkbox" id="cfg-lookdefault"> on save, make this look everyone's default</label>
-        </div>
-        <div class="addrow">
-          <label class="inline"><input type="checkbox" id="cfg-kiosk"> <span>kiosk on every screen (a screen opts out at <code>/?kiosk=0</code>), next node every</span></label>
-          <input type="number" id="cfg-kiosksec" min="5" max="600" style="max-width:80px"> s
-        </div>
-      </section>
-
-      <section>
-        <label>login &mdash; name and password</label>
-        <div class="addrow">
-          <input type="text" id="acct-user" autocomplete="username" placeholder="name" style="max-width:160px">
-          <input type="password" id="acct-new" autocomplete="new-password" placeholder="new password (blank: keep)">
-          <input type="password" id="acct-new2" autocomplete="new-password" placeholder="again">
-        </div>
-        <div class="addrow">
-          <input type="password" id="acct-current" autocomplete="current-password" placeholder="current password">
           <button id="acct-save">change login</button>
         </div>
-        <div id="acct-msg" style="color:var(--dim);font-size:12px"></div>
+        <div id="acct-msg" class="hint"></div>
       </section>
     </div>
     <div class="btns">

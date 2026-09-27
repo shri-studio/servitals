@@ -33,6 +33,9 @@ All notable changes to this project are documented here. The format follows
   resends a too-large snapshot without its lists.
 
 ### Fixed
+- The settings panel is tidier: sections are separated, fields have captions
+  and line up, every button and checkbox matches the page (also in dark
+  mode), and nothing is squeezed on a phone. CI checks it at 390 and 1280 px.
 - Password fields in settings look like the other fields.
 - Long values (load, sensors, network totals) wrap instead of spilling out of
   narrow panels on phones and tablets.

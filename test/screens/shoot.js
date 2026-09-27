@@ -48,6 +48,46 @@ const STYLES = ["classic", "8bit", "phosphor", "eink", "contrast", "nord", "gruv
   await page.locator("#cfg-style").scrollIntoViewIfNeeded();
   await page.screenshot({ path: `${out}/settings.png` });
 
+  // the settings panel on a desktop and a phone: styled controls, none squeezed or sticking out
+  for (const width of [1280, 390]) {
+    await page.setViewportSize({ width, height: 2600 });
+    await page.goto(`${base}/?shot=settings-${width}#fleet`);
+    await page.waitForTimeout(1200);
+    await page.keyboard.press("s");
+    await page.waitForTimeout(300);
+    await page.screenshot({ path: `${out}/settings-${width}.png` });
+    const bad = await page.evaluate(() => {
+      const out = [], modal = document.querySelector("#overlay .modal").getBoundingClientRect();
+      const font = getComputedStyle(document.body).fontFamily;
+      for (const el of document.querySelectorAll("#overlay .modal button, #overlay .modal input, #overlay .modal select")) {
+        if (!el.offsetParent || el.type === "file") continue;
+        const r = el.getBoundingClientRect(), cs = getComputedStyle(el), id = el.id || el.textContent.trim() || el.type;
+        if (el.type !== "checkbox" && cs.fontFamily !== font) out.push(`${id}: browser default look`);
+        if (el.type === "checkbox" && cs.accentColor === "auto") out.push(`${id}: browser default checkbox`);
+        if (r.right > modal.right - 8 || r.left < modal.left + 8) out.push(`${id}: sticks out of the panel`);
+        if (r.height > 40) out.push(`${id}: ${Math.round(r.height)}px tall`);
+        const short = el.maxLength > 0 && el.maxLength <= 8;   // the emoji field
+        const min = !short && (el.tagName === "SELECT" || ["text", "password"].includes(el.type)) ? 120 : 0;
+        if (r.width < min && !el.closest(".pcf")) out.push(`${id}: only ${Math.round(r.width)}px wide`);
+      }
+      for (const el of document.querySelectorAll("#overlay .modal .check")) {
+        if (getComputedStyle(el).textTransform !== "none") out.push(`"${el.textContent.trim().slice(0, 20)}": shouted like a heading`);
+      }
+      for (const row of document.querySelectorAll("#overlay .modal .fields")) {   // inputs side by side line up
+        const tops = new Map();
+        for (const f of row.querySelectorAll("input, select")) {
+          const row = Math.round(f.closest(".field").getBoundingClientRect().top), t = tops.get(row);
+          const bottom = f.getBoundingClientRect().bottom;
+          if (t !== undefined && Math.abs(t - bottom) > 1) out.push(`${f.id}: not lined up with its neighbour`);
+          tops.set(row, bottom);
+        }
+      }
+      return out;
+    });
+    if (bad.length) errors.push(`settings-${width}: ${bad.join("; ")}`);
+  }
+  await page.setViewportSize({ width: 1280, height: 800 });
+
   // a phone and a desktop in every density and in kiosk: nothing cut off
   for (const width of [390, 600, 768, 1024, 1280, 1920]) for (const [density, q] of [["compact", ""], ["comfortable", ""], ["large", ""], ["comfortable", "?kiosk"]]) {
     for (const hash of ["#fleet", "#node=" + local]) {
