@@ -4,7 +4,7 @@
 
 **Goal:** Ten styles (classic, 8bit, phosphor, e-ink, high contrast, nord, gruvbox, dracula, catppuccin, solarized), each loaded only when chosen; a light/dark/system mode switch; density; a hub-wide default look; and a kiosk mode for wall screens, with screenshots of every style and mode in CI.
 
-**Architecture:** Every style but classic is one file `www/styles/<id>.css` (at most 3 KB gzipped) holding a light token set `:root[data-style="<id>"]`, a dark set `:root[data-theme="dark"][data-style="<id>"]`, the same dark set for a system in dark mode, and optional extra rules. A small script at the top of `<head>` applies the browser's stored style, mode, density and `?kiosk` before the first paint and writes the style's `<link>`; after `config.json` loads, the hub's saved defaults fill in whatever this browser has not chosen. The page keeps a registry `STYLES` that the settings panel and the `y` key use. A demo hub with three servers and a Playwright container take screenshots of every style and mode.
+**Architecture:** Every style but classic is one file `www/styles/<id>.css` (at most 3 KB gzipped) holding a light token set `:root[data-style="<id>"]`, a dark set `:root[data-theme="dark"][data-style="<id>"]`, the same dark set for a system in dark mode, and optional extra rules. A small script at the top of `<head>` applies the browser's stored style, mode, density and `?kiosk` before the first paint and writes the style's `<link>`; after `config.json` loads, the hub's saved defaults fill in whatever this browser has not chosen. The page keeps a registry `STYLES` that the settings panel and the `y` key use. The hub carries `?kiosk` through its login page and tells browsers to revalidate static files. A demo hub with three servers and a Playwright container take screenshots of every style and mode at six widths and fail on any page error or panel whose content does not fit.
 
 **Tech Stack:** HTML/CSS/vanilla JS (single page), Node.js ≥ 18 built-ins for tests, Playwright 1.55 in its Docker image (CI only), fonttools (once, to subset VT323).
 
@@ -12,7 +12,7 @@
 
 **Scope (4c of sub-project 4):** 4f (ES modules with a strict CSP, i18n dictionary, PWA shell) follows as its own plan. 4b, 4d and 4e are unchanged.
 
-**Proven before writing:** every code block was built and run in a scratch copy of `main` (0ef135a) on 2026-09-27: node suite 193 tests, shellcheck at CI settings, budget (page 24.5 KB gz, styles 495-1021 bytes gz), Docker smoke test, both series built and lintian clean, autopkgtest, and `test/screens.sh` (46 screenshots, no page errors).
+**Proven before writing:** every code block was built and run in a scratch copy of `main` (0ef135a) on 2026-09-27: node suite 195 tests, shellcheck at CI settings, budget (page 25.0 KB gz, styles 495-1021 bytes gz), Docker smoke test, both series built and lintian clean, autopkgtest, and `test/screens.sh` (94 screenshots, no page errors, nothing cut off). A second copy rebuilt from this plan's text alone matched the first byte for byte.
 
 ## Global Constraints
 
@@ -31,10 +31,10 @@
 ## Review Focus
 
 1. **A stored style name that is odd, hostile or no longer shipped** (edited `localStorage`, an older version's choice, a removed style): nothing but a plain name may reach the `<link>`, and the page must fall back to classic without errors; older `theme` values `light`/`dark` and style `8bit` keep working. Test: Task 2, "the early script applies a stored look and refuses odd style names".
-2. **Kiosk on every screen with no keyboard** (a wall tablet after an admin saved "kiosk on every screen"): the screen must have a way out. Test: Task 2, "?kiosk turns kiosk on and ?kiosk=0 keeps it off".
+2. **A wall screen with no keyboard**: `/?kiosk` must survive the login page and a later expired session, and a screen must have a way out when an admin turns kiosk on for every screen. Tests: Task 2, "?kiosk turns kiosk on and is remembered; ?kiosk=0 turns it off…"; Task 3, "/?kiosk survives the login page, with only a fixed value in the redirect" (including an odd request path and a hostile value).
 3. **Unreadable text in some style and mode**, including the system-dark path that a person never picks explicitly. Test: Task 1, "text is readable in every style and mode" and "its system-dark block matches its dark block".
-4. **A style that works from the checkout but not from the package** (a style or font file not installed, a font URL that 404s). Tests: Task 1, "every font a style file asks for is shipped" and "the package ships the style files and the VT323 font"; the autopkgtest run in Task 3.
-5. **A script error in one style or mode** (a missing element, a stale reference to the old theme code) that tests reading the source cannot see. Test: Task 3, `test/screens.sh` fails on any page or console error in every style and mode.
+4. **Narrow screens, large density and kiosk zoom**: phones, tablets and a 1280 px wall screen must not cut off or overlap values, and a script error in one style or mode must not go unseen. Test: Task 4, `test/screens.sh` checks 390, 600, 768, 1024, 1280 and 1920 px in every density and kiosk, and fails on any page error or panel wider than its box.
+5. **Works from the checkout but not after install or upgrade** (a style or font file not packaged, a font URL that 404s, a browser keeping the old page after an upgrade). Tests: Task 1, "every font a style file asks for is shipped" and "the package ships the style files and the VT323 font"; Task 3, the `cache-control: no-cache` assertion; Task 4, autopkgtest.
 
 ---
 
@@ -133,7 +133,7 @@ test("text is readable in every style and mode (AA; AAA for high contrast)", () 
   for (const [id, mode, t] of allSets()) {
     const text = id === "contrast" ? 7 : 4.5;
     const status = id === "contrast" ? 4.5 : 3;
-    for (const [a, b, min] of [["fg", "bg", text], ["fg", "bg-panel", text], ["dim", "bg-panel", text], ["fg-bright", "bg-panel", text],
+    for (const [a, b, min] of [["fg", "bg", text], ["fg", "bg-panel", text], ["dim", "bg-panel", text], ["dim", "bg", text], ["fg-bright", "bg-panel", text],
                                ...STATUS.map((s) => [s, "bg-panel", status])]) {
       const c = contrast(t[a], t[b]);
       if (c < min) problems.push(`${id} ${mode}: --${a} on --${b} is ${c.toFixed(2)} (needs ${min})`);
@@ -532,7 +532,7 @@ git commit -m "feat(ui): style files for eight new styles and 8bit, with contras
 
 **Interfaces:**
 - Consumes: the style files from Task 1.
-- Produces: in the page, `STYLES` (array of `{ id, label, group }`, group `v1`/`access`/`palette`), `MODES = ["system", "light", "dark"]`, `DENSITIES = ["compact", "comfortable", "large"]`, `applyStyle(id)`, `applyMode(m)`, `applyDensity(n)`, `applyAppearanceDefaults()`, `kioskOff()`, `startKiosk()`; the settings controls `#cfg-style #cfg-mode #cfg-density #cfg-kiosk #cfg-kiosksec`; `config.json` keys `style`, `mode`, `density`, `kiosk` (boolean), `kioskSec` (5..600, default 20). Task 3's screenshots drive the page through `localStorage` and `?kiosk`.
+- Produces: in the page, `STYLES` (array of `{ id, label, group }`, group `v1`/`access`/`palette`), `MODES = ["system", "light", "dark"]`, `DENSITIES = ["compact", "comfortable", "large"]`, `applyStyle(id)`, `applyMode(m)`, `applyDensity(n)`, `applyAppearanceDefaults()` (also remembers the hub's defaults as `servitals.hub.style|mode|density|kiosk`), `startKiosk()`; `localStorage` `servitals.kiosk` (`1`/`0`, set by `?kiosk` / `?kiosk=0`); the settings controls `#cfg-style #cfg-mode #cfg-density #cfg-kiosk #cfg-kiosksec`; `config.json` keys `style`, `mode`, `density`, `kiosk` (boolean), `kioskSec` (5..600, default 20). Task 3 makes the login page pass `?kiosk=1|0` on; Task 4's screenshots drive the page through `localStorage` and `?kiosk`, and fix narrow-screen layout in the same file.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -580,9 +580,9 @@ function early({ search = "", stored = {} } = {}) {
     documentElement: { setAttribute: (k, v) => { attrs[k] = v; } },
     write: (s) => written.push(s),
   };
-  const localStorage = { getItem: (k) => (k in stored ? stored[k] : null) };
+  const localStorage = { getItem: (k) => (k in stored ? stored[k] : null), setItem: (k, v) => { stored[k] = String(v); } };
   new Function("document", "localStorage", "location", src)(document, localStorage, { search });
-  return { attrs, written };
+  return { attrs, written, stored };
 }
 
 test("the early script applies a stored look and refuses odd style names", () => {
@@ -595,19 +595,36 @@ test("the early script applies a stored look and refuses odd style names", () =>
   assert.deepStrictEqual(early({ stored: { "servitals.theme": "system", "servitals.density": "huge" } }).attrs, {});
 });
 
-test("?kiosk turns kiosk on and ?kiosk=0 keeps it off, even when the hub turns it on for everyone", () => {
-  assert.strictEqual(early({ search: "?kiosk" }).attrs["data-kiosk"], "");
+test("the hub's default look from the last visit paints at once; this browser's own choice wins", () => {
+  const hub = { "servitals.hub.style": "phosphor", "servitals.hub.mode": "dark", "servitals.hub.density": "compact" };
+  const r = early({ stored: { ...hub } });
+  assert.deepStrictEqual(r.attrs, { "data-theme": "dark", "data-density": "compact", "data-style": "phosphor" });
+  const own = early({ stored: { ...hub, "servitals.style": "nord", "servitals.theme": "light" } });
+  assert.strictEqual(own.attrs["data-style"], "nord");
+  assert.strictEqual(own.attrs["data-theme"], "light");
+  assert.match(HTML, /lsSet\("hub\." \+ k, cfg\[k\] \|\| ""\)/, "the page remembers the hub's defaults");
+});
+
+test("?kiosk turns kiosk on and is remembered; ?kiosk=0 turns it off, even when the hub turns it on for everyone", () => {
+  const on = early({ search: "?kiosk" });
+  assert.strictEqual(on.attrs["data-kiosk"], "");
+  assert.strictEqual(on.stored["servitals.kiosk"], "1");
   assert.strictEqual(early({ search: "?a=1&kiosk=1" }).attrs["data-kiosk"], "");
-  assert.strictEqual(early({ search: "?kiosk=0" }).attrs["data-kiosk"], undefined);
+  assert.strictEqual(early({ stored: { "servitals.kiosk": "1" } }).attrs["data-kiosk"], "", "back after the session ran out");
+  const off = early({ search: "?kiosk=0", stored: { "servitals.kiosk": "1" } });
+  assert.strictEqual(off.attrs["data-kiosk"], undefined);
+  assert.strictEqual(off.stored["servitals.kiosk"], "0");
+  assert.strictEqual(early({ stored: { "servitals.hub.kiosk": "1" } }).attrs["data-kiosk"], "");
+  assert.strictEqual(early({ stored: { "servitals.hub.kiosk": "1", "servitals.kiosk": "0" } }).attrs["data-kiosk"], undefined);
   assert.strictEqual(early({ search: "?kioskx" }).attrs["data-kiosk"], undefined);
-  assert.match(HTML, /if \(cfg\.kiosk && !kioskOff\(\)\) document\.documentElement\.setAttribute\("data-kiosk", ""\);/);
+  assert.match(HTML, /if \(cfg\.kiosk && lsGet\("kiosk"\) !== "0"\) document\.documentElement\.setAttribute\("data-kiosk", ""\);/);
 });
 ```
 
 - [ ] **Step 2: Run them to see them fail**
 
 Run: `node --test test/styles.test.js test/page.test.js`
-Expected: FAIL: the registry test (the page lists no `{ id, label, group }` entries), and the new page tests (no early script, 8bit still in the page, no appearance section).
+Expected: FAIL, 7 tests: the registry test (the page lists no `{ id, label, group }` entries) and the six new page tests (no early script, 8bit still in the page, no appearance section, no remembered hub look or kiosk).
 
 - [ ] **Step 3: Change the page**
 
@@ -654,11 +671,18 @@ In `www/index.html`:
     var d = document.documentElement, get = function (k) {
       try { return localStorage.getItem("servitals." + k); } catch (e) { return null; }
     };
-    var style = get("style"), mode = get("theme"), density = get("density");
+    // this browser's choice, else the hub's default remembered from the last visit
+    var style = get("style") || get("hub.style"), mode = get("theme") || get("hub.mode"),
+        density = get("density") || get("hub.density");
     if (mode === "light" || mode === "dark") d.setAttribute("data-theme", mode);
     if (density === "compact" || density === "large") d.setAttribute("data-density", density);
-    var kiosk = /[?&]kiosk(?:=([^&]*))?(?:&|$)/.exec(location.search);
-    if (kiosk && kiosk[1] !== "0") d.setAttribute("data-kiosk", "");
+    // ?kiosk and ?kiosk=0 are remembered, so kiosk survives a new login
+    var q = /[?&]kiosk(?:=([^&]*))?(?:&|$)/.exec(location.search), kiosk = get("kiosk");
+    if (q) {
+      kiosk = q[1] === "0" ? "0" : "1";
+      try { localStorage.setItem("servitals.kiosk", kiosk); } catch (e) { /* private mode */ }
+    }
+    if (kiosk === "1" || (kiosk !== "0" && get("hub.kiosk") === "1")) d.setAttribute("data-kiosk", "");
     if (style && style !== "classic" && /^[a-z0-9-]{1,32}$/.test(style)) {
       d.setAttribute("data-style", style);
       document.write('<link rel="stylesheet" id="style-css" href="styles/' + style + '.css">');
@@ -790,10 +814,11 @@ In `www/index.html`:
   /* ---- density (spec 10.3): compact, comfortable (default), large ---- */
   :root[data-density="compact"] body { zoom: .88; }
   :root[data-density="compact"] .grid, :root[data-density="compact"] .fleet { gap: 10px; }
-  :root[data-density="large"] body { zoom: 1.18; }
+  @media (min-width: 720px) { :root[data-density="large"] body { zoom: 1.18; } }   /* a phone has no room to grow */
 
   /* ---- kiosk (/?kiosk or settings): big type, no controls ---- */
-  :root[data-kiosk] body { zoom: 1.3; cursor: none; }
+  :root[data-kiosk] body { cursor: none; }
+  @media (min-width: 960px) { :root[data-kiosk] body { zoom: 1.3; } }
   :root[data-kiosk] .keyhint, :root[data-kiosk] .prompt, :root[data-kiosk] .brand-foot,
   :root[data-kiosk] .svc-ctl, :root[data-kiosk] #tabs, :root[data-kiosk] .update-note { display: none !important; }
 
@@ -963,10 +988,12 @@ function applyAppearanceDefaults() {
   applyStyle(lsGet("style") || cfg.style || "classic");
   applyMode(lsGet("theme") || cfg.mode || "system");
   applyDensity(lsGet("density") || cfg.density || "comfortable");
-  if (cfg.kiosk && !kioskOff()) document.documentElement.setAttribute("data-kiosk", "");
+  // ?kiosk=0 keeps a screen out of kiosk mode when the hub turns it on for everyone
+  if (cfg.kiosk && lsGet("kiosk") !== "0") document.documentElement.setAttribute("data-kiosk", "");
+  // remembered for the next visit, so the hub's look paints at once
+  for (const k of ["style", "mode", "density"]) lsSet("hub." + k, cfg[k] || "");
+  lsSet("hub.kiosk", cfg.kiosk ? "1" : "");
 }
-// ?kiosk=0 keeps a screen out of kiosk mode when the hub turns it on for everyone
-function kioskOff() { return /[?&]kiosk=0(?:&|$)/.test(location.search); }
 
 /* ------------------------------------------------------------------ kiosk
    Cycles through the nodes every kioskSec seconds (spec 10.3). */
@@ -1102,26 +1129,284 @@ function startKiosk() {
 - [ ] **Step 4: Run all tests**
 
 Run: `node --test test/*.test.js && bash test/budget.sh | grep "first page"`
-Expected: PASS (6 new tests); first page load about 24.5 KB gzipped (limit 60 KB).
+Expected: PASS (7 new tests); first page load about 25 KB gzipped (limit 60 KB).
 
 - [ ] **Step 5: Commit**
 
 ```bash
 git add www/index.html test/page.test.js test/styles.test.js
-git commit -m "feat(ui): styles load on demand; system mode, density, kiosk, hub-wide defaults" -m "A script at the top of the page applies the stored style, mode and density before the first paint and links only the chosen style. Mode cycles system, light, dark and follows the system by default. Settings gain an appearance section; saving makes the current look the default for everyone. /?kiosk shows big type without controls and moves to the next server every 20 s; /?kiosk=0 keeps a screen out of it. Password fields in settings get the input style."
+git commit -m "feat(ui): styles load on demand; system mode, density, kiosk, hub-wide defaults" -m "A script at the top of the page applies the stored style, mode and density before the first paint and links only the chosen style. Mode cycles system, light, dark and follows the system by default. Settings gain an appearance section; saving makes the current look the default for everyone. /?kiosk shows big type without controls and moves to the next server every 20 s; the browser remembers it, and /?kiosk=0 turns it off even when the hub turns kiosk on for everyone. The hub's defaults are remembered so the next load paints them at once. Large density and kiosk zoom only on screens wide enough for them. Password fields in settings get the input style."
 ```
 
 ---
 
-### Task 3: Screenshots in CI, docs
+### Task 3: The hub keeps `?kiosk` through login; browsers revalidate static files
+
+**Files:**
+- Modify: `hub/server.js`, `hub/lib/static.js`, `test/helpers/hub.js`, `test/hub.test.js`, `test/static.test.js`
+
+**Interfaces:**
+- Consumes: the page's `?kiosk` / `?kiosk=0` handling from Task 2.
+- Produces: `loginPage(msg, kiosk = "")` adds `<input type="hidden" name="kiosk" value="1|0">` when the request asked for kiosk; a successful login redirects to `/?kiosk=1` or `/?kiosk=0`, else `/`. Only `1` or `0` ever reaches the form or the redirect. Every static response (200 and 304) carries `cache-control: no-cache`. The test helper `login(port, { form })` sends extra form fields.
+
+- [ ] **Step 1: Write the failing tests**
+
+In `test/helpers/hub.js`:
+
+1. Replace
+
+```js
+}
+
+async function login(port, { user = "admin", pass = DEFAULT_PASS, headers = {}, origin } = {}) {
+  const body = formBody({ username: user, password: pass });
+  const h = {
+    "content-type": "application/x-www-form-urlencoded",
+```
+
+   with
+
+```js
+}
+
+async function login(port, { user = "admin", pass = DEFAULT_PASS, headers = {}, origin, form = {} } = {}) {
+  const body = formBody({ username: user, password: pass, ...form });
+  const h = {
+    "content-type": "application/x-www-form-urlencoded",
+```
+
+Append to `test/hub.test.js`:
+
+```js
+test("/?kiosk survives the login page, with only a fixed value in the redirect", async () => {
+  await withHub({}, async (hub) => {
+    const page = await request(hub.port, { path: "/?kiosk" });
+    assert.match(page.body, /<input type="hidden" name="kiosk" value="1">/);
+    assert.match((await request(hub.port, { path: "/?kiosk=0" })).body, /name="kiosk" value="0"/);
+    assert.doesNotMatch((await request(hub.port, { path: "/" })).body, /name="kiosk"/);
+    const odd = await request(hub.port, { path: "//[?kiosk" });
+    assert.strictEqual(odd.status, 200, "an odd path still gets the login page");
+    assert.match(odd.body, /name="kiosk" value="1"/);
+    assert.strictEqual((await login(hub.port, { form: { kiosk: "1" } })).headers.location, "/?kiosk=1");
+    assert.strictEqual((await login(hub.port, { form: { kiosk: "0" } })).headers.location, "/?kiosk=0");
+    assert.strictEqual((await login(hub.port, { form: { kiosk: "//evil.example" } })).headers.location, "/?kiosk=1");
+    assert.strictEqual((await login(hub.port)).headers.location, "/");
+    const bad = await login(hub.port, { pass: "wrong", form: { kiosk: "1" } });
+    assert.match(bad.body, /name="kiosk" value="1"/, "a failed attempt keeps kiosk for the next one");
+  });
+});
+```
+
+In `test/static.test.js`:
+
+1. Replace
+
+```js
+    assert.ok(r.headers.etag);
+    assert.ok(r.headers["last-modified"]);
+    const again = await request(port, { path: "/", headers: { "if-none-match": r.headers.etag } });
+    assert.strictEqual(again.status, 304);
+```
+
+   with
+
+```js
+    assert.ok(r.headers.etag);
+    assert.ok(r.headers["last-modified"]);
+    assert.strictEqual(r.headers["cache-control"], "no-cache", "browsers check for a newer page after an upgrade");
+    const again = await request(port, { path: "/", headers: { "if-none-match": r.headers.etag } });
+    assert.strictEqual(again.status, 304);
+```
+
+- [ ] **Step 2: Run them to see them fail**
+
+Run: `node --test test/hub.test.js test/static.test.js`
+Expected: FAIL: "/?kiosk survives the login page…" (no hidden `kiosk` field) and "serves index.html for / with type and validators" (`cache-control` is `undefined`).
+
+- [ ] **Step 3: Carry kiosk through the login page**
+
+In `hub/server.js`:
+
+1. Replace
+
+```js
+</style></head><body><div class="box">${inner}</div></body></html>`;
+
+const loginPage = (msg) => SHELL(SITE + " · login", `
+  <h1>${SITE} · authentication required</h1>
+  <form class="body" method="POST" action="/__auth/login">
+    <label>username</label><input name="username" autocomplete="username" autofocus>
+    <label>password</label><input name="password" type="password" autocomplete="current-password">
+```
+
+   with
+
+```js
+</style></head><body><div class="box">${inner}</div></body></html>`;
+
+// a wall screen opened at /?kiosk keeps kiosk through the login (spec 10.3);
+// only "1" or "0" ever reaches the form and the redirect
+const kioskValue = (v) => (v === null ? "" : v === "0" ? "0" : "1");
+const kioskFromUrl = (url) => {
+  const m = /[?&]kiosk(?:=([^&#]*))?(?:[&#]|$)/.exec(url || "");
+  return m ? kioskValue(m[1] || "") : "";
+};
+const loginPage = (msg, kiosk = "") => SHELL(SITE + " · login", `
+  <h1>${SITE} · authentication required</h1>
+  <form class="body" method="POST" action="/__auth/login">
+    ${kiosk ? `<input type="hidden" name="kiosk" value="${kiosk}">` : ""}
+    <label>username</label><input name="username" autocomplete="username" autofocus>
+    <label>password</label><input name="password" type="password" autocomplete="current-password">
+```
+
+2. Replace
+
+```js
+    const user = params.get("username") || "";
+    const ok = await checkPass(user, params.get("password") || "");
+    if (ok) {
+      clearFails(ip);
+```
+
+   with
+
+```js
+    const user = params.get("username") || "";
+    const ok = await checkPass(user, params.get("password") || "");
+    const kiosk = kioskValue(params.get("kiosk"));
+    if (ok) {
+      clearFails(ip);
+```
+
+3. Replace
+
+```js
+      res.writeHead(302, {
+        "set-cookie": `sv_session=${makeCookie()}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${SESSION_HOURS * 3600}${secure}`,
+        location: "/",
+      });
+      return res.end();
+```
+
+   with
+
+```js
+      res.writeHead(302, {
+        "set-cookie": `sv_session=${makeCookie()}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${SESSION_HOURS * 3600}${secure}`,
+        location: kiosk ? `/?kiosk=${kiosk}` : "/",
+      });
+      return res.end();
+```
+
+4. Replace
+
+```js
+    }
+    res.writeHead(401, { "content-type": "text/html" });
+    return res.end(loginPage(msg));
+  }
+
+```
+
+   with
+
+```js
+    }
+    res.writeHead(401, { "content-type": "text/html" });
+    return res.end(loginPage(msg, kiosk));
+  }
+
+```
+
+5. Replace
+
+```js
+
+  res.writeHead(200, { "content-type": "text/html" });
+  res.end(loginPage(null));
+}
+
+```
+
+   with
+
+```js
+
+  res.writeHead(200, { "content-type": "text/html" });
+  res.end(loginPage(null, kioskFromUrl(req.url)));
+}
+
+```
+
+The URL is read with a regular expression, not `new URL()`: `new URL("//[?kiosk", base)` throws, and the test's odd path checks that.
+
+- [ ] **Step 4: Revalidate static files**
+
+In `hub/lib/static.js`:
+
+1. Replace
+
+```js
+    const ims = Date.parse(req.headers["if-modified-since"] || "");
+    if (inm ? inm === etag : (Number.isFinite(ims) && mtime * 1000 <= ims)) {
+      res.writeHead(304, { etag, "last-modified": st.mtime.toUTCString() });
+      return res.end();
+    }
+```
+
+   with
+
+```js
+    const ims = Date.parse(req.headers["if-modified-since"] || "");
+    if (inm ? inm === etag : (Number.isFinite(ims) && mtime * 1000 <= ims)) {
+      res.writeHead(304, { etag, "last-modified": st.mtime.toUTCString(), "cache-control": "no-cache" });
+      return res.end();
+    }
+```
+
+2. Replace
+
+```js
+      "last-modified": st.mtime.toUTCString(),
+      etag,
+      "x-content-type-options": "nosniff",
+    });
+```
+
+   with
+
+```js
+      "last-modified": st.mtime.toUTCString(),
+      etag,
+      // revalidate every time (a 304 is cheap), so an upgrade shows at once
+      "cache-control": "no-cache",
+      "x-content-type-options": "nosniff",
+    });
+```
+
+- [ ] **Step 5: Run all tests**
+
+Run: `node --test test/*.test.js`
+Expected: PASS (1 new test, 195 in total).
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add hub/server.js hub/lib/static.js test/helpers/hub.js test/hub.test.js test/static.test.js
+git commit -m "fix(hub): keep /?kiosk through the login page; browsers revalidate static files" -m "A wall screen opened at /?kiosk used to land on / after logging in. The login form now carries kiosk=1 or 0 (nothing else) to the redirect. Static files get cache-control: no-cache, so a browser asks for a newer page after an upgrade instead of guessing from Last-Modified."
+```
+
+---
+
+### Task 4: Screenshots at every width in CI, narrow-screen fixes, docs
 
 **Files:**
 - Create: `test/screens/demo-hub.js`, `test/screens/shoot.js`, `test/screens.sh`
-- Modify: `.github/workflows/ci.yml`, `README.md`, `CHANGELOG.md`
+- Modify: `www/index.html`, `.github/workflows/ci.yml`, `README.md`, `CHANGELOG.md`
 
 **Interfaces:**
 - Consumes: the page from Task 2 (`localStorage` keys, `?kiosk`, `#btn-settings`), `hub/server.js` environment (`STATE_DIR`, `WWW_DIR`, `PORT`, `NODE_ENV`) and `hub/lib/nodes.js` from sub-project 4a.
-- Produces: `bash test/screens.sh` writes `build/screens/<view>-<style>-<mode>.png` (view `fleet` or `node`), `kiosk.png`, `settings.png` and contact sheets `sheet-fleet-1.png`, `sheet-fleet-2.png`, `sheet-node-1.png`, `sheet-node-2.png`; it exits non-zero on any page error or console error. `demo-hub.js <port>` prints `READY <port>` and logs in as `demo` / `demo-pass-1`.
+- Produces: `bash test/screens.sh` writes `build/screens/<view>-<style>-<mode>.png` (view `fleet` or `node`), `<width>-<density or kiosk>-<fleet or node>.png` (widths 390, 600, 768, 1024, 1280, 1920), `kiosk.png`, `settings.png` and contact sheets `sheet-fleet-1.png`, `sheet-fleet-2.png`, `sheet-node-1.png`, `sheet-node-2.png`; it exits non-zero on any page error, console error, sideways scrolling, or panel (`.panel`, `.ncard`, `.head`, network table cell) whose content is wider than its box. `demo-hub.js <port>` prints `READY <port>` and logs in as `demo` / `demo-pass-1`.
 
 - [ ] **Step 1: Write the demo hub and the screenshot script**
 
@@ -1252,11 +1537,33 @@ const STYLES = ["classic", "8bit", "phosphor", "eink", "contrast", "nord", "gruv
   await page.goto(`${base}/?kiosk#fleet`);
   await page.waitForTimeout(1500);
   await page.screenshot({ path: `${out}/kiosk.png` });
+  await page.evaluate(() => localStorage.clear());   // ?kiosk is remembered
   await page.goto(`${base}/#fleet`);
   await page.waitForTimeout(1200);
   await page.keyboard.press("s");
   await page.locator("#cfg-style").scrollIntoViewIfNeeded();
   await page.screenshot({ path: `${out}/settings.png` });
+
+  // a phone and a desktop in every density and in kiosk: nothing cut off
+  for (const width of [390, 600, 768, 1024, 1280, 1920]) for (const [density, q] of [["compact", ""], ["comfortable", ""], ["large", ""], ["comfortable", "?kiosk"]]) {
+    for (const hash of ["#fleet", "#node=" + local]) {
+      await page.evaluate((d) => { localStorage.clear(); localStorage.setItem("servitals.density", d); }, density);
+      await page.setViewportSize({ width, height: 844 });
+      const name = `${width}-${q ? "kiosk" : density}-${hash === "#fleet" ? "fleet" : "node"}`;
+      await page.goto(`${base}/?shot=${name}${q ? "&kiosk" : ""}${hash}`);   // a new query: a real reload
+      await page.waitForTimeout(1200);
+      const wide = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+      // content cut off or overlapping inside a panel
+      const clipped = await page.evaluate(() => [...document.querySelectorAll(".panel:not(.hidden), .ncard, .head, .nettab td, .nettab th")]
+        .filter((p) => p.offsetParent && p.scrollWidth > p.clientWidth + 1)
+        .map((p) => (p.dataset.panel || `${p.tagName.toLowerCase()}.${p.className} "${p.textContent.trim().slice(0, 16)}"`)
+          + " +" + (p.scrollWidth - p.clientWidth) + "px"));
+      if (clipped.length) errors.push(`${name}: wider than its box: ${clipped.join(", ")}`);
+      await page.screenshot({ path: `${out}/${name}.png`, fullPage: true });
+      if (wide > 0) errors.push(`${name}: ${wide}px wider than the screen`);
+    }
+  }
+  await page.evaluate(() => localStorage.clear());
 
   const sheet = await ctx.newPage();
   await sheet.setViewportSize({ width: 1600, height: 1000 });
@@ -1302,14 +1609,88 @@ docker run --rm --network host -u "$(id -u):$(id -g)" -e HOME=/tmp -v "$SRC/test
   "http://127.0.0.1:$PORT"
 ```
 
-- [ ] **Step 2: Run it**
+- [ ] **Step 2: Run it to see what does not fit yet**
+
+Run: `bash test/screens.sh; echo "exit=$?"`
+Expected: FAIL, `exit=1`, with lines like `600-comfortable-node: wider than its box: cpu +41px, temp +25px, network +4px, th. "total" +2px, td.rx "318 KB/s" +18px, …` for node views at 390 to 1280 px: the `cpu` and `temp` panels (their `.row` values never wrap), the network table cells (`nowrap` in fixed-width columns), `th "total"` at 600 px, and `weather` in kiosk at 1024 px. The pixel counts depend on the host's own data; no `pageerror` lines.
+
+- [ ] **Step 3: Let long values wrap**
+
+In `www/index.html`:
+
+1. Replace
+
+```html
+
+  .row { display: flex; justify-content: space-between; gap: 10px; white-space: nowrap; }
+  .row + .row { margin-top: 3px; }
+  .k { color: var(--dim); }
+```
+
+   with
+
+```html
+
+  .row { display: flex; justify-content: space-between; gap: 10px; white-space: nowrap; }
+  /* a long value wraps instead of spilling out of a narrow panel */
+  .row > .v { white-space: normal; text-align: right; min-width: 0; }
+  .row + .row { margin-top: 3px; }
+  .k { color: var(--dim); }
+```
+
+2. Replace
+
+```html
+  .nettab th {
+    font-weight: 400; color: var(--dim); font-size: 11px; text-transform: uppercase;
+    letter-spacing: .06em; text-align: right; padding: 0 0 8px; white-space: nowrap;
+  }
+  .nettab td { text-align: right; padding: 7px 0; color: var(--fg-bright); white-space: nowrap; }
+  .nettab th:first-child, .nettab td:first-child {
+    text-align: left; color: var(--dim);
+```
+
+   with
+
+```html
+  .nettab th {
+    font-weight: 400; color: var(--dim); font-size: 11px; text-transform: uppercase;
+    letter-spacing: .06em; text-align: right; padding: 0 0 8px;
+  }
+  .nettab td { text-align: right; padding: 7px 0; color: var(--fg-bright); }
+  @media (max-width: 700px) { .nettab th { letter-spacing: 0; } }   /* "total" fits its column */
+  .nettab th:first-child, .nettab td:first-child {
+    text-align: left; color: var(--dim);
+```
+
+3. Replace
+
+```html
+  .clock .cdte { font-size: 12px; color: var(--dim); }
+
+  .wx { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px 24px; }
+  .wx .wc { display: flex; flex-direction: column; height: 100%; }
+  .wx .wnow { display: flex; gap: 10px; align-items: baseline; }
+```
+
+   with
+
+```html
+  .clock .cdte { font-size: 12px; color: var(--dim); }
+
+  .wx { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr)); gap: 16px 24px; }
+  .wx .wc { display: flex; flex-direction: column; height: 100%; }
+  .wx .wnow { display: flex; gap: 10px; align-items: baseline; }
+```
+
+- [ ] **Step 4: Run it again and look**
 
 Run: `bash test/screens.sh && ls build/screens | wc -l`
-Expected: `screenshots in /out: no page errors`, then `46`. Open the four `build/screens/sheet-*.png`, `kiosk.png` and `settings.png` and check each style by eye: readable text, status colours distinct, no overlapping panels, phosphor in VT323, 8bit in Press Start 2P.
+Expected: `screenshots in /out: no page errors`, then `94`. Open the four `build/screens/sheet-*.png`, `kiosk.png`, `settings.png`, `390-large-node.png`, `600-comfortable-node.png` and `1280-kiosk-node.png` and check by eye: readable text, status colours distinct, nothing overlapping, phosphor in VT323, 8bit in Press Start 2P, the settings shot not in kiosk mode.
 
-To see that it catches errors: temporarily change `$("#btn-style")` to `$("#btn-stylex")` in `applyStyle`, run `bash test/screens.sh; echo $?`, expect a `pageerror: TypeError …` line and `1`, and undo the change.
+To see that it catches script errors: temporarily change `$("#btn-style")` to `$("#btn-stylex")` in `applyStyle`, run `bash test/screens.sh; echo $?`, expect a `pageerror: TypeError …` line and `1`, and undo the change.
 
-- [ ] **Step 3: Add the CI job**
+- [ ] **Step 5: Add the CI job**
 
 In `.github/workflows/ci.yml`:
 
@@ -1364,7 +1745,7 @@ In `.github/workflows/ci.yml`:
 
 ```
 
-- [ ] **Step 4: Docs**
+- [ ] **Step 6: Docs**
 
 In `README.md`:
 
@@ -1390,11 +1771,12 @@ light), e-ink (pure black and white for e-ink wall displays), high contrast
 (WCAG AAA, colour-blind-safe status colours, shaped status lamps), and the
 nord, gruvbox, dracula, catppuccin and solarized palettes. `y` cycles the
 style and `t` the mode (system, light, dark) for this browser; settings →
-appearance also sets the density (compact, comfortable, large), and saving
-makes the current look everyone's default. Open `/?kiosk` for a wall screen:
-big type, no controls, and it moves to the next server every 20 seconds
-(settings → appearance changes the interval or turns kiosk on for every
-screen; `/?kiosk=0` keeps one screen out of it).
+appearance also sets the density (compact, comfortable, large; large needs a
+screen at least 720 px wide), and saving makes the current look everyone's
+default. Open `/?kiosk` for a wall screen: big type, no controls, and it
+moves to the next server every 20 seconds. The screen remembers it, also
+across a new login; `/?kiosk=0` turns it off again, even when settings →
+appearance turns kiosk on for every screen.
 
 ## Sensors and network history
 ```
@@ -1461,16 +1843,20 @@ In `CHANGELOG.md`:
 
 ### Fixed
 - Password fields in settings look like the other fields.
+- Long values (load, sensors, network totals) wrap instead of spilling out of
+  narrow panels on phones and tablets.
+- Browsers check for a newer page and style files on every load
+  (`cache-control: no-cache`), so an upgrade shows at once.
 - Without vnStat and `NET_IFACE`, the network panel disappeared; the agent
   now takes the interface of the default route, and the panel shows the live
 ```
 
-- [ ] **Step 5: Full validation**
+- [ ] **Step 7: Full validation**
 
 Run each and compare:
 
 ```bash
-node --test test/*.test.js                         # Expected: all pass (193)
+node --test test/*.test.js                         # Expected: all pass (195)
 pipx run --spec shellcheck-py shellcheck -S warning test/screens.sh packaging/install-local.sh
 pipx run --spec shellcheck-py shellcheck -S error test/budget.sh
 bash test/budget.sh                                # Expected: every line ok
@@ -1480,9 +1866,11 @@ dpkg-deb -c build/deb/noble/servitals_*_all.deb | grep -c 'www/styles/.*\.css'  
 IMAGE_PREFIX=mirror.gcr.io/library/ packaging/autopkgtest.sh # Expected: smoke PASS, purge PASS on both series
 ```
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 8: Log the bugs and commit**
+
+In the main checkout's `.wolf/buglog.json`, add three entries (error_message, root_cause, fix, tags): values spilling out of narrow panels (`.row` and network cells never wrapped; fixed with wrapping, width-gated zoom and `test/screens.sh` checking six widths), browsers keeping an old page after an upgrade (no `cache-control` on static files; fixed with `no-cache` in Task 3), and unstyled password fields in settings (missing from the input rule; fixed in Task 2).
 
 ```bash
-git add test/screens test/screens.sh .github/workflows/ci.yml README.md CHANGELOG.md
-git commit -m "test(ui): screenshots of every style and mode in CI; docs for styles and kiosk" -m "test/screens.sh starts a demo hub with three servers and runs Playwright in its Docker image. It fails on any page or console error; CI uploads the screenshots as an artifact."
+git add www/index.html test/screens test/screens.sh .github/workflows/ci.yml README.md CHANGELOG.md
+git commit -m "test(ui): screenshots of every style, mode and width in CI; long values wrap" -m "test/screens.sh starts a demo hub with three servers and runs Playwright in its Docker image. It fails on any page or console error and on any panel whose content is wider than the panel, at 390 to 1920 px in every density and in kiosk. Load, sensor and network values now wrap. CI uploads the screenshots as an artifact."
 ```
