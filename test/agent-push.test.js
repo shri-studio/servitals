@@ -79,6 +79,7 @@ test("ONCE=1 pushes one snapshot that the hub serves", async () => {
     });
     assert.strictEqual(r.status, 0, r.stdout + r.stderr);
     assert.match(r.stdout, /event=agent\.start .*mode=push/);
+    assert.doesNotMatch(r.stdout + r.stderr, /No such file/, "a missing push-hold file is not an error");
     const cookie = cookieFrom(await login(hub.port));
     const d = JSON.parse((await request(hub.port, { path: "/data.json", headers: { cookie } })).body);
     assert.ok(d.host.name.length > 0);

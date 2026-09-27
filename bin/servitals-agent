@@ -100,7 +100,7 @@ cmd_join() {
   load_agent_env "${AGENT_ENV:-/etc/servitals/agent.env}"
   STATE_DIR="$state" CREDENTIALS_FILE="$JOIN_DIR/credentials.env" ONCE=1 HOST_ROOT="${HOST_ROOT:-/}" \
     bash "$AGENT_HOME/collect.sh" > "$JOIN_DIR/log" 2>&1 || true
-  read -r _ status err < "$state/last-push" 2>/dev/null || { status=000; err=-; }
+  read -r _ status err 2>/dev/null < "$state/last-push" || { status=000; err=-; }
   result=$(join_result "$status" "$err")
   echo "$result"
   [ "$result" = ok ] || exit 1
@@ -130,7 +130,7 @@ cmd_status() {
   fi
   echo "node:      ${id:--}"
   echo "service:   $("${SYSTEMCTL:-systemctl}" is-active servitals-agent.service 2>/dev/null || true)"
-  if read -r at status err < "$AGENT_STATE/last-push" 2>/dev/null; then
+  if read -r at status err 2>/dev/null < "$AGENT_STATE/last-push"; then
     echo "last push: $(date -d "@$at" '+%F %T') $(join_result "$status" "$err")"
   elif [ -d "$AGENT_STATE" ] && [ ! -x "$AGENT_STATE" ]; then
     echo "last push: (run with sudo to read $AGENT_STATE)"

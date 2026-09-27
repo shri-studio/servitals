@@ -109,7 +109,8 @@ push() {  # $1 = snapshot file; 0 when the hub stored it
 
 push_held() {  # 0 while an earlier error says to wait
   local until
-  read -r until < "$STATE/push-hold" 2>/dev/null || return 1
+  [ -r "$STATE/push-hold" ] || return 1   # the usual case: nothing to wait for
+  read -r until < "$STATE/push-hold" || return 1
   [[ $until =~ ^[0-9]+$ ]] && [ "$(date +%s)" -lt "$until" ]
 }
 

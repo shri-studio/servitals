@@ -213,6 +213,7 @@ test("join explains what went wrong and saves nothing", async () => {
       const r = run("servitals-agent", ["join", "--no-start", ...args], joinEnv({ CREDENTIALS_FILE: creds }));
       assert.notStrictEqual(r.status, 0);
       assert.match(r.stdout, want, args.join(" "));
+      assert.doesNotMatch(r.stderr, /No such file/, "no shell noise next to the answer");
       assert.ok(!fs.existsSync(creds));
     }
     const bad = run("servitals-agent", ["join", n.url, "nonsense"], joinEnv({ CREDENTIALS_FILE: creds }));
