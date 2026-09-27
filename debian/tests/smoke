@@ -19,6 +19,15 @@ pw=$(cat /var/lib/servitals/initial-password)
 [ "$(login admin "$pw")" = 302 ] || fail "first login with the initial password"
 wait_for "curl -fsS -b /tmp/jar $B/data.json 2>/dev/null | jq -e .host.name >/dev/null" || fail "no snapshot from the local agent"
 
+# a second machine joins (spec 13.4): here the same host with its own credentials
+join=$(servitals-ctl node add second | sed -n 's/^ *sudo servitals-agent join //p')
+[ -n "$join" ] || fail "node add printed no join command"
+# shellcheck disable=SC2086  # the join command is two words
+[ "$(CREDENTIALS_FILE=/tmp/second.env servitals-agent join --no-start $join | tail -n 1)" = "saved /tmp/second.env" ] \
+	|| fail "second agent could not join"
+wait_for "curl -fsS -b /tmp/jar $B/__ctl/nodes | jq -e 'map(select(.name == \"second\" and .status == \"online\")) | length == 1' >/dev/null" \
+	|| fail "second node not online in the fleet"
+
 printf 'another-pass-1\n' | servitals-ctl passwd --user owner
 [ "$(curl -s -o /dev/null -w '%{http_code}' -b /tmp/jar "$B/__ctl/whoami")" = 401 ] || fail "old session survived passwd"
 [ "$(login owner another-pass-1)" = 302 ] || fail "login after passwd"

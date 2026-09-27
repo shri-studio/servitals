@@ -6,6 +6,28 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+- Watch several servers: `servitals-ctl node add|list|rename|revoke` and
+  `servitals-agent join|status`. The dashboard shows a fleet grid and node
+  tabs once there is a second server; container controls stay on the hub's
+  own host.
+- `HUB_HEADERS` (for example a Cloudflare Access service token) and
+  `HUB_CA_FILE` for agents; `docs/networking.md`.
+
+### Changed
+- Agent protocol: snapshots are fully validated (schema 1); agents send
+  counters and the hub derives network rates, container CPU and the trend.
+  Snapshot `ts` is in milliseconds. Upgrade the hub and its agents together:
+  the hub refuses snapshots from older agents (`invalid_snapshot`). With
+  Docker, rebuild both images (`docker compose up -d --build`).
+- The agent stops asking a hub that no longer knows it (`unknown_node`) and
+  resends a too-large snapshot without its lists.
+
+### Security
+- An address that keeps failing agent authentication gets `429` for a
+  minute. The last accepted request time per node survives a hub restart,
+  so captured requests cannot be replayed after it.
+
 ## [0.1.0] - 2026-09-26
 
 ### Added

@@ -3,8 +3,12 @@
 .SH NAME
 servitals-agent \- metrics agent for the servitals dashboard
 .SH SYNOPSIS
+.B servitals-agent join
+.RB [ \-\-no\-start ]
+.I hub-url node-id:secret
+.br
 .B servitals-agent
-.RB { run | test }
+.RB { status | run | test }
 .br
 .B servitals-agent docker
 .RB { enable | disable }
@@ -14,6 +18,23 @@ Docker containers every INTERVAL seconds, and at once when the hub asks,
 and pushes signed snapshots to the hub. It only makes outbound
 connections and never runs anything the hub sends.
 .SH COMMANDS
+.TP
+.BI join " hub-url node-id:secret"
+Pair with a hub, using the line
+.B servitals-ctl node add
+printed there. Sends one test push and reports
+.BR ok ,
+.BR "bad secret" ,
+.BR "clock skew" ,
+.B unreachable
+or
+.BR "unsupported protocol" .
+On success it writes the credentials file and starts the service
+.RB ( \-\-no\-start
+skips that).
+.TP
+.B status
+Show the hub, the node id, the service state and the last push.
 .TP
 .B run
 Run the agent (the systemd unit uses this).
@@ -29,7 +50,9 @@ Add or remove the docker group for the agent, to list containers.
 .TP
 .I /etc/servitals/agent.env
 INTERVAL, DISKS (auto or a list of mountpoints), NET_IFACE, COLLECT_*
-switches, STAT_TIMEOUT, WAIT_SECONDS, HTTPS_PROXY, NO_PROXY, LOG_LEVEL.
+switches, STAT_TIMEOUT, WAIT_SECONDS, HTTPS_PROXY, NO_PROXY, HUB_HEADERS
+(extra request headers, for example a Cloudflare Access service token),
+HUB_CA_FILE (a private CA for an HTTPS hub), LOG_LEVEL.
 .TP
 .I /etc/servitals/agent-credentials.env
 HUB_URL, NODE_ID and NODE_SECRET (mode 0600). The servitals package writes

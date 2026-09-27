@@ -15,6 +15,20 @@ Set the admin password, and the name with
 Reads the password twice from the terminal, or one line from standard
 input. Every session ends; no restart is needed.
 .TP
+.BI "node add" " name" " \fR[\fB\-\-tag\fP" " tag" "\fR]...\fP"
+Add a server to watch. Prints the
+.B servitals-agent join
+command to run on it, with the node's secret; the secret is shown only once.
+.TP
+.B node list
+List servers with their id, name, tags and last push.
+.TP
+.BI "node rename" " id name"
+Rename a server without pairing it again.
+.TP
+.BI "node revoke" " id"
+Refuse a server's agent from now on.
+.TP
 .B bans
 List blocked addresses and the whitelist.
 .TP

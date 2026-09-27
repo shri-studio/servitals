@@ -126,6 +126,21 @@ with `sudo apt install -o Dpkg::Options::=--force-confold servitals` to
 keep your `hub.env`. Login, node and agent credentials are kept. Turn
 Docker access back on afterwards (`sudo servitals-agent docker enable`).
 
+## Watch more servers
+
+```bash
+sudo servitals-ctl node add nas --tag home        # on the hub: prints a join command
+sudo servitals-agent join http://hub.lan:20002 <node-id>:<secret>   # on the server
+```
+
+With a second server the dashboard opens on the fleet grid: one card per
+server with its status lamp, CPU, memory, temperature, a CPU sparkline and
+the fullest disk. Click a card, or a tab, for that server's panels; `f`
+goes back to the fleet. Container buttons are only offered for the hub's
+own host. Agents only make outbound requests, so watched servers need no
+open port: see [docs/networking.md](docs/networking.md) for LANs,
+Tailscale, Cloudflare tunnels, reverse proxies and HTTP proxies.
+
 ## Native install (systemd, no Docker)
 
 To run a checkout without the packages (development), install it in the same layout: The layout,
