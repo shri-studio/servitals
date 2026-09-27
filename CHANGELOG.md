@@ -7,6 +7,12 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- Styles: phosphor, e-ink, high contrast, nord, gruvbox, dracula,
+  catppuccin and solarized join classic and 8bit. Each loads only when chosen
+  (at most 3 KB); text contrast is checked for every style and mode.
+- Mode switch with a system setting (the default), density (compact,
+  comfortable, large), a hub-wide default look, and kiosk mode (`/?kiosk`).
+- CI takes screenshots of every style and mode and fails on page errors.
 - Watch several servers: `servitals-ctl node add|list|rename|revoke` and
   `servitals-agent join|status`. The dashboard shows a fleet grid and node
   tabs once there is a second server; container controls stay on the hub's
@@ -15,6 +21,9 @@ All notable changes to this project are documented here. The format follows
   `HUB_CA_FILE` for agents; `docs/networking.md`.
 
 ### Changed
+- The page follows the system's light or dark setting until someone picks a
+  mode (it used to start dark). The 8bit style moved out of the page into
+  `styles/8bit.css`; its light colours are darker so text stays readable.
 - Agent protocol: snapshots are fully validated (schema 1); agents send
   counters and the hub derives network rates, container CPU and the trend.
   Snapshot `ts` is in milliseconds. Upgrade the hub and its agents together:
@@ -24,6 +33,11 @@ All notable changes to this project are documented here. The format follows
   resends a too-large snapshot without its lists.
 
 ### Fixed
+- Password fields in settings look like the other fields.
+- Long values (load, sensors, network totals) wrap instead of spilling out of
+  narrow panels on phones and tablets.
+- Browsers check for a newer page and style files on every load
+  (`cache-control: no-cache`), so an upgrade shows at once.
 - Without vnStat and `NET_IFACE`, the network panel disappeared; the agent
   now takes the interface of the default route, and the panel shows the live
   rate with a hint to install vnStat for history.

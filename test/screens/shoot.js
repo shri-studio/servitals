@@ -1,0 +1,87 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+"use strict";
+/*
+ * Screenshots of every style in dark and light, for the fleet and the node
+ * view, plus kiosk and settings; contact sheets of them all. Exits 1 on any
+ * page error or console error. Runs inside the Playwright image:
+ *   node shoot.js <base-url> <out-dir>
+ */
+const { chromium } = require("playwright");
+const fs = require("fs");
+
+const errors = [];
+const STYLES = ["classic", "8bit", "phosphor", "eink", "contrast", "nord", "gruvbox", "dracula", "catppuccin", "solarized"];
+
+(async () => {
+  const [base, out] = process.argv.slice(2);
+  fs.mkdirSync(out, { recursive: true });
+  const browser = await chromium.launch();
+  const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 } });
+  const page = await ctx.newPage();
+  page.on("pageerror", (e) => errors.push(`pageerror: ${e}`));
+  page.on("console", (m) => { if (m.type() === "error") errors.push(`console: ${m.text()}`); });
+  await page.goto(base + "/");
+  await page.fill("input[name=username]", "demo");
+  await page.fill("input[name=password]", "demo-pass-1");
+  await Promise.all([page.waitForNavigation(), page.click("button[type=submit]")]);
+  await page.waitForTimeout(1500);
+  const local = await page.evaluate(() => localNode);
+  const shots = { fleet: [], node: [] };
+  for (const style of STYLES) for (const mode of ["dark", "light"]) {
+    await page.evaluate(([s, m]) => { localStorage.setItem("servitals.style", s); localStorage.setItem("servitals.theme", m); }, [style, mode]);
+    for (const view of ["fleet", "node"]) {
+      await page.goto(`${base}/?shot=${style}-${mode}-${view}${view === "node" ? "#node=" + local : "#fleet"}`);
+      await page.waitForTimeout(1500);
+      const f = `${out}/${view}-${style}-${mode}.png`;
+      await page.screenshot({ path: f });
+      shots[view].push([`${style} · ${mode}`, fs.readFileSync(f).toString("base64")]);
+    }
+  }
+  await page.evaluate(() => localStorage.clear());
+  await page.goto(`${base}/?kiosk#fleet`);
+  await page.waitForTimeout(1500);
+  await page.screenshot({ path: `${out}/kiosk.png` });
+  await page.evaluate(() => localStorage.clear());   // ?kiosk is remembered
+  await page.goto(`${base}/#fleet`);
+  await page.waitForTimeout(1200);
+  await page.keyboard.press("s");
+  await page.locator("#cfg-style").scrollIntoViewIfNeeded();
+  await page.screenshot({ path: `${out}/settings.png` });
+
+  // a phone and a desktop in every density and in kiosk: nothing cut off
+  for (const width of [390, 600, 768, 1024, 1280, 1920]) for (const [density, q] of [["compact", ""], ["comfortable", ""], ["large", ""], ["comfortable", "?kiosk"]]) {
+    for (const hash of ["#fleet", "#node=" + local]) {
+      await page.evaluate((d) => { localStorage.clear(); localStorage.setItem("servitals.density", d); }, density);
+      await page.setViewportSize({ width, height: 844 });
+      const name = `${width}-${q ? "kiosk" : density}-${hash === "#fleet" ? "fleet" : "node"}`;
+      await page.goto(`${base}/?shot=${name}${q ? "&kiosk" : ""}${hash}`);   // a new query: a real reload
+      await page.waitForTimeout(1200);
+      const wide = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+      // content cut off or overlapping inside a panel
+      const clipped = await page.evaluate(() => [...document.querySelectorAll(".panel:not(.hidden), .ncard, .head, .nettab td, .nettab th")]
+        .filter((p) => p.offsetParent && p.scrollWidth > p.clientWidth + 1)
+        .map((p) => (p.dataset.panel || `${p.tagName.toLowerCase()}.${p.className} "${p.textContent.trim().slice(0, 16)}"`)
+          + " +" + (p.scrollWidth - p.clientWidth) + "px"));
+      if (clipped.length) errors.push(`${name}: wider than its box: ${clipped.join(", ")}`);
+      await page.screenshot({ path: `${out}/${name}.png`, fullPage: true });
+      if (wide > 0) errors.push(`${name}: ${wide}px wider than the screen`);
+    }
+  }
+  await page.evaluate(() => localStorage.clear());
+
+  const sheet = await ctx.newPage();
+  await sheet.setViewportSize({ width: 1600, height: 1000 });
+  for (const view of Object.keys(shots)) for (let i = 0; i < shots[view].length; i += 10) {
+    await sheet.setContent(`<body style="margin:0;background:#888;font:14px sans-serif;display:grid;grid-template-columns:repeat(4,1fr);gap:4px;padding:4px">`
+      + shots[view].slice(i, i + 10).map(([t, b]) => `<figure style="margin:0"><img style="width:100%" src="data:image/png;base64,${b}">`
+        + `<figcaption style="background:#fff">${t}</figcaption></figure>`).join("") + "</body>");
+    await sheet.screenshot({ path: `${out}/sheet-${view}-${i / 10 + 1}.png`, fullPage: true });
+  }
+  await browser.close();
+  if (errors.length) { console.error(errors.join("\n")); process.exit(1); }
+  console.log(`screenshots in ${out}: no page errors`);
+})().catch((e) => {
+  // a page error usually makes a later step time out: show it first
+  console.error([...errors, String(e)].join("\n"));
+  process.exit(1);
+});

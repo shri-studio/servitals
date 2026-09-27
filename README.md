@@ -126,6 +126,20 @@ with `sudo apt install -o Dpkg::Options::=--force-confold servitals` to
 keep your `hub.env`. Login, node and agent credentials are kept. Turn
 Docker access back on afterwards (`sudo servitals-agent docker enable`).
 
+## Styles, modes and kiosk
+
+Ten styles: classic, 8bit, phosphor (green CRT in dark mode, amber in
+light), e-ink (pure black and white for e-ink wall displays), high contrast
+(WCAG AAA, colour-blind-safe status colours, shaped status lamps), and the
+nord, gruvbox, dracula, catppuccin and solarized palettes. `y` cycles the
+style and `t` the mode (system, light, dark) for this browser; settings →
+appearance also sets the density (compact, comfortable, large; large needs a
+screen at least 720 px wide), and saving makes the current look everyone's
+default. Open `/?kiosk` for a wall screen: big type, no controls, and it
+moves to the next server every 20 seconds. The screen remembers it, also
+across a new login; `/?kiosk=0` turns it off again, even when settings →
+appearance turns kiosk on for every screen.
+
 ## Sensors and network history
 
 Temperatures come from the kernel's sensor drivers (every chip it exposes;

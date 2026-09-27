@@ -17,7 +17,7 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y shellcheck
       - name: shellcheck
         run: |
-          shellcheck -S warning agent/collect.sh agent/lib/*.sh bin/servitals-agent packaging/install-local.sh packaging/*.sh packaging/docker/*.sh test/deb-migrate.sh debian/servitals.postinst debian/servitals.postrm debian/servitals-agent.postrm debian/tests/smoke debian/tests/purge
+          shellcheck -S warning agent/collect.sh agent/lib/*.sh bin/servitals-agent packaging/install-local.sh packaging/*.sh packaging/docker/*.sh test/deb-migrate.sh test/screens.sh debian/servitals.postinst debian/servitals.postrm debian/servitals-agent.postrm debian/tests/smoke debian/tests/purge
           shellcheck -S error bin/servitals-ctl bin/bans bin/unban bin/whitelist test/budget.sh test/compose-smoke.sh
       - name: node --check
         run: for f in hub/server.js hub/lib/*.js test/*.js test/helpers/*.js; do node --check "$f"; done
@@ -71,3 +71,20 @@ jobs:
         run: bash test/deb-migrate.sh resolute
       - name: PPA source packages (dry run)
         run: packaging/ppa-upload.sh ppa:prabzo/servitals
+
+  screens:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+      - name: Install agent tools
+        run: sudo apt-get update && sudo apt-get install -y jq
+      - name: Screenshots in every style and mode (fails on page errors)
+        run: bash test/screens.sh
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: screens
+          path: build/screens/

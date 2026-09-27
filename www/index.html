@@ -236,6 +236,8 @@
   .panel > h2 .h2note { color: var(--dim); font-weight: 400; letter-spacing: 0; text-transform: none; }
 
   .row { display: flex; justify-content: space-between; gap: 10px; white-space: nowrap; }
+  /* a long value wraps instead of spilling out of a narrow panel */
+  .row > .v { white-space: normal; text-align: right; min-width: 0; }
   .row + .row { margin-top: 3px; }
   .k { color: var(--dim); }
   .v { color: var(--fg-bright); }
@@ -290,9 +292,10 @@
   .nettab col.ca { width: 19%; }
   .nettab th {
     font-weight: 400; color: var(--dim); font-size: 11px; text-transform: uppercase;
-    letter-spacing: .06em; text-align: right; padding: 0 0 8px; white-space: nowrap;
+    letter-spacing: .06em; text-align: right; padding: 0 0 8px;
   }
-  .nettab td { text-align: right; padding: 7px 0; color: var(--fg-bright); white-space: nowrap; }
+  .nettab td { text-align: right; padding: 7px 0; color: var(--fg-bright); }
+  @media (max-width: 700px) { .nettab th { letter-spacing: 0; } }   /* "total" fits its column */
   .nettab th:first-child, .nettab td:first-child {
     text-align: left; color: var(--dim);
     text-transform: uppercase; letter-spacing: .05em; font-size: 12px;
@@ -412,7 +415,7 @@
   .clock .cl { font-size: 12px; color: var(--dim); letter-spacing: .1em; text-transform: uppercase; }
   .clock .cdte { font-size: 12px; color: var(--dim); }
 
-  .wx { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px 24px; }
+  .wx { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr)); gap: 16px 24px; }
   .wx .wc { display: flex; flex-direction: column; height: 100%; }
   .wx .wnow { display: flex; gap: 10px; align-items: baseline; }
   .wx .wicon { font-size: 20px; }
