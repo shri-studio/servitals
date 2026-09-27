@@ -147,3 +147,21 @@ test("a missing WWW_DIR stops the gateway at startup", async () => {
   assert.strictEqual(r.code, 1);
   assert.match(r.logs, /config\.www_missing/);
 });
+
+test("/?kiosk survives the login page, with only a fixed value in the redirect", async () => {
+  await withHub({}, async (hub) => {
+    const page = await request(hub.port, { path: "/?kiosk" });
+    assert.match(page.body, /<input type="hidden" name="kiosk" value="1">/);
+    assert.match((await request(hub.port, { path: "/?kiosk=0" })).body, /name="kiosk" value="0"/);
+    assert.doesNotMatch((await request(hub.port, { path: "/" })).body, /name="kiosk"/);
+    const odd = await request(hub.port, { path: "//[?kiosk" });
+    assert.strictEqual(odd.status, 200, "an odd path still gets the login page");
+    assert.match(odd.body, /name="kiosk" value="1"/);
+    assert.strictEqual((await login(hub.port, { form: { kiosk: "1" } })).headers.location, "/?kiosk=1");
+    assert.strictEqual((await login(hub.port, { form: { kiosk: "0" } })).headers.location, "/?kiosk=0");
+    assert.strictEqual((await login(hub.port, { form: { kiosk: "//evil.example" } })).headers.location, "/?kiosk=1");
+    assert.strictEqual((await login(hub.port)).headers.location, "/");
+    const bad = await login(hub.port, { pass: "wrong", form: { kiosk: "1" } });
+    assert.match(bad.body, /name="kiosk" value="1"/, "a failed attempt keeps kiosk for the next one");
+  });
+});

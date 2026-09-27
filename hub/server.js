@@ -295,9 +295,17 @@ button:hover{border-color:#7db2ff}
 .foot{color:#8f9bad;font-size:11.5px;padding:10px 16px;border-top:1px solid #2b3440}
 </style></head><body><div class="box">${inner}</div></body></html>`;
 
-const loginPage = (msg) => SHELL(SITE + " · login", `
+// a wall screen opened at /?kiosk keeps kiosk through the login (spec 10.3);
+// only "1" or "0" ever reaches the form and the redirect
+const kioskValue = (v) => (v === null ? "" : v === "0" ? "0" : "1");
+const kioskFromUrl = (url) => {
+  const m = /[?&]kiosk(?:=([^&#]*))?(?:[&#]|$)/.exec(url || "");
+  return m ? kioskValue(m[1] || "") : "";
+};
+const loginPage = (msg, kiosk = "") => SHELL(SITE + " · login", `
   <h1>${SITE} · authentication required</h1>
   <form class="body" method="POST" action="/__auth/login">
+    ${kiosk ? `<input type="hidden" name="kiosk" value="${kiosk}">` : ""}
     <label>username</label><input name="username" autocomplete="username" autofocus>
     <label>password</label><input name="password" type="password" autocomplete="current-password">
     <button type="submit">login</button>
@@ -425,12 +433,13 @@ async function handle(req, res) {
     const params = new URLSearchParams(body);
     const user = params.get("username") || "";
     const ok = await checkPass(user, params.get("password") || "");
+    const kiosk = kioskValue(params.get("kiosk"));
     if (ok) {
       clearFails(ip);
       log.audit("auth.login_ok", { ip, user });
       res.writeHead(302, {
         "set-cookie": `sv_session=${makeCookie()}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${SESSION_HOURS * 3600}${secure}`,
-        location: "/",
+        location: kiosk ? `/?kiosk=${kiosk}` : "/",
       });
       return res.end();
     }
@@ -449,7 +458,7 @@ async function handle(req, res) {
       log.audit("auth.login_fail", { ip, user, whitelisted: true });
     }
     res.writeHead(401, { "content-type": "text/html" });
-    return res.end(loginPage(msg));
+    return res.end(loginPage(msg, kiosk));
   }
 
   if (req.url === "/__auth/logout") {
@@ -605,7 +614,7 @@ async function handle(req, res) {
   if (authed) return UP ? proxy(req, res) : serveStatic(req, res);
 
   res.writeHead(200, { "content-type": "text/html" });
-  res.end(loginPage(null));
+  res.end(loginPage(null, kioskFromUrl(req.url)));
 }
 
 // a gateway should stay up: log and keep serving rather than exit on a stray throw

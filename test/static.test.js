@@ -37,6 +37,7 @@ test("serves index.html for / with type and validators", async () => {
     assert.strictEqual(r.headers["x-content-type-options"], "nosniff");
     assert.ok(r.headers.etag);
     assert.ok(r.headers["last-modified"]);
+    assert.strictEqual(r.headers["cache-control"], "no-cache", "browsers check for a newer page after an upgrade");
     const again = await request(port, { path: "/", headers: { "if-none-match": r.headers.etag } });
     assert.strictEqual(again.status, 304);
     assert.strictEqual(again.body, "");

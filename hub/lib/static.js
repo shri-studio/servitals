@@ -52,7 +52,7 @@ function createStatic(root) {
     const inm = req.headers["if-none-match"];
     const ims = Date.parse(req.headers["if-modified-since"] || "");
     if (inm ? inm === etag : (Number.isFinite(ims) && mtime * 1000 <= ims)) {
-      res.writeHead(304, { etag, "last-modified": st.mtime.toUTCString() });
+      res.writeHead(304, { etag, "last-modified": st.mtime.toUTCString(), "cache-control": "no-cache" });
       return res.end();
     }
     res.writeHead(200, {
@@ -60,6 +60,8 @@ function createStatic(root) {
       "content-length": st.size,
       "last-modified": st.mtime.toUTCString(),
       etag,
+      // revalidate every time (a 304 is cheap), so an upgrade shows at once
+      "cache-control": "no-cache",
       "x-content-type-options": "nosniff",
     });
     if (req.method === "HEAD") return res.end();

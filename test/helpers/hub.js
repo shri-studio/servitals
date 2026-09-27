@@ -126,8 +126,8 @@ function formBody(fields) {
   return new URLSearchParams(fields).toString();
 }
 
-async function login(port, { user = "admin", pass = DEFAULT_PASS, headers = {}, origin } = {}) {
-  const body = formBody({ username: user, password: pass });
+async function login(port, { user = "admin", pass = DEFAULT_PASS, headers = {}, origin, form = {} } = {}) {
+  const body = formBody({ username: user, password: pass, ...form });
   const h = {
     "content-type": "application/x-www-form-urlencoded",
     "content-length": Buffer.byteLength(body),
