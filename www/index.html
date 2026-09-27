@@ -102,6 +102,7 @@
 
   /* ---- kiosk (/?kiosk or settings): big type, no controls ---- */
   :root[data-kiosk] body { cursor: none; }
+  :root[data-kiosk] .overlay.open { cursor: auto; }
   @media (min-width: 960px) { :root[data-kiosk] body { zoom: 1.3; } }
   :root[data-kiosk] .keyhint, :root[data-kiosk] .prompt, :root[data-kiosk] .brand-foot,
   :root[data-kiosk] .svc-ctl, :root[data-kiosk] #tabs, :root[data-kiosk] .update-note { display: none !important; }
@@ -696,14 +697,17 @@
       </section>
 
       <section>
-        <label>appearance &mdash; changes this browser now; save to make it everyone's default</label>
+        <label>appearance &mdash; changes this browser now</label>
         <div class="addrow">
           <select id="cfg-style" aria-label="style"></select>
           <select id="cfg-mode" aria-label="mode"></select>
           <select id="cfg-density" aria-label="density"></select>
         </div>
         <div class="addrow">
-          <label class="inline"><input type="checkbox" id="cfg-kiosk"> kiosk on every screen, next node every</label>
+          <label class="inline"><input type="checkbox" id="cfg-lookdefault"> on save, make this look everyone's default</label>
+        </div>
+        <div class="addrow">
+          <label class="inline"><input type="checkbox" id="cfg-kiosk"> <span>kiosk on every screen (a screen opts out at <code>/?kiosk=0</code>), next node every</span></label>
           <input type="number" id="cfg-kiosksec" min="5" max="600" style="max-width:80px"> s
         </div>
       </section>
@@ -973,8 +977,9 @@ function applyAppearanceDefaults() {
   applyStyle(lsGet("style") || cfg.style || "classic");
   applyMode(lsGet("theme") || cfg.mode || "system");
   applyDensity(lsGet("density") || cfg.density || "comfortable");
-  // ?kiosk=0 keeps a screen out of kiosk mode when the hub turns it on for everyone
-  if (cfg.kiosk && lsGet("kiosk") !== "0") document.documentElement.setAttribute("data-kiosk", "");
+  // this screen's own ?kiosk / ?kiosk=0 wins; otherwise the hub decides, also when it turned kiosk off
+  const own = lsGet("kiosk");
+  document.documentElement.toggleAttribute("data-kiosk", own === "1" || (own !== "0" && !!cfg.kiosk));
   // remembered for the next visit, so the hub's look paints at once
   for (const k of ["style", "mode", "density"]) lsSet("hub." + k, cfg[k] || "");
   lsSet("hub.kiosk", cfg.kiosk ? "1" : "");
@@ -1546,6 +1551,7 @@ function openSettings() {
   $("#cfg-style").value = currentStyle();
   $("#cfg-mode").value = currentMode();
   $("#cfg-density").value = currentDensity();
+  $("#cfg-lookdefault").checked = false;
   $("#cfg-kiosk").checked = !!cfg.kiosk;
   $("#cfg-kiosksec").value = cfg.kioskSec || 20;
   $("#acct-msg").textContent = "";
@@ -1653,11 +1659,16 @@ async function wxSearch() {
 async function saveSettings() {
   cfg.title = $("#cfg-name").value.trim() || "servitals";
   cfg.refreshSec = clamp(+$("#cfg-refresh").value || 60, 5, 900);
-  // this browser's look becomes the hub's default for everyone
-  cfg.style = currentStyle();
-  cfg.mode = currentMode();
-  cfg.density = currentDensity();
+  // this browser's look becomes everyone's default only when asked
+  if ($("#cfg-lookdefault").checked) {
+    cfg.style = currentStyle();
+    cfg.mode = currentMode();
+    cfg.density = currentDensity();
+  }
+  const was = !!cfg.kiosk;
   cfg.kiosk = $("#cfg-kiosk").checked;
+  // whoever turns kiosk on for everyone keeps the controls in this browser
+  if (cfg.kiosk && !was && lsGet("kiosk") === null) lsSet("kiosk", "0");
   cfg.kioskSec = clamp(+$("#cfg-kiosksec").value || 20, 5, 600);
   // panels/order/size/favicon are already updated live by the settings widgets
 

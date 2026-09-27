@@ -150,5 +150,47 @@ test("?kiosk turns kiosk on and is remembered; ?kiosk=0 turns it off, even when 
   assert.strictEqual(early({ stored: { "servitals.hub.kiosk": "1" } }).attrs["data-kiosk"], "");
   assert.strictEqual(early({ stored: { "servitals.hub.kiosk": "1", "servitals.kiosk": "0" } }).attrs["data-kiosk"], undefined);
   assert.strictEqual(early({ search: "?kioskx" }).attrs["data-kiosk"], undefined);
-  assert.match(HTML, /if \(cfg\.kiosk && lsGet\("kiosk"\) !== "0"\) document\.documentElement\.setAttribute\("data-kiosk", ""\);/);
+});
+
+// runs one page function from the source with the stubs it needs
+function pageFn(name, stubs) {
+  const i = HTML.indexOf(`function ${name}(`);
+  let depth = 0, j = HTML.indexOf("{", i);
+  for (let k = j; k < HTML.length; k++) {
+    if (HTML[k] === "{") depth++;
+    if (HTML[k] === "}" && --depth === 0) { j = k + 1; break; }
+  }
+  const src = HTML.slice(i, j);
+  return new Function(...Object.keys(stubs), `${src}; return ${name};`)(...Object.values(stubs));
+}
+
+test("the hub turning kiosk off (or on) takes effect on the same load", () => {
+  const run = (cfg, own) => {
+    const attrs = { "data-kiosk": "" };   // painted from the remembered hub.kiosk
+    const documentElement = {
+      setAttribute: (k, v) => { attrs[k] = v; }, removeAttribute: (k) => { delete attrs[k]; },
+      toggleAttribute: (k, on) => { if (on) attrs[k] = ""; else delete attrs[k]; return on; },
+    };
+    const store = own === undefined ? {} : { kiosk: own };
+    pageFn("applyAppearanceDefaults", {
+      cfg, document: { documentElement }, lsGet: (k) => (k in store ? store[k] : null), lsSet: () => {},
+      applyStyle: () => {}, applyMode: () => {}, applyDensity: () => {},
+    })();
+    return "data-kiosk" in attrs;
+  };
+  assert.strictEqual(run({ kiosk: false }), false, "hub turned kiosk off");
+  assert.strictEqual(run({ kiosk: true }), true);
+  assert.strictEqual(run({ kiosk: true }, "0"), false, "this screen opted out");
+  assert.strictEqual(run({ kiosk: false }, "1"), true, "this screen asked for kiosk");
+});
+
+test("turning kiosk on for everyone does not lock the admin's own browser", () => {
+  assert.match(HTML, /:root\[data-kiosk\] \.overlay\.open \{ cursor: auto; \}/, "a pointer inside open dialogs");
+  assert.match(HTML, /a screen opts out at <code>\/\?kiosk=0<\/code>/, "the way out is in the settings panel");
+  assert.match(HTML, /if \(cfg\.kiosk && !was && lsGet\("kiosk"\) === null\) lsSet\("kiosk", "0"\);/);
+});
+
+test("saving settings changes everyone's look only when asked to", () => {
+  assert.ok(HTML.includes('id="cfg-lookdefault"'));
+  assert.match(HTML, /if \(\$\("#cfg-lookdefault"\)\.checked\) \{\n    cfg\.style = currentStyle\(\);/);
 });

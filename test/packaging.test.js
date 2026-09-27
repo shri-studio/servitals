@@ -102,3 +102,7 @@ test("the package ships the style files and the VT323 font", () => {
   }
   assert.match(read("packaging/install-local.sh"), /cp -r "\$SRC\/www\/styles" "\$SHARE\/www\/styles"/);
 });
+
+test("the Docker install also tells browsers to revalidate the page", () => {
+  assert.match(read("nginx.conf"), /location \/ \{\n\s+add_header Cache-Control "no-cache" always;/);
+});

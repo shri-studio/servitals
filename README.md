@@ -134,8 +134,9 @@ light), e-ink (pure black and white for e-ink wall displays), high contrast
 nord, gruvbox, dracula, catppuccin and solarized palettes. `y` cycles the
 style and `t` the mode (system, light, dark) for this browser; settings →
 appearance also sets the density (compact, comfortable, large; large needs a
-screen at least 720 px wide), and saving makes the current look everyone's
-default. Open `/?kiosk` for a wall screen: big type, no controls, and it
+screen at least 720 px wide), and with "make this look everyone's default"
+ticked, saving makes it the default for every browser that has not picked
+its own. Open `/?kiosk` for a wall screen: big type, no controls, and it
 moves to the next server every 20 seconds. The screen remembers it, also
 across a new login; `/?kiosk=0` turns it off again, even when settings →
 appearance turns kiosk on for every screen.
