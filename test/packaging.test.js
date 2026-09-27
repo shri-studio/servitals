@@ -92,3 +92,13 @@ test("vnStat is recommended and lm-sensors suggested for the agent, neither requ
   assert.match(agent, /^Suggests: lm-sensors$/m);
   assert.doesNotMatch(agent.match(/^Depends: .*$/m)[0], /vnstat|lm-sensors/);
 });
+
+test("the package ships the style files and the VT323 font", () => {
+  assert.match(read("debian/servitals.install"), /^www\/styles\/\*\.css usr\/share\/servitals\/www\/styles\/$/m);
+  assert.match(read("debian/servitals.install"), /^www\/fonts\/\*\.woff2 /m);
+  assert.match(read("debian/copyright"), /^Files: www\/fonts\/vt323-\*\.woff2$/m);
+  for (const p of ["nord", "gruvbox", "dracula", "catppuccin", "solarized"]) {
+    assert.match(read("debian/copyright"), new RegExp(`^Files: www/styles/${p}\\.css\nCopyright: .+\n .+\nLicense: AGPL-3\\.0-or-later and Expat$`, "m"), p);
+  }
+  assert.match(read("packaging/install-local.sh"), /cp -r "\$SRC\/www\/styles" "\$SHARE\/www\/styles"/);
+});

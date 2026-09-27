@@ -1,0 +1,23 @@
+/* SPDX-License-Identifier: AGPL-3.0-or-later */
+/* 8bit: PICO-8 palette, pixel headings, hard shadows, scanlines, blinking lamp */
+:root[data-style="8bit"] { --bg:#FFF1E8; --bg-panel:#ffffff; --border:#5F574F; --dim:#7E2553; --fg:#1D2B53; --fg-bright:#000000; --green:#008751; --cyan:#1D6FA8; --amber:#AB5236; --red:#C4003A; --magenta:#7E2553; --blue:#1D2B53; --track:#C2C3C7; --spark:#83769C; --shadow:4px 4px 0 var(--border); --glow:none; --border-w:3px; }
+:root[data-theme="dark"][data-style="8bit"] { --bg:#1D2B53; --bg-panel:#14142b; --border:#5F574F; --dim:#A99BC4; --fg:#FFF1E8; --fg-bright:#ffffff; --green:#00E436; --cyan:#29ADFF; --amber:#FFA300; --red:#FF004D; --magenta:#FF77A8; --blue:#29ADFF; --track:#2b2b45; --spark:#5F574F; --shadow:4px 4px 0 #000000; --glow:none; --border-w:3px; }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"])[data-style="8bit"] { --bg:#1D2B53; --bg-panel:#14142b; --border:#5F574F; --dim:#A99BC4; --fg:#FFF1E8; --fg-bright:#ffffff; --green:#00E436; --cyan:#29ADFF; --amber:#FFA300; --red:#FF004D; --magenta:#FF77A8; --blue:#29ADFF; --track:#2b2b45; --spark:#5F574F; --shadow:4px 4px 0 #000000; --glow:none; --border-w:3px; }
+}
+@font-face { font-family: 'Press Start 2P'; font-style: normal; font-weight: 400; font-display: swap; src: url('../fonts/press-start-2p-400.woff2') format('woff2'); }
+:root[data-style="8bit"] .head, :root[data-style="8bit"] .panel { image-rendering: pixelated; }
+:root[data-style="8bit"] .head .title, :root[data-style="8bit"] .panel > h2, :root[data-style="8bit"] .keyhint b,
+:root[data-style="8bit"] .modal h3, :root[data-style="8bit"] .ps1, :root[data-style="8bit"] .sb,
+:root[data-style="8bit"] button, :root[data-style="8bit"] .ncard .nhead { font-family: 'Press Start 2P', monospace; letter-spacing: 0; }
+:root[data-style="8bit"] .head .title { font-size: 12px; line-height: 1.8; }
+:root[data-style="8bit"] .panel > h2, :root[data-style="8bit"] .ncard .nhead { font-size: 9px; line-height: 1.9; }
+:root[data-style="8bit"] .keyhint b, :root[data-style="8bit"] .tabs button { font-size: 9px; line-height: 2.2; }
+:root[data-style="8bit"] .modal h3 { font-size: 9px; line-height: 2; }
+:root[data-style="8bit"] .head .dot, :root[data-style="8bit"] .lamp { border-radius: 0; }
+:root[data-style="8bit"] .head .dot { animation: blink8bit 1s steps(1) infinite; }
+@keyframes blink8bit { 0%,49% { opacity: 1 } 50%,100% { opacity: 0 } }
+:root[data-style="8bit"] body::after { content: ""; position: fixed; inset: 0; pointer-events: none; z-index: 999;
+  background: repeating-linear-gradient(to bottom, rgba(0,0,0,.12) 0px, rgba(0,0,0,.12) 1px, transparent 1px, transparent 3px); mix-blend-mode: multiply; }
+:root[data-theme="dark"][data-style="8bit"] body::after { mix-blend-mode: overlay; }
+@media (prefers-reduced-motion: reduce) { :root[data-style="8bit"] .head .dot { animation: none; } }

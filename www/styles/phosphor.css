@@ -1,0 +1,12 @@
+/* SPDX-License-Identifier: AGPL-3.0-or-later */
+/* phosphor: CRT terminal, green phosphor in dark mode, amber in light mode, VT323 and scanlines */
+:root[data-style="phosphor"] { --bg:#140c02; --bg-panel:#1c1204; --border:#6b4a12; --dim:#d9a03a; --fg:#ffb940; --fg-bright:#ffe2a8; --green:#ffb940; --cyan:#ffcf7a; --amber:#ffe2a8; --red:#ff6b4a; --magenta:#ffe2a8; --blue:#ffb940; --track:#2e1f07; --spark:#8a6420; --shadow:none; --glow:0 0 6px rgba(255,185,64,.5); }
+:root[data-theme="dark"][data-style="phosphor"] { --bg:#030a05; --bg-panel:#06120a; --border:#1d5c2e; --dim:#4fbf70; --fg:#5cff8a; --fg-bright:#b9ffcb; --green:#5cff8a; --cyan:#8affad; --amber:#ffd75c; --red:#ff6b5c; --magenta:#b9ffcb; --blue:#5cff8a; --track:#0d2615; --spark:#2c8a47; --shadow:none; --glow:0 0 6px rgba(92,255,138,.55); }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"])[data-style="phosphor"] { --bg:#030a05; --bg-panel:#06120a; --border:#1d5c2e; --dim:#4fbf70; --fg:#5cff8a; --fg-bright:#b9ffcb; --green:#5cff8a; --cyan:#8affad; --amber:#ffd75c; --red:#ff6b5c; --magenta:#b9ffcb; --blue:#5cff8a; --track:#0d2615; --spark:#2c8a47; --shadow:none; --glow:0 0 6px rgba(92,255,138,.55); }
+}
+@font-face { font-family: 'VT323'; font-style: normal; font-weight: 400; font-display: swap; src: url('../fonts/vt323-400.woff2') format('woff2'); }
+:root[data-style="phosphor"] body { font-family: 'VT323', monospace; font-size: 17px; line-height: 1.2; color-scheme: dark; }
+:root[data-style="phosphor"] body * { text-shadow: var(--glow); }
+:root[data-style="phosphor"] body::after { content: ""; position: fixed; inset: 0; pointer-events: none; z-index: 999;
+  background: repeating-linear-gradient(to bottom, rgba(0,0,0,.18) 0px, rgba(0,0,0,.18) 1px, transparent 1px, transparent 3px); }

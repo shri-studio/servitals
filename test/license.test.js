@@ -10,7 +10,7 @@ const ROOT = path.join(__dirname, "..");
 
 test("LICENSE is the AGPL v3 and font licenses are present", () => {
   assert.match(fs.readFileSync(path.join(ROOT, "LICENSE"), "utf8"), /GNU AFFERO GENERAL PUBLIC LICENSE\s+Version 3/);
-  for (const f of ["OFL-JetBrainsMono.txt", "OFL-PressStart2P.txt"]) {
+  for (const f of ["OFL-JetBrainsMono.txt", "OFL-PressStart2P.txt", "OFL-VT323.txt"]) {
     assert.match(fs.readFileSync(path.join(ROOT, "www", "fonts", f), "utf8"), /SIL OPEN FONT LICENSE Version 1\.1/i);
   }
 });

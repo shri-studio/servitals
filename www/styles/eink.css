@@ -1,0 +1,13 @@
+/* SPDX-License-Identifier: AGPL-3.0-or-later */
+/* e-ink: pure black and white for e-ink wall displays; warnings use weight, underline and borders instead of colour */
+:root[data-style="eink"] { --bg:#ffffff; --bg-panel:#ffffff; --border:#000000; --dim:#333333; --fg:#000000; --fg-bright:#000000; --green:#000000; --cyan:#000000; --amber:#000000; --red:#000000; --magenta:#000000; --blue:#000000; --track:#d0d0d0; --spark:#000000; --shadow:none; --glow:none; --border-w:2px; }
+:root[data-theme="dark"][data-style="eink"] { --bg:#000000; --bg-panel:#000000; --border:#ffffff; --dim:#cccccc; --fg:#ffffff; --fg-bright:#ffffff; --green:#ffffff; --cyan:#ffffff; --amber:#ffffff; --red:#ffffff; --magenta:#ffffff; --blue:#ffffff; --track:#3a3a3a; --spark:#ffffff; --shadow:none; --glow:none; --border-w:2px; }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"])[data-style="eink"] { --bg:#000000; --bg-panel:#000000; --border:#ffffff; --dim:#cccccc; --fg:#ffffff; --fg-bright:#ffffff; --green:#ffffff; --cyan:#ffffff; --amber:#ffffff; --red:#ffffff; --magenta:#ffffff; --blue:#ffffff; --track:#3a3a3a; --spark:#ffffff; --shadow:none; --glow:none; --border-w:2px; }
+}
+:root[data-style="eink"] *, :root[data-style="eink"] *::before, :root[data-style="eink"] *::after { transition: none !important; animation: none !important; }
+:root[data-style="eink"] .c-amber, :root[data-style="eink"] .hl-amber { font-weight: 700; }
+:root[data-style="eink"] .c-red, :root[data-style="eink"] .hl-red { font-weight: 700; text-decoration: underline; }
+:root[data-style="eink"] .ncard.stale, :root[data-style="eink"] .ncard.offline, :root[data-style="eink"] .ncard.waiting { opacity: 1; border-style: dashed; }
+:root[data-style="eink"] .lamp.stale, :root[data-style="eink"] .lamp.waiting { background: transparent; box-shadow: inset 0 0 0 2px var(--fg); }
+:root[data-style="eink"] .lamp.offline { border-radius: 0; }

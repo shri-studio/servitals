@@ -1,0 +1,8 @@
+/* SPDX-License-Identifier: AGPL-3.0-or-later */
+/* gruvbox: warm retro palette (gruvbox by Pavel Pertsev, MIT) */
+:root[data-style="gruvbox"] { --bg:#fbf1c7; --bg-panel:#f2e5bc; --border:#d5c4a1; --dim:#665c54; --fg:#3c3836; --fg-bright:#282828; --green:#6b660c; --cyan:#3c6e4e; --amber:#935d10; --red:#9d0006; --magenta:#8f3f71; --blue:#076678; --track:#ebdbb2; --spark:#928374; --shadow:none; --glow:none; }
+:root[data-theme="dark"][data-style="gruvbox"] { --bg:#282828; --bg-panel:#3c3836; --border:#504945; --dim:#bdae93; --fg:#ebdbb2; --fg-bright:#fbf1c7; --green:#b8bb26; --cyan:#8ec07c; --amber:#fabd2f; --red:#fb4934; --magenta:#d3869b; --blue:#83a598; --track:#504945; --spark:#928374; --shadow:none; --glow:none; }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"])[data-style="gruvbox"] { --bg:#282828; --bg-panel:#3c3836; --border:#504945; --dim:#bdae93; --fg:#ebdbb2; --fg-bright:#fbf1c7; --green:#b8bb26; --cyan:#8ec07c; --amber:#fabd2f; --red:#fb4934; --magenta:#d3869b; --blue:#83a598; --track:#504945; --spark:#928374; --shadow:none; --glow:none; }
+}
+:root[data-style="gruvbox"] .panel, :root[data-style="gruvbox"] .tabs button, :root[data-style="gruvbox"] .modal { border-radius: 6px; }

@@ -27,6 +27,11 @@ check "runtime dependencies" "$deps" 0 "packages"
 page=$(gzip -9 -c www/index.html | wc -c)
 check "first page load (gzip, no fonts)" "$page" 61440 "bytes"
 
+# 2b. every optional style, gzipped (spec 18: at most 3 KB each)
+for css in www/styles/*.css; do
+  check "style $(basename "$css" .css) (gzip)" "$(gzip -9 -c "$css" | wc -c)" 3072 "bytes"
+done
+
 # 3. gateway steady-state anonymous memory
 data=$(mktemp -d)
 port=$(node -e 'const s=require("net").createServer().listen(0,()=>{console.log(s.address().port);s.close()})')

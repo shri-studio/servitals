@@ -1,0 +1,8 @@
+/* SPDX-License-Identifier: AGPL-3.0-or-later */
+/* catppuccin: soft pastel palette, Latte light and Mocha dark (Catppuccin, MIT) */
+:root[data-style="catppuccin"] { --bg:#eff1f5; --bg-panel:#e6e9ef; --border:#ccd0da; --dim:#5c5f77; --fg:#4c4f69; --fg-bright:#1e1e2e; --green:#2e7d20; --cyan:#04709c; --amber:#9a5a0a; --red:#c10d36; --magenta:#a8408c; --blue:#1e5fe0; --track:#ccd0da; --spark:#8839ef; --shadow:none; --glow:none; }
+:root[data-theme="dark"][data-style="catppuccin"] { --bg:#1e1e2e; --bg-panel:#181825; --border:#313244; --dim:#a6adc8; --fg:#cdd6f4; --fg-bright:#ffffff; --green:#a6e3a1; --cyan:#89dceb; --amber:#f9e2af; --red:#f38ba8; --magenta:#f5c2e7; --blue:#89b4fa; --track:#313244; --spark:#cba6f7; --shadow:none; --glow:none; }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"])[data-style="catppuccin"] { --bg:#1e1e2e; --bg-panel:#181825; --border:#313244; --dim:#a6adc8; --fg:#cdd6f4; --fg-bright:#ffffff; --green:#a6e3a1; --cyan:#89dceb; --amber:#f9e2af; --red:#f38ba8; --magenta:#f5c2e7; --blue:#89b4fa; --track:#313244; --spark:#cba6f7; --shadow:none; --glow:none; }
+}
+:root[data-style="catppuccin"] .panel, :root[data-style="catppuccin"] .tabs button, :root[data-style="catppuccin"] .modal { border-radius: 6px; }

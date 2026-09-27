@@ -1,0 +1,8 @@
+/* SPDX-License-Identifier: AGPL-3.0-or-later */
+/* solarized: precise light and dark palette (Solarized by Ethan Schoonover, MIT) */
+:root[data-style="solarized"] { --bg:#fdf6e3; --bg-panel:#eee8d5; --border:#93a1a1; --dim:#4f6169; --fg:#475b62; --fg-bright:#073642; --green:#5e6d00; --cyan:#1b7a73; --amber:#7f6000; --red:#b8261f; --magenta:#a6245f; --blue:#1e6fa8; --track:#e4ddc8; --spark:#2aa198; --shadow:none; --glow:none; }
+:root[data-theme="dark"][data-style="solarized"] { --bg:#002b36; --bg-panel:#073642; --border:#586e75; --dim:#a6b3b3; --fg:#b4bfbf; --fg-bright:#eee8d5; --green:#9fb000; --cyan:#2aa198; --amber:#c9a000; --red:#f0514d; --magenta:#e05a92; --blue:#4a9ee0; --track:#0a4452; --spark:#2aa198; --shadow:none; --glow:none; }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"])[data-style="solarized"] { --bg:#002b36; --bg-panel:#073642; --border:#586e75; --dim:#a6b3b3; --fg:#b4bfbf; --fg-bright:#eee8d5; --green:#9fb000; --cyan:#2aa198; --amber:#c9a000; --red:#f0514d; --magenta:#e05a92; --blue:#4a9ee0; --track:#0a4452; --spark:#2aa198; --shadow:none; --glow:none; }
+}
+:root[data-style="solarized"] .panel, :root[data-style="solarized"] .tabs button, :root[data-style="solarized"] .modal { border-radius: 6px; }

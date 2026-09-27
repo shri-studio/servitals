@@ -1,0 +1,8 @@
+/* SPDX-License-Identifier: AGPL-3.0-or-later */
+/* dracula: purple-accented palette (Dracula Theme, MIT) */
+:root[data-style="dracula"] { --bg:#fffbeb; --bg-panel:#ffffff; --border:#cfcfde; --dim:#534d85; --fg:#1f1f1f; --fg-bright:#000000; --green:#14710a; --cyan:#036a96; --amber:#9a4812; --red:#b52f21; --magenta:#a3144d; --blue:#5a3fbf; --track:#ecebf5; --spark:#a3144d; --shadow:none; --glow:none; }
+:root[data-theme="dark"][data-style="dracula"] { --bg:#282a36; --bg-panel:#21222c; --border:#44475a; --dim:#a4acd6; --fg:#f8f8f2; --fg-bright:#ffffff; --green:#50fa7b; --cyan:#8be9fd; --amber:#ffb86c; --red:#ff6e6e; --magenta:#ff79c6; --blue:#bd93f9; --track:#44475a; --spark:#ff79c6; --shadow:none; --glow:none; }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"])[data-style="dracula"] { --bg:#282a36; --bg-panel:#21222c; --border:#44475a; --dim:#a4acd6; --fg:#f8f8f2; --fg-bright:#ffffff; --green:#50fa7b; --cyan:#8be9fd; --amber:#ffb86c; --red:#ff6e6e; --magenta:#ff79c6; --blue:#bd93f9; --track:#44475a; --spark:#ff79c6; --shadow:none; --glow:none; }
+}
+:root[data-style="dracula"] .panel, :root[data-style="dracula"] .tabs button, :root[data-style="dracula"] .modal { border-radius: 6px; }

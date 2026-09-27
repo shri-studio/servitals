@@ -1,0 +1,8 @@
+/* SPDX-License-Identifier: AGPL-3.0-or-later */
+/* nord: arctic palette (Nord by Arctic Ice Studio and Sven Greb, MIT) */
+:root[data-style="nord"] { --bg:#eceff4; --bg-panel:#e5e9f0; --border:#c9d0dc; --dim:#4c566a; --fg:#2e3440; --fg-bright:#242933; --green:#3f6b2c; --cyan:#2f6a7a; --amber:#7a5b10; --red:#9a3a43; --magenta:#7a4a70; --blue:#4c6d97; --track:#d8dee9; --spark:#81a1c1; --shadow:none; --glow:none; }
+:root[data-theme="dark"][data-style="nord"] { --bg:#2e3440; --bg-panel:#3b4252; --border:#4c566a; --dim:#d8dee9; --fg:#e5e9f0; --fg-bright:#eceff4; --green:#a3be8c; --cyan:#8fbcbb; --amber:#ebcb8b; --red:#e08a92; --magenta:#c9a3c1; --blue:#88c0d0; --track:#434c5e; --spark:#81a1c1; --shadow:none; --glow:none; }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"])[data-style="nord"] { --bg:#2e3440; --bg-panel:#3b4252; --border:#4c566a; --dim:#d8dee9; --fg:#e5e9f0; --fg-bright:#eceff4; --green:#a3be8c; --cyan:#8fbcbb; --amber:#ebcb8b; --red:#e08a92; --magenta:#c9a3c1; --blue:#88c0d0; --track:#434c5e; --spark:#81a1c1; --shadow:none; --glow:none; }
+}
+:root[data-style="nord"] .panel, :root[data-style="nord"] .tabs button, :root[data-style="nord"] .modal { border-radius: 6px; }

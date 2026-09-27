@@ -4,5 +4,6 @@ VERSION usr/share/servitals/
 www/index.html usr/share/servitals/www/
 www/config.example.json usr/share/servitals/www/
 www/fonts/*.woff2 usr/share/servitals/www/fonts/
+www/styles/*.css usr/share/servitals/www/styles/
 bin/servitals-ctl usr/bin/
 packaging/etc/hub.env etc/servitals/
