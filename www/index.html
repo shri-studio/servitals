@@ -1,11 +1,36 @@
 <!DOCTYPE html>
 <!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
-<html lang="en" data-theme="dark">
+<html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>servitals</title>
 <link rel="icon" id="favicon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' fill='%23000'/%3E%3Crect x='2' y='9' width='2' height='5' fill='%236bd88a'/%3E%3Crect x='5' y='6' width='2' height='8' fill='%236bd88a'/%3E%3Crect x='8' y='3' width='2' height='11' fill='%236bd88a'/%3E%3Crect x='11' y='7' width='2' height='7' fill='%236bd88a'/%3E%3C/svg%3E">
+<script>
+  /* style, mode, density and kiosk before the first paint, so the page never
+     flashes the default look (the hub's defaults apply once config.json loads) */
+  (function () {
+    var d = document.documentElement, get = function (k) {
+      try { return localStorage.getItem("servitals." + k); } catch (e) { return null; }
+    };
+    // this browser's choice, else the hub's default remembered from the last visit
+    var style = get("style") || get("hub.style"), mode = get("theme") || get("hub.mode"),
+        density = get("density") || get("hub.density");
+    if (mode === "light" || mode === "dark") d.setAttribute("data-theme", mode);
+    if (density === "compact" || density === "large") d.setAttribute("data-density", density);
+    // ?kiosk and ?kiosk=0 are remembered, so kiosk survives a new login
+    var q = /[?&]kiosk(?:=([^&]*))?(?:&|$)/.exec(location.search), kiosk = get("kiosk");
+    if (q) {
+      kiosk = q[1] === "0" ? "0" : "1";
+      try { localStorage.setItem("servitals.kiosk", kiosk); } catch (e) { /* private mode */ }
+    }
+    if (kiosk === "1" || (kiosk !== "0" && get("hub.kiosk") === "1")) d.setAttribute("data-kiosk", "");
+    if (style && style !== "classic" && /^[a-z0-9-]{1,32}$/.test(style)) {
+      d.setAttribute("data-style", style);
+      document.write('<link rel="stylesheet" id="style-css" href="styles/' + style + '.css">');
+    }
+  })();
+</script>
 <style>
   @font-face {
     font-family: 'JetBrains Mono'; font-style: normal; font-weight: 400;
@@ -18,10 +43,6 @@
   @font-face {
     font-family: 'JetBrains Mono'; font-style: normal; font-weight: 700;
     font-display: swap; src: url('fonts/jetbrains-mono-700.woff2') format('woff2');
-  }
-  @font-face {
-    font-family: 'Press Start 2P'; font-style: normal; font-weight: 400;
-    font-display: swap; src: url('fonts/press-start-2p-400.woff2') format('woff2');
   }
 
   /* ---- light (default) ---- */
@@ -71,85 +92,19 @@
     }
   }
 
-  /* ---- 8bit retro style: layered on top of dark/light via data-style ---- */
-  :root[data-style="8bit"] {
-    --border-w: 3px;
-    --bg:        #FFF1E8;
-    --bg-panel:  #ffffff;
-    --border:    #5F574F;
-    --dim:       #7E2553;
-    --fg:        #1D2B53;
-    --fg-bright: #000000;
-    --green:  #008751;
-    --cyan:   #29ADFF;
-    --amber:  #AB5236;
-    --red:    #FF004D;
-    --magenta:#7E2553;
-    --blue:   #1D2B53;
-    --track:  #C2C3C7;
-    --spark:  #83769C;
-    --shadow: 4px 4px 0 var(--border);
-    --glow: none;
-  }
-  :root[data-theme="dark"][data-style="8bit"] {
-    --bg:        #1D2B53;
-    --bg-panel:  #14142b;
-    --border:    #5F574F;
-    --dim:       #83769C;
-    --fg:        #FFF1E8;
-    --fg-bright: #ffffff;
-    --green:  #00E436;
-    --cyan:   #29ADFF;
-    --amber:  #FFA300;
-    --red:    #FF004D;
-    --magenta:#FF77A8;
-    --blue:   #29ADFF;
-    --track:  #2b2b45;
-    --spark:  #5F574F;
-    --shadow: 4px 4px 0 #000000;
-    --glow: none;
-  }
-  @media (prefers-color-scheme: dark) {
-    :root:not([data-theme="light"])[data-style="8bit"] {
-      --bg:#1D2B53; --bg-panel:#14142b; --border:#5F574F; --dim:#83769C;
-      --fg:#FFF1E8; --fg-bright:#ffffff; --green:#00E436; --cyan:#29ADFF;
-      --amber:#FFA300; --red:#FF004D; --magenta:#FF77A8; --blue:#29ADFF;
-      --track:#2b2b45; --spark:#5F574F; --shadow:4px 4px 0 #000000; --glow:none;
-    }
-  }
-  :root[data-style="8bit"] .head,
-  :root[data-style="8bit"] .panel {
-    image-rendering: pixelated;
-  }
-  :root[data-style="8bit"] .head .title,
-  :root[data-style="8bit"] .panel > h2,
-  :root[data-style="8bit"] .keyhint b,
-  :root[data-style="8bit"] .modal h3,
-  :root[data-style="8bit"] .ps1,
-  :root[data-style="8bit"] .sb,
-  :root[data-style="8bit"] button {
-    font-family: 'Press Start 2P', monospace;
-    letter-spacing: 0;
-  }
-  :root[data-style="8bit"] .head .title { font-size: 12px; line-height: 1.8; }
-  :root[data-style="8bit"] .panel > h2 { font-size: 9px; line-height: 1.9; }
-  :root[data-style="8bit"] .keyhint b { font-size: 9px; line-height: 2.2; }
-  :root[data-style="8bit"] .modal h3 { font-size: 9px; line-height: 2; }
-  :root[data-style="8bit"] .head .dot {
-    border-radius: 0;
-    animation: blink8bit 1s steps(1) infinite;
-  }
-  @keyframes blink8bit { 0%,49%{opacity:1} 50%,100%{opacity:0} }
-  :root[data-style="8bit"] body::after {
-    content: "";
-    position: fixed; inset: 0; pointer-events: none; z-index: 999;
-    background: repeating-linear-gradient(
-      to bottom, rgba(0,0,0,.12) 0px, rgba(0,0,0,.12) 1px,
-      transparent 1px, transparent 3px
-    );
-    mix-blend-mode: multiply;
-  }
-  :root[data-theme="dark"][data-style="8bit"] body::after { mix-blend-mode: overlay; }
+  /* ---- other styles live in styles/<name>.css and load only when chosen ---- */
+  .modal label.inline { display: inline-flex; align-items: center; gap: 6px; text-transform: none; letter-spacing: 0; margin: 0; }
+
+  /* ---- density (spec 10.3): compact, comfortable (default), large ---- */
+  :root[data-density="compact"] body { zoom: .88; }
+  :root[data-density="compact"] .grid, :root[data-density="compact"] .fleet { gap: 10px; }
+  @media (min-width: 720px) { :root[data-density="large"] body { zoom: 1.18; } }   /* a phone has no room to grow */
+
+  /* ---- kiosk (/?kiosk or settings): big type, no controls ---- */
+  :root[data-kiosk] body { cursor: none; }
+  @media (min-width: 960px) { :root[data-kiosk] body { zoom: 1.3; } }
+  :root[data-kiosk] .keyhint, :root[data-kiosk] .prompt, :root[data-kiosk] .brand-foot,
+  :root[data-kiosk] .svc-ctl, :root[data-kiosk] #tabs, :root[data-kiosk] .update-note { display: none !important; }
 
   .logout-form { display: inline; }
   .linkbtn { background: none; border: 0; padding: 0; font: inherit; color: var(--dim); cursor: pointer; }
@@ -509,7 +464,7 @@
   .modal .item { display: flex; align-items: center; gap: 8px; margin-bottom: 5px; }
   .modal .item .txt { flex: 1; color: var(--fg); }
   .modal .item .rm { color: var(--red); cursor: pointer; border: var(--border-w, 1px) solid var(--border); padding: 0 7px; }
-  .modal input[type=text], .modal input[type=number], .modal select {
+  .modal input[type=text], .modal input[type=password], .modal input[type=number], .modal select {
     background: var(--bg); border: var(--border-w, 1px) solid var(--border); color: var(--fg-bright);
     font-family: inherit; font-size: 12px; padding: 5px 8px; width: 100%;
   }
@@ -738,6 +693,19 @@
       </section>
 
       <section>
+        <label>appearance &mdash; changes this browser now; save to make it everyone's default</label>
+        <div class="addrow">
+          <select id="cfg-style" aria-label="style"></select>
+          <select id="cfg-mode" aria-label="mode"></select>
+          <select id="cfg-density" aria-label="density"></select>
+        </div>
+        <div class="addrow">
+          <label class="inline"><input type="checkbox" id="cfg-kiosk"> kiosk on every screen, next node every</label>
+          <input type="number" id="cfg-kiosksec" min="5" max="600" style="max-width:80px"> s
+        </div>
+      </section>
+
+      <section>
         <label>login &mdash; name and password</label>
         <div class="addrow">
           <input type="text" id="acct-user" autocomplete="username" placeholder="name" style="max-width:160px">
@@ -937,39 +905,91 @@ function applyVersion(v) {
   lsSet("version", v);
 }
 
-/* ------------------------------------------------------------------ theme */
-function currentTheme() {
-  return document.documentElement.getAttribute("data-theme")
-    || (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+/* ------------------------------------------------------------------ appearance
+   Style and mode are independent (spec 10.2). A choice made in this browser
+   wins; otherwise the hub's default from config.json applies. Each style but
+   classic is a file in styles/, loaded only when chosen. */
+const STYLES = [
+  { id: "classic", label: "classic", group: "v1" },
+  { id: "8bit", label: "8bit", group: "v1" },
+  { id: "phosphor", label: "phosphor", group: "v1" },
+  { id: "eink", label: "e-ink", group: "v1" },
+  { id: "contrast", label: "high contrast", group: "access" },
+  { id: "nord", label: "nord", group: "palette" },
+  { id: "gruvbox", label: "gruvbox", group: "palette" },
+  { id: "dracula", label: "dracula", group: "palette" },
+  { id: "catppuccin", label: "catppuccin", group: "palette" },
+  { id: "solarized", label: "solarized", group: "palette" },
+];
+const MODES = ["system", "light", "dark"];
+const DENSITIES = ["compact", "comfortable", "large"];
+
+function currentStyle() { return document.documentElement.getAttribute("data-style") || "classic"; }
+function currentMode() { return document.documentElement.getAttribute("data-theme") || "system"; }
+function currentDensity() { return document.documentElement.getAttribute("data-density") || "comfortable"; }
+
+function applyStyle(id) {
+  if (!STYLES.some(s => s.id === id)) id = "classic";
+  const d = document.documentElement;
+  let link = $("#style-css");
+  if (id === "classic") {
+    d.removeAttribute("data-style");
+    if (link) link.remove();
+  } else {
+    if (!link) {
+      link = document.createElement("link");
+      link.rel = "stylesheet"; link.id = "style-css";
+      document.head.appendChild(link);
+    }
+    link.href = `styles/${id}.css`;
+    d.setAttribute("data-style", id);
+  }
+  $("#btn-style").textContent = `[y] ${(STYLES.find(s => s.id === id) || STYLES[0]).label}`;
+}
+function applyMode(m) {
+  if (m === "light" || m === "dark") document.documentElement.setAttribute("data-theme", m);
+  else document.documentElement.removeAttribute("data-theme");
+  $("#btn-theme").textContent = `[t] ${currentMode()}`;
+}
+function applyDensity(n) {
+  if (n === "compact" || n === "large") document.documentElement.setAttribute("data-density", n);
+  else document.documentElement.removeAttribute("data-density");
+}
+// the keys change this browser only
+function toggleStyle() {
+  const i = STYLES.findIndex(s => s.id === currentStyle());
+  const next = STYLES[(i + 1) % STYLES.length].id;
+  applyStyle(next); lsSet("style", next);
 }
 function toggleTheme() {
-  const next = currentTheme() === "dark" ? "light" : "dark";
-  document.documentElement.setAttribute("data-theme", next);
-  $("#btn-theme").textContent = `[t] ${next}`;
-  lsSet("theme", next);
+  const next = MODES[(MODES.indexOf(currentMode()) + 1) % MODES.length];
+  applyMode(next); lsSet("theme", next);
 }
-(function initTheme() {
-  let t = null;
-  t = lsGet("theme");
-  if (t === "light" || t === "dark") document.documentElement.setAttribute("data-theme", t);
-})();
+// after config.json: the hub's defaults where this browser has no choice of its own
+function applyAppearanceDefaults() {
+  applyStyle(lsGet("style") || cfg.style || "classic");
+  applyMode(lsGet("theme") || cfg.mode || "system");
+  applyDensity(lsGet("density") || cfg.density || "comfortable");
+  // ?kiosk=0 keeps a screen out of kiosk mode when the hub turns it on for everyone
+  if (cfg.kiosk && lsGet("kiosk") !== "0") document.documentElement.setAttribute("data-kiosk", "");
+  // remembered for the next visit, so the hub's look paints at once
+  for (const k of ["style", "mode", "density"]) lsSet("hub." + k, cfg[k] || "");
+  lsSet("hub.kiosk", cfg.kiosk ? "1" : "");
+}
 
-const STYLES = ["classic", "8bit"];   // orthogonal to theme; append future styles here
-function currentStyle() {
-  return document.documentElement.getAttribute("data-style") || "classic";
+/* ------------------------------------------------------------------ kiosk
+   Cycles through the nodes every kioskSec seconds (spec 10.3). */
+let kioskTimer = null;
+function startKiosk() {
+  clearInterval(kioskTimer);
+  if (!document.documentElement.hasAttribute("data-kiosk")) return;
+  kioskTimer = setInterval(() => {
+    if (fleetNodes.length < 2) return;
+    const ids = fleetNodes.map(n => n.id);
+    const now = view === "fleet" ? -1 : ids.indexOf(currentNode || localNode);
+    location.hash = "#node=" + ids[(now + 1) % ids.length];
+  }, clamp(+cfg.kioskSec || 20, 5, 600) * 1000);
 }
-function toggleStyle() {
-  const next = STYLES[(STYLES.indexOf(currentStyle()) + 1) % STYLES.length];
-  if (next === "classic") document.documentElement.removeAttribute("data-style");
-  else document.documentElement.setAttribute("data-style", next);
-  $("#btn-style").textContent = `[y] ${next}`;
-  lsSet("style", next);
-}
-(function initStyle() {
-  let s = null;
-  s = lsGet("style");
-  if (STYLES.includes(s) && s !== "classic") document.documentElement.setAttribute("data-style", s);
-})();
 
 /* ------------------------------------------------------------------ render: metrics */
 let lastData = null;
@@ -1514,6 +1534,17 @@ function openSettings() {
   $("#cfg-refresh").value = cfg.refreshSec;
   $("#export-wrap").classList.add("hidden");
   $("#acct-user").value = whoUser;
+  const groups = { v1: "styles", access: "accessibility", palette: "palettes" };
+  $("#cfg-style").innerHTML = Object.entries(groups).map(([g, name]) => `<optgroup label="${name}">`
+    + STYLES.filter(x => x.group === g).map(x => `<option value="${x.id}">${esc(x.label)}</option>`).join("")
+    + "</optgroup>").join("");
+  $("#cfg-mode").innerHTML = MODES.map(m => `<option value="${m}">${m}</option>`).join("");
+  $("#cfg-density").innerHTML = DENSITIES.map(n => `<option value="${n}">${n}</option>`).join("");
+  $("#cfg-style").value = currentStyle();
+  $("#cfg-mode").value = currentMode();
+  $("#cfg-density").value = currentDensity();
+  $("#cfg-kiosk").checked = !!cfg.kiosk;
+  $("#cfg-kiosksec").value = cfg.kioskSec || 20;
   $("#acct-msg").textContent = "";
   $("#overlay").classList.add("open");
 }
@@ -1619,6 +1650,12 @@ async function wxSearch() {
 async function saveSettings() {
   cfg.title = $("#cfg-name").value.trim() || "servitals";
   cfg.refreshSec = clamp(+$("#cfg-refresh").value || 60, 5, 900);
+  // this browser's look becomes the hub's default for everyone
+  cfg.style = currentStyle();
+  cfg.mode = currentMode();
+  cfg.density = currentDensity();
+  cfg.kiosk = $("#cfg-kiosk").checked;
+  cfg.kioskSec = clamp(+$("#cfg-kiosksec").value || 20, 5, 600);
   // panels/order/size/favicon are already updated live by the settings widgets
 
   applyBranding();
@@ -1705,8 +1742,7 @@ document.addEventListener("visibilitychange", () => {
 (async function () {
   await loadConfig();
   $("#ps1").textContent = "visitor@" + (cfg.title || "host");
-  $("#btn-theme").textContent = `[t] ${currentTheme()}`;
-  $("#btn-style").textContent = `[y] ${currentStyle()}`;
+  applyAppearanceDefaults();
   applyBranding();
   renderClocks();
   applyLayout();
@@ -1715,6 +1751,7 @@ document.addEventListener("visibilitychange", () => {
   await loadNodes();
   route();
   window.addEventListener("hashchange", () => { route(); refreshNow(true); });
+  startKiosk();
   $("#tabs").onclick = e => {
     const b = e.target.closest("button[data-go]");
     if (b) location.hash = b.dataset.go === "fleet" ? "#fleet" : "#node=" + b.dataset.go;
@@ -1729,6 +1766,9 @@ document.addEventListener("visibilitychange", () => {
   $("#btn-settings").onclick = openSettings;
   $("#settings-close").onclick = closeSettings;
   $("#acct-save").onclick = saveAccount;
+  $("#cfg-style").onchange = e => { applyStyle(e.target.value); lsSet("style", e.target.value); };
+  $("#cfg-mode").onchange = e => { applyMode(e.target.value); lsSet("theme", e.target.value); };
+  $("#cfg-density").onchange = e => { applyDensity(e.target.value); lsSet("density", e.target.value); };
   $("#btn-theme").onclick = toggleTheme;
   $("#btn-style").onclick = toggleStyle;
   $("#btn-refresh").onclick = refreshNow;

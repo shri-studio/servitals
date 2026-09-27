@@ -82,3 +82,73 @@ test("the node tabs sit at the top, above the header", () => {
   const head = HTML.indexOf('<div class="head">');
   assert.ok(tabs > 0 && head > 0 && tabs < head, "tabs before the header bar");
 });
+
+test("style, mode, density and kiosk are applied before the first paint", () => {
+  const head = HTML.slice(0, HTML.indexOf("<style>"));
+  assert.match(head, /localStorage\.getItem\("servitals\." \+ k\)/);
+  assert.match(head, /\/\^\[a-z0-9-\]\{1,32\}\$\/\.test\(style\)/, "only a plain style name reaches the link");
+  assert.match(head, /d\.setAttribute\("data-kiosk", ""\)/);
+  assert.doesNotMatch(HTML.slice(0, 200), /data-theme="dark"/, "no forced dark mode: the default is the system's");
+});
+
+test("8bit lives in its own file, not in the first page load", () => {
+  assert.doesNotMatch(HTML, /data-style="8bit"\]/);
+  assert.doesNotMatch(HTML, /press-start-2p-400\.woff2/);
+});
+
+test("the settings panel sets style, mode, density and kiosk", () => {
+  for (const id of ["cfg-style", "cfg-mode", "cfg-density", "cfg-kiosk", "cfg-kiosksec"]) {
+    assert.ok(HTML.includes(`id="${id}"`), `missing #${id}`);
+  }
+  assert.match(HTML, /cfg\.style = currentStyle\(\);/);
+  assert.match(HTML, /applyStyle\(lsGet\("style"\) \|\| cfg\.style \|\| "classic"\)/);
+  assert.match(HTML, /\.modal input\[type=password\]/, "password fields look like the other fields");
+});
+
+// runs the early <head> script against a fake document, as a browser would
+function early({ search = "", stored = {} } = {}) {
+  const src = HTML.slice(HTML.indexOf("<script>") + 8, HTML.indexOf("</script>"));
+  const attrs = {}; const written = [];
+  const document = {
+    documentElement: { setAttribute: (k, v) => { attrs[k] = v; } },
+    write: (s) => written.push(s),
+  };
+  const localStorage = { getItem: (k) => (k in stored ? stored[k] : null), setItem: (k, v) => { stored[k] = String(v); } };
+  new Function("document", "localStorage", "location", src)(document, localStorage, { search });
+  return { attrs, written, stored };
+}
+
+test("the early script applies a stored look and refuses odd style names", () => {
+  const r = early({ stored: { "servitals.style": "nord", "servitals.theme": "light", "servitals.density": "large" } });
+  assert.deepStrictEqual(r.attrs, { "data-theme": "light", "data-density": "large", "data-style": "nord" });
+  assert.deepStrictEqual(r.written, ['<link rel="stylesheet" id="style-css" href="styles/nord.css">']);
+  for (const bad of ['x"><script>alert(1)</script>', "../../etc", "Nord"]) {
+    assert.deepStrictEqual(early({ stored: { "servitals.style": bad } }).written, [], bad);
+  }
+  assert.deepStrictEqual(early({ stored: { "servitals.theme": "system", "servitals.density": "huge" } }).attrs, {});
+});
+
+test("the hub's default look from the last visit paints at once; this browser's own choice wins", () => {
+  const hub = { "servitals.hub.style": "phosphor", "servitals.hub.mode": "dark", "servitals.hub.density": "compact" };
+  const r = early({ stored: { ...hub } });
+  assert.deepStrictEqual(r.attrs, { "data-theme": "dark", "data-density": "compact", "data-style": "phosphor" });
+  const own = early({ stored: { ...hub, "servitals.style": "nord", "servitals.theme": "light" } });
+  assert.strictEqual(own.attrs["data-style"], "nord");
+  assert.strictEqual(own.attrs["data-theme"], "light");
+  assert.match(HTML, /lsSet\("hub\." \+ k, cfg\[k\] \|\| ""\)/, "the page remembers the hub's defaults");
+});
+
+test("?kiosk turns kiosk on and is remembered; ?kiosk=0 turns it off, even when the hub turns it on for everyone", () => {
+  const on = early({ search: "?kiosk" });
+  assert.strictEqual(on.attrs["data-kiosk"], "");
+  assert.strictEqual(on.stored["servitals.kiosk"], "1");
+  assert.strictEqual(early({ search: "?a=1&kiosk=1" }).attrs["data-kiosk"], "");
+  assert.strictEqual(early({ stored: { "servitals.kiosk": "1" } }).attrs["data-kiosk"], "", "back after the session ran out");
+  const off = early({ search: "?kiosk=0", stored: { "servitals.kiosk": "1" } });
+  assert.strictEqual(off.attrs["data-kiosk"], undefined);
+  assert.strictEqual(off.stored["servitals.kiosk"], "0");
+  assert.strictEqual(early({ stored: { "servitals.hub.kiosk": "1" } }).attrs["data-kiosk"], "");
+  assert.strictEqual(early({ stored: { "servitals.hub.kiosk": "1", "servitals.kiosk": "0" } }).attrs["data-kiosk"], undefined);
+  assert.strictEqual(early({ search: "?kioskx" }).attrs["data-kiosk"], undefined);
+  assert.match(HTML, /if \(cfg\.kiosk && lsGet\("kiosk"\) !== "0"\) document\.documentElement\.setAttribute\("data-kiosk", ""\);/);
+});
