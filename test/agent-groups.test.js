@@ -178,4 +178,42 @@ test("temperatures outside -50..150 °C (unconnected sensor inputs) are dropped"
   assert.strictEqual(t.max, 51);
 });
 
+
+test("without vnStat or NET_IFACE the interface comes from the host's default route", () => {
+  const stub = fs.mkdtempSync(path.join(os.tmpdir(), "sv-stub-"));
+  fs.writeFileSync(path.join(stub, "vnstat"), "#!/bin/sh\nexit 1\n", { mode: 0o755 });
+  const host = fakeHost({ ...BASE,
+    "proc/1/net/route": "Iface\tDestination\tGateway\tFlags\nlo\t0000007F\t00000000\t0001\ndocker0\t000011AC\t00000000\t0001\neth9\t00000000\t0101A8C0\t0003\n" });
+  const r = runGroup(host, "pick_iface", { PATH: `${stub}:${process.env.PATH}` });
+  assert.strictEqual(r.stdout.trim(), "eth9");
+  const pinned = runGroup(host, "pick_iface", { IFACE_ENV: "wlan0", PATH: `${stub}:${process.env.PATH}` });
+  assert.strictEqual(pinned.stdout.trim(), "wlan0", "NET_IFACE still wins");
+});
+
+test("without vnStat the network group still has counters", () => {
+  const stub = fs.mkdtempSync(path.join(os.tmpdir(), "sv-stub-"));
+  fs.writeFileSync(path.join(stub, "vnstat"), "#!/bin/sh\nexit 1\n", { mode: 0o755 });
+  const host = fakeHost({ ...BASE, "sys/class/net/eth9/statistics/rx_bytes": "1234\n", "sys/class/net/eth9/statistics/tx_bytes": "99\n" });
+  const n = json(runGroup(host, 'net_json eth9', { PATH: `${stub}:${process.env.PATH}` }));
+  assert.deepStrictEqual(n, { iface: "eth9", rxBytes: 1234, txBytes: 99, vnstat: null });
+});
+
+test("every hwmon chip is read; the CPU sensor, not a disk, is the headline", () => {
+  const host = fakeHost({ ...BASE,
+    "sys/class/hwmon/hwmon1/name": "nvme\n", "sys/class/hwmon/hwmon1/temp1_input": "60000\n", "sys/class/hwmon/hwmon1/temp1_label": "Composite\n",
+    "sys/class/hwmon/hwmon2/name": "drivetemp\n", "sys/class/hwmon/hwmon2/temp1_input": "35000\n" });
+  const t = json(runGroup(host, "temp_json"));
+  assert.strictEqual(t.package, 46, "coretemp's package sensor, not the NVMe Composite");
+  assert.strictEqual(t.max, 60);
+  assert.deepStrictEqual(t.sensors.map((x) => x.label).sort(), ["Core 0", "Package id 0", "drivetemp", "nvme Composite"]);
+});
+
+test("a laptop or VM with only acpitz still reports a temperature", () => {
+  const files = { ...BASE };
+  for (const k of Object.keys(files)) if (k.startsWith("sys/class/hwmon/")) delete files[k];
+  Object.assign(files, { "sys/class/hwmon/hwmon0/name": "acpitz\n", "sys/class/hwmon/hwmon0/temp1_input": "41000\n" });
+  const t = json(runGroup(fakeHost(files), "temp_json"));
+  assert.deepStrictEqual([t.package, t.max, t.sensors.length], [41, 41, 1]);
+});
+
 module.exports = { fakeHost, runGroup, BASE, json };

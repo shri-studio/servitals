@@ -126,6 +126,15 @@ with `sudo apt install -o Dpkg::Options::=--force-confold servitals` to
 keep your `hub.env`. Login, node and agent credentials are kept. Turn
 Docker access back on afterwards (`sudo servitals-agent docker enable`).
 
+## Sensors and network history
+
+Temperatures come from the kernel's sensor drivers (every chip it exposes;
+the CPU is the headline). If a motherboard shows none, `sudo apt install
+lm-sensors && sudo sensors-detect` loads the right driver. The network
+panel's live rate needs nothing; today, month, all-time and the 30-day /
+24-hour bars come from vnStat, which the package recommends (`apt install
+vnstat` if you skipped recommends). Without it the panel says so.
+
 ## Watch more servers
 
 ```bash

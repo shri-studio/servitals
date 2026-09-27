@@ -72,3 +72,7 @@ test("a panel whose group the node does not send is hidden, never left from the 
   assert.match(HTML, /for \(const \[panel, group\] of \[\["mem", "mem"\], \["cpu", "cpu"\], \["temp", "temp"\], \["storage", "disks"\], \["docker", "docker"\]\]\)/);
   assert.match(HTML, /\.classList\.toggle\("hidden", !d\[group\] \|\| cfg\.panels\[panel\] === false\)/);
 });
+
+test("without vnStat the network panel shows the live rate and says how to get history", () => {
+  assert.match(HTML, /install vnstat for today, month and 30-day history/);
+});

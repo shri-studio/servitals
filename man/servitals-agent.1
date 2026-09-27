@@ -46,6 +46,13 @@ snapshot. Nothing is sent.
 .BR "docker enable" | disable
 Add or remove the docker group for the agent, to list containers.
 .B The docker group can take over the host as root.
+.SH SENSORS AND HISTORY
+Temperatures come from every sensor chip the kernel exposes; the headline is
+the CPU's. For a motherboard chip the kernel does not know yet, run
+.B sensors\-detect
+from lm\-sensors once. The network panel's live rate needs nothing; its
+today, month and 30\-day history comes from vnStat (recommended by this
+package).
 .SH FILES
 .TP
 .I /etc/servitals/agent.env

@@ -25,6 +25,7 @@ Package: servitals-agent
 Architecture: all
 Depends: ${misc:Depends}, jq, curl
 Recommends: vnstat
+Suggests: lm-sensors
 Description: metrics agent for the servitals dashboard
  A small bash agent that samples memory, CPU, temperatures, disks, network
  traffic and Docker containers, and pushes signed snapshots to a servitals

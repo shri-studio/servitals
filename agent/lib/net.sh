@@ -5,7 +5,12 @@
 # net: live rate from interface counters, history from vnStat
 
 pick_iface() {
+  local iface
   if [ -n "$IFACE_ENV" ]; then echo "$IFACE_ENV"; return; fi
+  # the interface of the host's default route (pid 1's view, so the Docker
+  # agent sees the host's routes, not its container's); no vnStat needed
+  iface=$(awk 'NR > 1 && $2 == "00000000" && $1 != "lo" { print $1; exit }' "$HOST/proc/1/net/route" 2>/dev/null)
+  if [ -n "$iface" ]; then echo "$iface"; return; fi
   vnstat --json --dbdir "$VNSTAT_DB" 2>/dev/null \
     | jq -r '.interfaces[].name' 2>/dev/null \
     | grep -Ev '^(lo|docker|veth|br-|virbr|tap|tun)' | head -n1

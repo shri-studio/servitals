@@ -84,3 +84,11 @@ test("shell scripts parse", () => {
     assert.strictEqual(r.status, 0, `${f}: ${r.stderr}`);
   }
 });
+
+test("vnStat is recommended and lm-sensors suggested for the agent, neither required", () => {
+  const c = read("debian/control");
+  const agent = c.slice(c.indexOf("Package: servitals-agent"));
+  assert.match(agent, /^Recommends: vnstat$/m);
+  assert.match(agent, /^Suggests: lm-sensors$/m);
+  assert.doesNotMatch(agent.match(/^Depends: .*$/m)[0], /vnstat|lm-sensors/);
+});

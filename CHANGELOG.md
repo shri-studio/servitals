@@ -23,6 +23,14 @@ All notable changes to this project are documented here. The format follows
 - The agent stops asking a hub that no longer knows it (`unknown_node`) and
   resends a too-large snapshot without its lists.
 
+### Fixed
+- Without vnStat and `NET_IFACE`, the network panel disappeared; the agent
+  now takes the interface of the default route, and the panel shows the live
+  rate with a hint to install vnStat for history.
+- Temperatures came only from a fixed list of chips (no `acpitz`, NVMe,
+  `drivetemp`, `amdgpu`); every chip is read now and the CPU stays the
+  headline. `servitals-agent` suggests `lm-sensors`.
+
 ### Security
 - An address that keeps failing agent authentication gets `429` for a
   minute. The last accepted request time per node survives a hub restart,

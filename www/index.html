@@ -1225,8 +1225,8 @@ function renderMetrics(d) {
     const now = new Date();
     const dim = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
     const frac = (now.getDate() - 1 + now.getHours() / 24) / dim;
-    $("#net-est").textContent = n.month && frac > 0.02
-      ? "projected " + fmtBytes((n.month.rx + n.month.tx) / frac) + " this month" : "";
+    $("#net-est").textContent = !n.month ? "live rate only · install vnstat for today, month and 30-day history"
+      : frac > 0.02 ? "projected " + fmtBytes((n.month.rx + n.month.tx) / frac) + " this month" : "";
 
     netData = n;
     renderNetBars();
