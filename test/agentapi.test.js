@@ -197,3 +197,25 @@ test("a captured push cannot be replayed after a hub restart", async () => {
     assert.strictEqual(fs.statSync(path.join(dir, "replay.json")).mode & 0o777, 0o600);
   } finally { await b.stop(); fs.rmSync(dir, { recursive: true, force: true }); }
 });
+
+test("failures of one node or of unknown ids never lock out another node at the same address", async () => {
+  await withHub(async (hub, c) => {
+    const other = JSON.parse(require("node:child_process").execFileSync(process.execPath,
+      [path.join(__dirname, "..", "hub", "lib", "nodes.js"), path.join(hub.dataDir, "nodes.json"), "add", "other"]).toString());
+    for (let i = 0; i < 30; i++) {
+      assert.strictEqual((await signed(hub, c, { body: snap(), secret: "ab".repeat(32) })).status, 401);
+      assert.strictEqual((await signed(hub, { ...c, id: "aaaaaaaaaaaa" }, { body: snap() })).status, 401);
+    }
+    assert.strictEqual((await signed(hub, { ...c, id: "aaaaaaaaaaaa" }, { body: snap() })).status, 429, "junk ids are slowed down");
+    assert.strictEqual((await signed(hub, other, { body: snap() })).status, 200, "a healthy node behind the same address still pushes");
+  });
+});
+
+test("replays are not counted as authentication failures", async () => {
+  await withHub(async (hub, c) => {
+    const ok = await signed(hub, c, { body: snap() });
+    for (let i = 0; i < 35; i++) assert.strictEqual((await signed(hub, c, { body: snap(), ts: ok.ts })).status, 401);
+    const wait = await signed(hub, c, { method: "GET", path: WAIT, headers: { "x-servitals-wait": "5" } });
+    assert.strictEqual(wait.status, 204);
+  });
+});

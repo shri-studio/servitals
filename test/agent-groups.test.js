@@ -169,4 +169,13 @@ test("DISKS=auto finds real filesystems and skips system, pseudo and bind mounts
   assert.deepStrictEqual(d.map((x) => x.mount), ["/", "/srv", "/mnt/share", "/mnt/elements"]);
 });
 
+
+test("temperatures outside -50..150 °C (unconnected sensor inputs) are dropped", () => {
+  const host = fakeHost({ ...BASE, "sys/class/hwmon/hwmon1/name": "it8728\n", "sys/class/hwmon/hwmon1/temp1_input": "-128000\n",
+    "sys/class/hwmon/hwmon1/temp2_input": "255000\n", "sys/class/hwmon/hwmon1/temp3_input": "38000\n" });
+  const t = json(runGroup(host, "temp_json"));
+  assert.deepStrictEqual(t.sensors.map((x) => x.value).sort((a, b) => a - b), [38, 46, 51]);
+  assert.strictEqual(t.max, 51);
+});
+
 module.exports = { fakeHost, runGroup, BASE, json };

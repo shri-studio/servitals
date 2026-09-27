@@ -4,6 +4,9 @@
 # (globals such as HOST, STATE and NCPU are set by collect.sh)
 # temp: hwmon sensors, thermal zones as fallback
 
+# an unconnected sensor input reads -128 or 255 °C: leave those out
+in_range() { [[ $1 =~ ^-?[0-9]+$ ]] && [ "$1" -ge -50 ] && [ "$1" -le 150 ]; }
+
 temp_json() {
   # collect "label<TAB>value" lines, then one jq pass (labels never contain tabs)
   local lines="" hw nm f base lbl val z
@@ -19,7 +22,7 @@ temp_json() {
       base=${f%_input}
       lbl=$(cat "${base}_label" 2>/dev/null || echo "$nm")
       val=$(awk '{printf "%.0f", $1/1000}' "$f" 2>/dev/null)
-      [ -n "$val" ] && lines+="$lbl"$'\t'"$val"$'\n'
+      in_range "$val" && lines+="$lbl"$'\t'"$val"$'\n'
     done
   done
   if [ -z "$lines" ]; then
@@ -27,7 +30,7 @@ temp_json() {
       [ -r "$z/temp" ] || continue
       lbl=$(cat "$z/type" 2>/dev/null || echo zone)
       val=$(awk '{printf "%.0f", $1/1000}' "$z/temp" 2>/dev/null)
-      [ -n "$val" ] && lines+="$lbl"$'\t'"$val"$'\n'
+      in_range "$val" && lines+="$lbl"$'\t'"$val"$'\n'
     done
   fi
   printf '%s' "$lines" | jq -R -s '

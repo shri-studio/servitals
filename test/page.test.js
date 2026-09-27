@@ -60,3 +60,15 @@ test("fleet numbers show a dash when unknown", () => {
   assert.strictEqual(fmtVal(12.6, "%"), "13%");
   assert.strictEqual(fmtVal(0, "°C"), "0°C");
 });
+
+test("vnStat bar titles from remote nodes are escaped, also in the tooltip", () => {
+  assert.doesNotMatch(HTML, /data-t="\$\{x\.title\}"/);
+  assert.match(HTML, /data-t="\$\{esc\(x\.title\)\}"/);
+  assert.doesNotMatch(HTML, /\$\{d\.dataset\.t\}/);
+  assert.match(HTML, /\$\{esc\(d\.dataset\.t\)\}/);
+});
+
+test("a panel whose group the node does not send is hidden, never left from the previous node", () => {
+  assert.match(HTML, /for \(const \[panel, group\] of \[\["mem", "mem"\], \["cpu", "cpu"\], \["temp", "temp"\], \["storage", "disks"\], \["docker", "docker"\]\]\)/);
+  assert.match(HTML, /\.classList\.toggle\("hidden", !d\[group\] \|\| cfg\.panels\[panel\] === false\)/);
+});

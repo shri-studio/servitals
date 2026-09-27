@@ -119,30 +119,38 @@ function createAgentApi({ nodes, log, onSnapshot, maxBody = 256 * 1024, now = Da
     if (q >= 0) return fail(res, 400, "query_not_allowed");
 
     const ip = clientIp(req) || "?";
-    if (blocked(ip)) {
-      return fail(res, 429, "rate_limited", { headers: { "retry-after": String(Math.ceil(FAIL_WINDOW_MS / 1000)) } });
-    }
+    const slowDown = () => fail(res, 429, "rate_limited", { headers: { "retry-after": String(Math.ceil(FAIL_WINDOW_MS / 1000)) } });
     const h = req.headers;
     if (h["x-servitals-proto"] !== "1") return fail(res, 426, "unsupported_protocol");
     const id = h["x-servitals-node"] || "";
     const node = NODE_ID.test(id) ? nodes.get(id) : null;
-    if (!node) { failed(ip); log.warn("api.refused", { error: "unknown_node" }); return fail(res, 401, "unknown_node"); }
+    // failures are counted per address for unknown ids, and per address and
+    // node otherwise: a broken or revoked agent never locks out a healthy one
+    // behind the same NAT, proxy or tunnel
+    if (!node) {
+      if (blocked(ip)) return slowDown();
+      failed(ip);
+      log.warn("api.refused", { error: "unknown_node" });
+      return fail(res, 401, "unknown_node");
+    }
+    const who = `${ip} ${id}`;
+    if (blocked(who)) return slowDown();
     const tsRaw = h["x-servitals-ts"] || "";
     const ts = /^\d{1,16}$/.test(tsRaw) ? Number(tsRaw) : NaN;
     const hubMs = now();
     if (!Number.isFinite(ts) || Math.abs(hubMs - ts) > MAX_SKEW_MS) {
-      failed(ip);
+      failed(who);
       log.warn("api.refused", { node: id, error: "clock_skew" });
       return fail(res, 401, "clock_skew", { body: { hub_ms: hubMs } });
     }
     const key = `${id} ${endpoint}`;
-    if (ts <= (lastTs.get(key) || 0)) { failed(ip); return fail(res, 401, "replay"); }
+    if (ts <= (lastTs.get(key) || 0)) return fail(res, 401, "replay");   // agents retry these; not a failure
     const tooLarge = () => fail(res, 413, "too_large", { headers: { connection: "close" } });
     if (Number(h["content-length"] || 0) > maxBody) { req.resume(); return tooLarge(); }
     const body = await readLimited(req, maxBody);
     if (body === null) return tooLarge();
     if (!verifyRequest(node.secret, req.method, pathname, tsRaw, body, h["x-servitals-sig"])) {
-      failed(ip);
+      failed(who);
       log.warn("api.refused", { node: id, error: "bad_signature" });
       return fail(res, 401, "bad_signature");
     }

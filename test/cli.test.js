@@ -245,3 +245,24 @@ test("status shows the hub, the node and the last push", async () => {
     }
   } finally { await hub.stop(); }
 });
+
+test("join reads agent.env without running it, HUB_HEADERS included", async () => {
+  const hub = await startHub();
+  try {
+    const n = addNodeWithCtl(hub, "nas");
+    const dir = tmp();
+    const marker = path.join(dir, "pwned");
+    const env = path.join(dir, "agent.env");
+    fs.writeFileSync(env, `# agent settings\nHUB_HEADERS=CF-Access-Client-Id: abc.access; CF-Access-Client-Secret: s3cr3t\n` +
+      `DISKS=/\nEVIL=$(touch ${marker})\n`);
+    const creds = path.join(dir, "creds.env");
+    const r = run("servitals-agent", ["join", "--no-start", n.url, `${n.id}:${n.secret}`], joinEnv({ CREDENTIALS_FILE: creds, AGENT_ENV: env }));
+    assert.strictEqual(r.status, 0, r.stdout + r.stderr);
+    assert.match(r.stdout, /^ok$/m);
+    assert.ok(!fs.existsSync(marker), "nothing in agent.env is executed");
+    assert.ok(!(r.stdout + r.stderr).includes("s3cr3t"));
+    const t = run("servitals-agent", ["test"], joinEnv({ AGENT_ENV: env }));
+    assert.strictEqual(t.status, 0, t.stderr);
+    assert.ok(!fs.existsSync(marker));
+  } finally { await hub.stop(); }
+});

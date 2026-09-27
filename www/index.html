@@ -1235,7 +1235,13 @@ function renderMetrics(d) {
     !d.net || cfg.panels.network === false);
 
   // docker — stash and render (sort / expand handled separately)
-  if (d.docker) { dockerData = d.docker; renderDocker(); }
+  if (d.docker) { dockerData = d.docker; renderDocker(); } else dockerData = null;
+
+  // a node without a group: hide its panel, never keep the previous node's
+  for (const [panel, group] of [["mem", "mem"], ["cpu", "cpu"], ["temp", "temp"], ["storage", "disks"], ["docker", "docker"]]) {
+    const el = $(`[data-panel=${panel}]`);
+    if (el) el.classList.toggle("hidden", !d[group] || cfg.panels[panel] === false);
+  }
 }
 
 /* ------------------------------------------------------------------ network bars */
@@ -1248,7 +1254,7 @@ function renderNetBars() {
   const rows = (netView === "24h" ? n.hours : n.days) || [];
   const peak = Math.max(...rows.map(x => x.rx + x.tx), 1);
   $("#net-bars").innerHTML = rows.map(x =>
-    `<span class="d" data-t="${x.title}" data-rx="${x.rx}" data-tx="${x.tx}">`
+    `<span class="d" data-t="${esc(x.title)}" data-rx="${x.rx}" data-tx="${x.tx}">`
     + `<span class="up" style="height:${(x.tx / peak) * 100}%"></span>`
     + `<span class="dn" style="height:${(x.rx / peak) * 100}%"></span></span>`).join("");
   if (!rows.length) { $("#net-days-range").textContent = ""; return; }
@@ -1770,7 +1776,7 @@ document.addEventListener("visibilitychange", () => {
     const d = e.target.closest(".d");
     if (!d) { tip.classList.remove("show"); return; }
     const rx = +d.dataset.rx, tx = +d.dataset.tx;
-    tip.innerHTML = `<div class="nd">${d.dataset.t}</div>`
+    tip.innerHTML = `<div class="nd">${esc(d.dataset.t)}</div>`
       + `<span class="rx">↓ ${fmtBytes(rx)}</span>  <span class="tx">↑ ${fmtBytes(tx)}</span>`
       + `  <span class="muted">= ${fmtBytes(rx + tx)}</span>`;
     tip.classList.add("show");

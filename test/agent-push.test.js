@@ -65,6 +65,9 @@ test("credentials are parsed, never sourced", () => {
   fs.writeFileSync(f, "HUB_URL=http://x\nNODE_ID=abcdefghijkl\nNODE_SECRET=short\n");
   assert.notStrictEqual(run(f).status, 0, "a malformed secret is refused");
   assert.notStrictEqual(run(path.join(dir, "missing")).status, 0);
+  // a password in the hub URL would end up in the agent's log line: refuse it
+  fs.writeFileSync(f, `HUB_URL=http://user:secret@hub.lan:20002\nNODE_ID=abcdefghijkl\nNODE_SECRET=${"ab".repeat(32)}\n`);
+  assert.notStrictEqual(run(f).status, 0, "userinfo in HUB_URL is refused");
 });
 
 test("ONCE=1 pushes one snapshot that the hub serves", async () => {
@@ -179,4 +182,54 @@ test("a push inside the hub's 5 s limit waits it out instead of failing", { time
     assert.strictEqual(second.status, 0, second.stdout + second.stderr);
     assert.doesNotMatch(second.stdout, /push_failed/);
   } finally { await hub.stop(); }
+});
+
+test("HUB_HEADERS values never appear in a command line", async () => {
+  const hub = await startHub();
+  const dir = tmp();
+  const wrap = path.join(dir, "curl");
+  const log = path.join(dir, "argv.log");
+  const real = spawnSync("bash", ["-c", "command -v curl"], { encoding: "utf8" }).stdout.trim();
+  fs.writeFileSync(wrap, `#!/bin/sh\necho "$*" >> "${log}"\nexec "${real}" "$@"\n`, { mode: 0o755 });
+  try {
+    const r = spawnSync("bash", [AGENT], {
+      env: agentEnv({ ONCE: "1", CREDENTIALS_FILE: path.join(hub.dataDir, "local-agent.env"), PATH: `${dir}:${process.env.PATH}`,
+                      HUB_HEADERS: "CF-Access-Client-Id: id.access; CF-Access-Client-Secret: top-secret-value" }),
+      encoding: "utf8", timeout: 30000,
+    });
+    assert.strictEqual(r.status, 0, r.stdout + r.stderr);
+    const argv = fs.readFileSync(log, "utf8");
+    assert.match(argv, /-H @/, "headers come from a file");
+    assert.ok(!argv.includes("top-secret-value"), "the secret is not in curl's argv (visible in ps)");
+  } finally { await hub.stop(); }
+});
+
+test("after unknown_node the agent stops pushing for 10 minutes", async () => {
+  let pushes = 0;
+  const srv = http.createServer((req, res) => {
+    req.resume();
+    req.on("end", () => {
+      pushes++;
+      res.writeHead(401, { "content-type": "application/json" });
+      res.end('{"error":"unknown_node","message":"x"}');
+    });
+  });
+  await new Promise((r) => srv.listen(0, "127.0.0.1", r));
+  const dir = tmp();
+  const f = path.join(dir, "creds.env");
+  fs.writeFileSync(f, `HUB_URL=http://127.0.0.1:${srv.address().port}\nNODE_ID=abcdefghijkl\nNODE_SECRET=${SECRET}\n`);
+  const state = tmp();
+  const once = () => new Promise((resolve) => execFile("bash", [AGENT],
+    { env: agentEnv({ ONCE: "1", CREDENTIALS_FILE: f, STATE_DIR: state }), timeout: 30000 },
+    (e, stdout) => resolve({ code: e ? e.code : 0, stdout })));
+  try {
+    const first = await once();
+    assert.notStrictEqual(first.code, 0);
+    assert.strictEqual(pushes, 1);
+    const until = Number(fs.readFileSync(path.join(state, "push-hold"), "utf8").trim());
+    assert.ok(until >= Date.now() / 1000 + 590, String(until));
+    const second = await once();
+    assert.strictEqual(pushes, 1, "no request while held");
+    assert.match(second.stdout, /event=agent\.push_held/);
+  } finally { srv.close(); }
 });

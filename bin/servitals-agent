@@ -19,6 +19,23 @@ UNIT=servitals-agent.service
 
 die() { echo "servitals-agent: $*" >&2; exit 1; }
 
+# agent.env is read by systemd (EnvironmentFile=), not by a shell: values may
+# contain spaces and ";" (HUB_HEADERS). Parse it the same way, never source it,
+# and take only the agent's own settings.
+load_agent_env() {  # file
+  local k v
+  [ -r "$1" ] || return 0
+  while IFS='=' read -r k v || [ -n "$k" ]; do
+    v=${v%$'\r'}
+    [[ $v =~ ^\"(.*)\"$ || $v =~ ^\'(.*)\'$ ]] && v=${BASH_REMATCH[1]}
+    case "$k" in
+      INTERVAL|DISKS|NET_IFACE|COLLECT_[A-Z]*|STAT_TIMEOUT|WAIT_SECONDS|HUB_HEADERS|HUB_CA_FILE|\
+      HTTPS_PROXY|HTTP_PROXY|NO_PROXY|https_proxy|http_proxy|no_proxy|LOG_LEVEL)
+        [[ $k =~ ^[A-Za-z_]+$ ]] && export "$k=$v" ;;
+    esac
+  done < "$1"
+}
+
 docker_access() {  # enable|disable
   local dir="${DROPIN_ROOT:-/etc/systemd/system}/$UNIT.d"
   case "${1:-}" in
@@ -39,12 +56,7 @@ docker_access() {  # enable|disable
 
 cmd_test() {
   local env_file="${AGENT_ENV:-/etc/servitals/agent.env}"
-  if [ -r "$env_file" ]; then
-    set -a
-    # shellcheck source=/dev/null
-    . "$env_file"
-    set +a
-  fi
+  load_agent_env "$env_file"
   # global, not local: the EXIT trap runs after this function has returned
   TEST_DIR=$(mktemp -d)
   trap 'rm -rf "$TEST_DIR"' EXIT
@@ -75,7 +87,7 @@ cmd_join() {
   [ $# -eq 2 ] || die "usage: servitals-agent join [--no-start] <hub-url> <node-id>:<secret>"
   url=${1%/} cred=$2
   id=${cred%%:*} secret=${cred#*:}
-  [[ $url =~ ^https?://[^[:space:]/]+(/[^[:space:]]*)?$ ]] || die "hub url must start with http:// or https://"
+  [[ $url =~ ^https?://[^[:space:]/@]+(/[^[:space:]@]*)?$ ]] || die "hub url: http:// or https://, no user:password@"
   [[ $id =~ ^[a-z2-7]{12}$ && $secret =~ ^[0-9a-f]{64}$ ]] || die "the join string is <12-character node id>:<64 hex characters>"
   # global, not local: the EXIT trap runs after this function has returned
   JOIN_DIR=$(mktemp -d)
@@ -85,12 +97,7 @@ cmd_join() {
   state="$JOIN_DIR/state"
   echo "testing $url as node $id ..."
   # the same settings the service uses (proxy, HUB_HEADERS, HUB_CA_FILE, disks)
-  if [ -r "${AGENT_ENV:-/etc/servitals/agent.env}" ]; then
-    set -a
-    # shellcheck source=/dev/null
-    . "${AGENT_ENV:-/etc/servitals/agent.env}"
-    set +a
-  fi
+  load_agent_env "${AGENT_ENV:-/etc/servitals/agent.env}"
   STATE_DIR="$state" CREDENTIALS_FILE="$JOIN_DIR/credentials.env" ONCE=1 HOST_ROOT="${HOST_ROOT:-/}" \
     bash "$AGENT_HOME/collect.sh" > "$JOIN_DIR/log" 2>&1 || true
   read -r _ status err < "$state/last-push" 2>/dev/null || { status=000; err=-; }

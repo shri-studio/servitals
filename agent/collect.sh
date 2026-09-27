@@ -63,7 +63,12 @@ collect() {  # $1 = destination file
 
 tick() {
   collect "$SNAP" || { agent_log warn agent.tick_failed; return 1; }
-  [ -n "${OUT_FILE:-}" ] || push "$SNAP"
+  [ -z "${OUT_FILE:-}" ] || return 0
+  if push_held; then
+    agent_log info agent.push_held until="$(cat "$STATE/push-hold")"
+    return 1
+  fi
+  push "$SNAP"
 }
 
 agent_log info agent.start version="${AGENT_VERSION:-unknown}" interval="$INTERVAL" \
