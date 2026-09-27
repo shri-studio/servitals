@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # servitals-agent: run and inspect the servitals agent.
+#   servitals-agent join <hub-url> <node-id>:<secret>   pair with a hub (from servitals-ctl node add)
+#   servitals-agent status           show the hub, the node and the last push
 #   servitals-agent run              run the agent (the systemd unit uses this)
 #   servitals-agent test             sample once and print the snapshot; nothing is sent
 #   servitals-agent docker enable    let the agent read the Docker socket (root-equivalent)
@@ -51,9 +53,90 @@ cmd_test() {
   jq . "$TEST_DIR/snapshot.json"
 }
 
+CREDENTIALS_FILE="${CREDENTIALS_FILE:-/etc/servitals/agent-credentials.env}"
+AGENT_STATE="${STATE_DIR:-/var/lib/servitals-agent}"
+
+# the test push's outcome in words (spec 6.1)
+join_result() {  # status error
+  case "$1:$2" in
+    2??:*) echo ok ;;
+    000:*) echo "unreachable: no answer from the hub (address, port, firewall, proxy?)" ;;
+    401:bad_signature|bad_reply_signature:*) echo "bad secret: copy the whole join string again" ;;
+    401:unknown_node) echo "bad secret: the hub does not know this node id (revoked?)" ;;
+    401:clock_skew) echo "clock skew: this machine's clock differs from the hub's by more than 2 minutes (check NTP)" ;;
+    426:*) echo "unsupported protocol: update servitals or servitals-agent" ;;
+    *) echo "failed: HTTP $1 ${2:-}" ;;
+  esac
+}
+
+cmd_join() {
+  local start=1 url cred id secret state status err result
+  if [ "${1:-}" = --no-start ]; then start=0; shift; fi
+  [ $# -eq 2 ] || die "usage: servitals-agent join [--no-start] <hub-url> <node-id>:<secret>"
+  url=${1%/} cred=$2
+  id=${cred%%:*} secret=${cred#*:}
+  [[ $url =~ ^https?://[^[:space:]/]+(/[^[:space:]]*)?$ ]] || die "hub url must start with http:// or https://"
+  [[ $id =~ ^[a-z2-7]{12}$ && $secret =~ ^[0-9a-f]{64}$ ]] || die "the join string is <12-character node id>:<64 hex characters>"
+  # global, not local: the EXIT trap runs after this function has returned
+  JOIN_DIR=$(mktemp -d)
+  trap 'rm -rf "$JOIN_DIR"' EXIT
+  chmod 700 "$JOIN_DIR"
+  printf 'HUB_URL=%s\nNODE_ID=%s\nNODE_SECRET=%s\n' "$url" "$id" "$secret" > "$JOIN_DIR/credentials.env"
+  state="$JOIN_DIR/state"
+  echo "testing $url as node $id ..."
+  # the same settings the service uses (proxy, HUB_HEADERS, HUB_CA_FILE, disks)
+  if [ -r "${AGENT_ENV:-/etc/servitals/agent.env}" ]; then
+    set -a
+    # shellcheck source=/dev/null
+    . "${AGENT_ENV:-/etc/servitals/agent.env}"
+    set +a
+  fi
+  STATE_DIR="$state" CREDENTIALS_FILE="$JOIN_DIR/credentials.env" ONCE=1 HOST_ROOT="${HOST_ROOT:-/}" \
+    bash "$AGENT_HOME/collect.sh" > "$JOIN_DIR/log" 2>&1 || true
+  read -r _ status err < "$state/last-push" 2>/dev/null || { status=000; err=-; }
+  result=$(join_result "$status" "$err")
+  echo "$result"
+  [ "$result" = ok ] || exit 1
+  install -m 600 "$JOIN_DIR/credentials.env" "$CREDENTIALS_FILE"
+  # the service reads it as _servitals-agent (only root can hand it over)
+  if [ "$(id -u)" = 0 ] && getent passwd _servitals-agent >/dev/null 2>&1; then
+    chown _servitals-agent:_servitals-agent "$CREDENTIALS_FILE"
+  fi
+  echo "saved $CREDENTIALS_FILE"
+  if [ "$start" = 1 ]; then
+    "${SYSTEMCTL:-systemctl}" enable servitals-agent.service >/dev/null 2>&1 || true
+    "${SYSTEMCTL:-systemctl}" restart servitals-agent.service && echo "servitals-agent started"
+  fi
+}
+
+cmd_status() {
+  local k v url="" id="" at="" status="" err=""
+  if [ -r "$CREDENTIALS_FILE" ]; then
+    while IFS='=' read -r k v; do
+      case "$k" in HUB_URL) url=${v%$'\r'} ;; NODE_ID) id=${v%$'\r'} ;; esac
+    done < "$CREDENTIALS_FILE"
+  fi
+  if [ -e "$CREDENTIALS_FILE" ] && [ ! -r "$CREDENTIALS_FILE" ]; then
+    echo "hub:       (run with sudo to read $CREDENTIALS_FILE)"
+  else
+    echo "hub:       ${url:-not paired (servitals-agent join)}"
+  fi
+  echo "node:      ${id:--}"
+  echo "service:   $("${SYSTEMCTL:-systemctl}" is-active servitals-agent.service 2>/dev/null || true)"
+  if read -r at status err < "$AGENT_STATE/last-push" 2>/dev/null; then
+    echo "last push: $(date -d "@$at" '+%F %T') $(join_result "$status" "$err")"
+  elif [ -d "$AGENT_STATE" ] && [ ! -x "$AGENT_STATE" ]; then
+    echo "last push: (run with sudo to read $AGENT_STATE)"
+  else
+    echo "last push: none yet"
+  fi
+}
+
 case "${1:-}" in
+  join)   shift; cmd_join "$@" ;;
+  status) shift; cmd_status "$@" ;;
   run)    shift; exec bash "$AGENT_HOME/collect.sh" "$@" ;;
   test)   shift; cmd_test ;;
   docker) shift; docker_access "$@" ;;
-  *) sed -n '3,7p' "$0" | sed 's/^# \{0,1\}//'; exit 1 ;;
+  *) sed -n '3,9p' "$0" | sed 's/^# \{0,1\}//'; exit 1 ;;
 esac

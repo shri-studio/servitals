@@ -162,3 +162,86 @@ test("node add takes tags with --tag", () => {
   assert.notStrictEqual(run("servitals-ctl", ["node", "add", "x", "--tag"], { STATE_DIR: state }).status, 0);
   assert.notStrictEqual(run("servitals-ctl", ["node", "add", "x", "--tag", "Bad Tag"], { STATE_DIR: state }).status, 0);
 });
+
+const { startHub, request, login, cookieFrom } = require("./helpers/hub");
+
+function joinEnv(extra = {}) {
+  return { AGENT_ENV: "/nonexistent", HOST_ROOT: "/", DISKS: "/", DOCKER_SOCK: "/nonexistent", COLLECT_NET: "0",
+           SYSTEMCTL: "true", ...extra };
+}
+function addNodeWithCtl(hub, name) {
+  const etc = tmp();
+  fs.writeFileSync(path.join(etc, "hub.env"), `PUBLIC_URL=http://127.0.0.1:${hub.port}/\n`);
+  const r = run("servitals-ctl", ["node", "add", name], { STATE_DIR: hub.dataDir, ETC_DIR: etc });
+  assert.strictEqual(r.status, 0, r.stderr);
+  const m = /servitals-agent join (\S+) ([a-z2-7]{12}):([0-9a-f]{64})/.exec(r.stdout);
+  assert.ok(m, r.stdout);
+  return { url: m[1], id: m[2], secret: m[3], out: r.stdout };
+}
+
+test("node add prints a join command; join tests the push and saves the credentials", async () => {
+  const hub = await startHub();
+  try {
+    const n = addNodeWithCtl(hub, "nas");
+    assert.strictEqual(n.url, `http://127.0.0.1:${hub.port}`, "PUBLIC_URL without its trailing slash");
+    const creds = path.join(tmp(), "agent-credentials.env");
+    const r = run("servitals-agent", ["join", "--no-start", n.url, `${n.id}:${n.secret}`], joinEnv({ CREDENTIALS_FILE: creds }));
+    assert.strictEqual(r.status, 0, r.stdout + r.stderr);
+    assert.match(r.stdout, /^ok$/m);
+    assert.ok(!r.stdout.includes(n.secret) && !r.stderr.includes(n.secret), "the secret is not echoed");
+    assert.strictEqual(fs.statSync(creds).mode & 0o777, 0o600);
+    assert.match(fs.readFileSync(creds, "utf8"), new RegExp(`^NODE_ID=${n.id}$`, "m"));
+    const cookie = cookieFrom(await login(hub.port));
+    const list = JSON.parse((await request(hub.port, { path: "/__ctl/nodes", headers: { cookie } })).body);
+    assert.strictEqual(list.find((x) => x.id === n.id).status, "online", "the test push landed");
+    const listed = run("servitals-ctl", ["node", "list"], { STATE_DIR: hub.dataDir });
+    assert.match(listed.stdout, new RegExp(`^${n.id} +nas +remote +- +\\d{4}-`, "m"));
+  } finally { await hub.stop(); }
+});
+
+test("join explains what went wrong and saves nothing", async () => {
+  const hub = await startHub();
+  try {
+    const n = addNodeWithCtl(hub, "nas");
+    const creds = path.join(tmp(), "agent-credentials.env");
+    const cases = [
+      [[n.url, `${n.id}:${"ab".repeat(32)}`], /^bad secret: copy the whole join string again$/m],
+      [[n.url, `aaaaaaaaaaaa:${n.secret}`], /^bad secret: the hub does not know this node id/m],
+      [["http://127.0.0.1:9", `${n.id}:${n.secret}`], /^unreachable: /m],
+    ];
+    for (const [args, want] of cases) {
+      const r = run("servitals-agent", ["join", "--no-start", ...args], joinEnv({ CREDENTIALS_FILE: creds }));
+      assert.notStrictEqual(r.status, 0);
+      assert.match(r.stdout, want, args.join(" "));
+      assert.ok(!fs.existsSync(creds));
+    }
+    const bad = run("servitals-agent", ["join", n.url, "nonsense"], joinEnv({ CREDENTIALS_FILE: creds }));
+    assert.match(bad.stderr, /join string/);
+  } finally { await hub.stop(); }
+});
+
+test("status shows the hub, the node and the last push", async () => {
+  const hub = await startHub();
+  try {
+    const n = addNodeWithCtl(hub, "nas");
+    const dir = tmp();
+    const creds = path.join(dir, "credentials.env");
+    fs.writeFileSync(creds, `HUB_URL=${n.url}\nNODE_ID=${n.id}\nNODE_SECRET=${n.secret}\n`);
+    fs.writeFileSync(path.join(dir, "last-push"), `${Math.floor(Date.now() / 1000)} 200 -\n`);
+    const r = run("servitals-agent", ["status"], { CREDENTIALS_FILE: creds, STATE_DIR: dir, SYSTEMCTL: "true" });
+    assert.match(r.stdout, new RegExp(`^hub: +${n.url.replace(/[.]/g, "\\.")}$`, "m"));
+    assert.match(r.stdout, new RegExp(`^node: +${n.id}$`, "m"));
+    assert.match(r.stdout, /^last push: \d{4}-\d\d-\d\d .* ok$/m);
+    assert.ok(!r.stdout.includes(n.secret));
+    // the service's files are root-only: say so instead of "not paired" (root reads them anyway)
+    if (process.getuid() !== 0) {
+      fs.chmodSync(creds, 0o000);
+      const lockedState = tmp();
+      fs.chmodSync(lockedState, 0o600);
+      const locked = run("servitals-agent", ["status"], { CREDENTIALS_FILE: creds, STATE_DIR: lockedState, SYSTEMCTL: "true" });
+      fs.chmodSync(lockedState, 0o700);
+      assert.match(locked.stdout, /^hub: +\(run with sudo to read /m);
+      assert.match(locked.stdout, /^last push: \(run with sudo to read /m);
+    }
+  } finally { await hub.stop(); }
+});
