@@ -141,3 +141,24 @@ test("servitals-ctl passwd writes admin.json and ends sessions", async () => {
     assert.notStrictEqual(r.status, 0, args.join(" "));
   }
 });
+
+test("node rename and revoke", () => {
+  const state = tmp();
+  const add = run("servitals-ctl", ["node", "add", "old name"], { STATE_DIR: state, ETC_DIR: "/nonexistent" });
+  const id = /node ([a-z2-7]{12})/.exec(add.stdout)[1];
+  assert.strictEqual(run("servitals-ctl", ["node", "rename", id, "new name"], { STATE_DIR: state }).status, 0);
+  assert.match(run("servitals-ctl", ["node", "list"], { STATE_DIR: state }).stdout, /new name/);
+  assert.strictEqual(run("servitals-ctl", ["node", "revoke", id], { STATE_DIR: state }).status, 0);
+  assert.doesNotMatch(run("servitals-ctl", ["node", "list"], { STATE_DIR: state }).stdout, new RegExp(id));
+  assert.strictEqual(fs.statSync(path.join(state, "nodes.json")).mode & 0o777, 0o600);
+  assert.notStrictEqual(run("servitals-ctl", ["node", "add", ""], { STATE_DIR: state }).status, 0);
+});
+
+test("node add takes tags with --tag", () => {
+  const state = tmp();
+  const r = run("servitals-ctl", ["node", "add", "nas", "--tag", "home", "--tag", "lab"], { STATE_DIR: state, ETC_DIR: "/nonexistent" });
+  assert.strictEqual(r.status, 0, r.stderr);
+  assert.match(run("servitals-ctl", ["node", "list"], { STATE_DIR: state }).stdout, / nas +remote +home,lab /);
+  assert.notStrictEqual(run("servitals-ctl", ["node", "add", "x", "--tag"], { STATE_DIR: state }).status, 0);
+  assert.notStrictEqual(run("servitals-ctl", ["node", "add", "x", "--tag", "Bad Tag"], { STATE_DIR: state }).status, 0);
+});

@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # servitals-ctl: admin commands for the servitals hub.
+#   servitals-ctl node add <name> [--tag T]...  add a server; prints the join command for it
+#   servitals-ctl node list            list servers (id, name, tags, last push)
+#   servitals-ctl node rename <id> <name> | node revoke <id>
 #   servitals-ctl bans                 list blocked IPs and the whitelist
 #   servitals-ctl unban <ip>           remove a block (takes effect immediately)
 #   servitals-ctl whitelist <ip|cidr>  never block this address again (also unbans)
@@ -219,7 +222,67 @@ cmd_passwd() {  # [--user NAME]
   echo "login is now $user; every session has ended (no restart needed)"
 }
 
+# the address agents use: PUBLIC_URL, else this host and the hub's PORT
+hub_url() {
+  local url port
+  url=$(env_get "$ETC_DIR/hub.env" PUBLIC_URL 2>/dev/null || true)
+  [ -n "$url" ] || url=$(env_get "$ROOT/.env" PUBLIC_URL 2>/dev/null || true)
+  if [ -n "$url" ]; then echo "${url%/}"; return; fi
+  port=$(env_get "$ETC_DIR/hub.env" PORT 2>/dev/null || true)
+  [ -n "$port" ] || port=$(env_get "$ROOT/.env" PORT 2>/dev/null || true)
+  echo "http://$(hostname -f 2>/dev/null || hostname):${port:-20002}"
+}
+
+nodes_js() {  # run the node store CLI, then give the file back to the hub's user
+  local f="$DATA_DIR/nodes.json" rc=0
+  node "$ROOT/hub/lib/nodes.js" "$f" "$@" || rc=$?
+  if [ -e "$f" ]; then
+    chown --reference="$DATA_DIR" "$f" 2>/dev/null || true
+    chmod 600 "$f"
+  fi
+  return "$rc"
+}
+
+cmd_node() {
+  local sub=${1:-} out id at
+  shift || true
+  [ -d "$DATA_DIR" ] || die "state directory $DATA_DIR does not exist"
+  case "$sub" in
+    add)
+      local name=${1:-} tags=()
+      [ -n "$name" ] && shift || die "usage: servitals-ctl node add <name> [--tag TAG]..."
+      while [ $# -gt 0 ]; do
+        [ "$1" = --tag ] && [ -n "${2:-}" ] || die "usage: servitals-ctl node add <name> [--tag TAG]..."
+        tags+=("$2"); shift 2
+      done
+      out=$(nodes_js add "$name" "${tags[@]}") || exit 1
+      id=$(jq -r .id <<< "$out")
+      echo "added \"$name\" as node $id. On that server, run once (the secret is shown only now):"
+      echo "  sudo servitals-agent join $(hub_url) $id:$(jq -r .secret <<< "$out")"
+      ;;
+    list)
+      printf '%-13s %-24s %-7s %-20s %s\n' ID NAME KIND TAGS "LAST PUSH"
+      nodes_js list | jq -r '.[] | [.id, .name, (if .local then "local" else "remote" end), ((.tags // []) | join(","))] | @tsv' |
+        while IFS=$'\t' read -r id name kind tags; do
+          at=$(jq -r '.at // empty' "$DATA_DIR/snapshots/$id.json" 2>/dev/null || true)
+          if [ -n "$at" ]; then at=$(date -d "@$((at / 1000))" '+%F %T'); else at="never"; fi
+          printf '%-13s %-24s %-7s %-20s %s\n' "$id" "$name" "$kind" "${tags:--}" "$at"
+        done
+      ;;
+    rename)
+      [ $# -eq 2 ] || die "usage: servitals-ctl node rename <id> <name>"
+      nodes_js rename "$1" "$2" >/dev/null && echo "renamed $1 to \"$2\""
+      ;;
+    revoke)
+      [ $# -eq 1 ] || die "usage: servitals-ctl node revoke <id>"
+      nodes_js revoke "$1" >/dev/null && echo "revoked $1: its agent is refused from now on"
+      ;;
+    *) die "usage: servitals-ctl node add|list|rename|revoke" ;;
+  esac
+}
+
 case "${1:-}" in
+  node) shift; cmd_node "$@" ;;
   passwd) shift; cmd_passwd "$@" ;;
   import-docker) shift; cmd_import_docker "$@" ;;
   docker)        shift; cmd_docker "$@" ;;
@@ -227,5 +290,5 @@ case "${1:-}" in
   unban)         shift; cmd_unban "$@" ;;
   whitelist)     shift; cmd_whitelist "$@" ;;
   hash-password) shift; cmd_hash_password "$@" ;;
-  *) sed -n '3,12p' "$0" | sed 's/^# \{0,1\}//'; exit 1 ;;
+  *) sed -n '3,15p' "$0" | sed 's/^# \{0,1\}//'; exit 1 ;;
 esac
