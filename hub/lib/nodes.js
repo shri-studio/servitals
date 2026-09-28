@@ -95,6 +95,11 @@ function createNodeStore(file) {
     save();
   }
   const rename = (id, name) => change(id, (n) => { n.name = checkName(name); });
+  const setTags = (id, tags) => change(id, (n) => {
+    if (!Array.isArray(tags) || !tags.every((t) => typeof t === "string")) throw new Error("tags: a list of words");
+    check(n.name, tags);
+    n.tags = [...new Set(tags)];
+  });
   const revoke = (id) => change(id, (n) => {
     if (n.local) throw new Error("the local node cannot be revoked");
     n.revoked = true;
@@ -109,7 +114,7 @@ function createNodeStore(file) {
     }));
   }
 
-  return { get, localId, ensureLocal, check, add, rename, revoke, list, all: load };
+  return { get, localId, ensureLocal, check, add, rename, setTags, revoke, list, all: load };
 }
 
 const localAgentEnv = (hubUrl, id, secret) => `HUB_URL=${hubUrl}\nNODE_ID=${id}\nNODE_SECRET=${secret}\n`;

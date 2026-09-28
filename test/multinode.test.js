@@ -112,3 +112,35 @@ test("a revoked node is refused and leaves the fleet", async () => {
     assert.strictEqual((await getJSON(hub, cookie, `/__ctl/node/${nas.id}`)).status, 404);
   } finally { await hub.stop(); }
 });
+
+test("the page renames, tags and revokes a node; revoking is LAN-only and never the hub's own", async () => {
+  const hub = await startHub();
+  try {
+    const c = addNode(hub, "nas");
+    assert.strictEqual((await signed(hub, c, { body: snap() })).status, 200);
+    const cookie = cookieFrom(await login(hub.port));
+    const node = (id) => getJSON(hub, cookie, "/__ctl/nodes").then((r) => r.body.find((n) => n.id === id));
+
+    let r = await ctlPost(hub.port, cookie, `/__ctl/node/${c.id}`, JSON.stringify({ name: "  big nas ", tags: ["home", "storage"] }));
+    assert.strictEqual(r.status, 200, r.body);
+    assert.deepStrictEqual(((n) => [n.name, n.tags])(await node(c.id)), ["big nas", ["home", "storage"]]);
+    r = await ctlPost(hub.port, cookie, `/__ctl/node/${c.id}`, JSON.stringify({ tags: ["Bad Tag"] }));
+    assert.deepStrictEqual([r.status, /tag/.test(JSON.parse(r.body).error)], [400, true]);
+    r = await ctlPost(hub.port, cookie, `/__ctl/node/${c.id}`, JSON.stringify({ name: "" }));
+    assert.strictEqual(r.status, 400);
+    r = await ctlPost(hub.port, cookie, "/__ctl/node/aaaaaaaaaaaa", JSON.stringify({ name: "x" }));
+    assert.strictEqual(r.status, 404);
+
+    const revoke = (id, from) => request(hub.port, { method: "POST", path: `/__ctl/node/${id}/revoke`,
+      headers: { cookie, origin: `http://127.0.0.1:${hub.port}`, "x-forwarded-for": from } });
+    assert.strictEqual((await revoke(c.id, "203.0.113.5")).status, 403, "not from outside the LAN");
+    const local = (await getJSON(hub, cookie, "/__ctl/nodes")).body.find((n) => n.local);
+    assert.strictEqual((await revoke(local.id, "192.168.1.10")).status, 400, "never the hub's own node");
+
+    assert.strictEqual((await revoke(c.id, "192.168.1.10")).status, 200);
+    assert.strictEqual(await node(c.id), undefined, "gone from the fleet");
+    assert.strictEqual((await signed(hub, c, { body: snap() })).status, 401, "its agent is refused");
+    assert.ok(!fs.existsSync(path.join(hub.dataDir, "snapshots", c.id + ".json")), "its snapshot is gone");
+    assert.match(fs.readFileSync(path.join(hub.dataDir, "audit.log"), "utf8"), /node\.revoked/);
+  } finally { await hub.stop(); }
+});

@@ -685,6 +685,36 @@ async function handle(req, res) {
       return res.end(JSON.stringify({ ...rec.view, node: { ...n, status: nodeStatus(n.id), lastSeen: rec.at } }));
     }
 
+    // rename or tag a node from the page (spec 10.4); revoke it: LAN only, never the hub's own
+    const em = /^\/__ctl\/node\/([a-z2-7]{12})(\/revoke)?$/.exec(pathname);
+    if (req.method === "POST" && em) {
+      const id = em[1];
+      if (!nodes.get(id)) return json(404, { error: "no such node" });
+      if (em[2]) {
+        if (CTL_LAN_ONLY && !wl) return json(403, { error: "revoking a node is LAN-only" });
+        try { nodes.revoke(id); } catch (e) { return json(400, { error: e.message }); }
+        latest.delete(id);
+        try { fs.unlinkSync(path.join(SNAP_DIR, id + ".json")); } catch (_) { /* never pushed */ }
+        log.audit("node.revoked", { ip, node: id });
+        return json(200, { ok: true });
+      }
+      let body = null;
+      try { body = JSON.parse(await readBodyN(req, 4096)); } catch (_) { /* answered below */ }
+      if (!body || typeof body !== "object" || Array.isArray(body)) return json(400, { error: "invalid json" });
+      try {
+        // check both before changing either
+        const name = body.name !== undefined ? nodes.check(body.name) : nodes.get(id).name;
+        if (body.tags !== undefined) {
+          if (!Array.isArray(body.tags) || !body.tags.every((t) => typeof t === "string")) throw new Error("tags: a list of words");
+          nodes.check(name, body.tags);
+        }
+        if (body.name !== undefined) nodes.rename(id, name);
+        if (body.tags !== undefined) nodes.setTags(id, body.tags);
+      } catch (e) { return json(400, { error: e.message }); }
+      log.audit("node.changed", { ip, node: id });
+      return json(200, { ok: true });
+    }
+
     // does this client get container controls?
     if (req.url === "/__ctl/whoami") {
       return json(200, { ip, lan: wl, controls: (!CTL_LAN_ONLY || wl), version: VERSION, user: creds().user });
