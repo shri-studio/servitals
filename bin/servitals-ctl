@@ -14,6 +14,7 @@
 #   servitals-ctl import-docker <dir>  copy settings, login and disks from a Docker install
 #   servitals-ctl passwd [--user NAME] set the admin password (and name); ends every session
 #   servitals-ctl config check [dir]   check the files in /etc/servitals/conf.d (config as code)
+#   servitals-ctl rotate session-key   a new session signing key; every session ends
 # State: STATE_DIR, else DATA_DIR, else ./data of a Docker checkout, else /var/lib/servitals.
 set -euo pipefail
 
@@ -312,6 +313,18 @@ cmd_node() {
   esac
 }
 
+cmd_rotate() {
+  case "${1:-}" in
+    session-key)
+      [ -f "$DATA_DIR/secret" ] || die "no session key in $DATA_DIR (has the hub run yet?)"
+      od -An -tx1 -N32 /dev/urandom | tr -d ' \n' | atomic_write "$DATA_DIR/secret"
+      "${SYSTEMCTL:-systemctl}" try-restart "$UNIT" >/dev/null 2>&1 || true
+      echo "new session key in $DATA_DIR/secret; the hub restarted and every session ends (log in again)"
+      ;;
+    *) die "usage: servitals-ctl rotate session-key" ;;
+  esac
+}
+
 cmd_config() {
   case "${1:-}" in
     check) node "$ROOT/hub/lib/confd.js" check "${2:-$ETC_DIR/conf.d}" ;;
@@ -322,6 +335,7 @@ cmd_config() {
 case "${1:-}" in
   node) shift; cmd_node "$@" ;;
   config) shift; cmd_config "$@" ;;
+  rotate) shift; cmd_rotate "$@" ;;
   passwd) shift; cmd_passwd "$@" ;;
   import-docker) shift; cmd_import_docker "$@" ;;
   docker)        shift; cmd_docker "$@" ;;
@@ -329,5 +343,5 @@ case "${1:-}" in
   unban)         shift; cmd_unban "$@" ;;
   whitelist)     shift; cmd_whitelist "$@" ;;
   hash-password) shift; cmd_hash_password "$@" ;;
-  *) sed -n '3,17p' "$0" | sed 's/^# \{0,1\}//'; exit 1 ;;
+  *) sed -n '3,18p' "$0" | sed 's/^# \{0,1\}//'; exit 1 ;;
 esac

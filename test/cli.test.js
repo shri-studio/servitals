@@ -477,3 +477,30 @@ test("servitals-ctl node rotate prints new join lines; the hub's own agent is up
   assert.strictEqual((r.stdout.match(/sudo servitals-agent join/g) || []).length, 1, "a join line for the remote node only");
   assert.notStrictEqual(run("servitals-ctl", ["node", "rotate", "aaaaaaaaaaaa"], { STATE_DIR: state, ETC_DIR: etc, SYSTEMCTL: stub }).status, 0);
 });
+
+test("servitals-ctl rotate session-key: a new key, same owner and mode, the hub restarts, every session ends", async () => {
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "sv-hub-"));   // kept across the two hubs
+  const hub = await startHub({}, { dataDir });
+  const port = hub.port;
+  const cookie = cookieFrom(await login(port));
+  assert.strictEqual((await request(port, { path: "/__ctl/whoami", headers: { cookie } })).status, 200);
+  await hub.stop();
+  const key = path.join(dataDir, "secret");
+  const before = fs.readFileSync(key, "utf8");
+  const calls = path.join(tmp(), "calls");
+  const stub = path.join(path.dirname(calls), "systemctl");
+  fs.writeFileSync(stub, `#!/bin/sh\necho "$@" >> ${calls}\n`, { mode: 0o755 });
+  const r = run("servitals-ctl", ["rotate", "session-key"], { STATE_DIR: dataDir, SYSTEMCTL: stub });
+  assert.strictEqual(r.status, 0, r.stderr);
+  assert.match(r.stdout, /every session ends/);
+  const after = fs.readFileSync(key, "utf8");
+  assert.match(after, /^[0-9a-f]{64}$/);
+  assert.notStrictEqual(after, before);
+  assert.strictEqual(fs.statSync(key).mode & 0o777, 0o600);
+  assert.match(fs.readFileSync(calls, "utf8"), /^try-restart servitals\.service$/m);
+  const again = await startHub({}, { dataDir, port });
+  try {
+    assert.strictEqual((await request(port, { path: "/__ctl/whoami", headers: { cookie } })).status, 401, "the old session is gone");
+  } finally { await again.stop(); fs.rmSync(dataDir, { recursive: true, force: true }); }
+  assert.notStrictEqual(run("servitals-ctl", ["rotate", "vapid"], { STATE_DIR: dataDir }).status, 0);
+});
