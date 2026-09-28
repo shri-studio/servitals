@@ -42,6 +42,18 @@ const STYLES = ["classic", "8bit", "phosphor", "eink", "contrast", "nord", "gruv
   await page.waitForTimeout(1500);
   await page.screenshot({ path: `${out}/kiosk.png` });
   await page.evaluate(() => localStorage.clear());   // ?kiosk is remembered
+
+  // a customized fleet: grouped by tag, °F, bits, other card numbers (spec 10.4)
+  await page.evaluate(() => localStorage.setItem("servitals.cfg", JSON.stringify({
+    units: { temp: "f", rate: "bits", size: "decimal", clock: "12h" },
+    fleet: { group: true, sort: "disk", card: ["disk", "containers", "temp"] } })));
+  await page.goto(`${base}/?shot=custom#fleet`);
+  await page.waitForTimeout(1500);
+  await page.screenshot({ path: `${out}/fleet-custom.png` });
+  await page.goto(`${base}/?shot=custom-node#node=${local}`);
+  await page.waitForTimeout(1500);
+  await page.screenshot({ path: `${out}/node-custom.png` });
+  await page.evaluate(() => localStorage.clear());
   await page.goto(`${base}/#fleet`);
   await page.waitForTimeout(1200);
   await page.keyboard.press("s");

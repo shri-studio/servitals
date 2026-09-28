@@ -126,6 +126,22 @@ with `sudo apt install -o Dpkg::Options::=--force-confold servitals` to
 keep your `hub.env`. Login, node and agent credentials are kept. Turn
 Docker access back on afterwards (`sudo servitals-agent docker enable`).
 
+## Customize
+
+Settings (`s`) has everything in one place:
+
+- **Units**: °C or °F, sizes in powers of 1024 (like `df -h`) or 1000 (like
+  drive labels), network in bytes or bits per second, a 12 or 24 hour clock.
+- **Servers**: rename a server or change its tags (saved at once), pin it to
+  the front of the fleet, hide it from the fleet, or revoke it (LAN only;
+  its agent is refused from then on). Sort the fleet by name, trouble first,
+  CPU, memory, temperature or fullest disk, group it by each server's first
+  tag, and pick up to four numbers for the cards.
+- **Panels**: which panels show and how wide, for every server or only one;
+  the order is shared (drag, or the arrow buttons on touch screens).
+- **Export and import** the settings as one JSON file. An imported file fills
+  the form; nothing changes until you save.
+
 ## Styles, modes and kiosk
 
 Ten styles: classic, 8bit, phosphor (green CRT in dark mode, amber in

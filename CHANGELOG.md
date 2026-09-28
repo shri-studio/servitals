@@ -7,6 +7,11 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- Customize (spec 10.4): units (°C/°F, 1024/1000 sizes, bits or bytes per
+  second, 12/24 hour clock); rename, tag, pin, hide and revoke servers from
+  settings; sort and group the fleet and choose the numbers on its cards;
+  panels and sizes per server; up and down buttons for the panel order;
+  import settings from an exported file.
 - Link a server by code on HTTPS hubs: `servitals-agent link https://hub`
   prints a short code, a person approves it on the hub's `/link` page, and the
   agent joins with a secret it made itself (RFC 8628 pattern).
