@@ -240,3 +240,40 @@ test("every temperature and time on the page goes through the unit helpers", () 
   assert.doesNotMatch(script.replace(/function fmtTime[\s\S]*?\n}\n/, ""), /toLocaleTimeString\(/, "times through fmtTime");
   for (const id of ["cfg-u-temp", "cfg-u-size", "cfg-u-rate", "cfg-u-clock"]) assert.ok(HTML.includes(`id="${id}"`), id);
 });
+
+test("the fleet: hidden nodes go, pinned ones lead, then the chosen order, optionally grouped by first tag", () => {
+  const arrange = pageFn("arrangeFleet", {});
+  const n = (id, name, over = {}) => ({ id, name, status: "online", tags: [], summary: { cpu: 10, mem: 10, temp: 40, disk: { pct: 50 } }, ...over });
+  const nodes = [
+    n("a", "alpha", { tags: ["home"], summary: { cpu: 5, mem: 80, temp: null, disk: { pct: 91 } } }),
+    n("b", "bravo", { status: "offline", summary: null }),
+    n("c", "charlie", { tags: ["lab", "home"], summary: { cpu: 70, mem: 20, temp: 60, disk: null } }),
+    n("d", "delta", { tags: ["home"], status: "stale" }),
+  ];
+  const ids = (groups) => groups.map((g) => [g.title, g.nodes.map((x) => x.id).join("")]);
+  assert.deepStrictEqual(ids(arrange(nodes, {})), [["", "abcd"]], "by name by default");
+  assert.deepStrictEqual(ids(arrange(nodes, { sort: "cpu" })), [["", "cdab"]], "busiest first, unknown last");
+  assert.deepStrictEqual(ids(arrange(nodes, { sort: "disk" })), [["", "adbc"]]);
+  assert.deepStrictEqual(ids(arrange(nodes, { sort: "status" })), [["", "bdac"]], "trouble first");
+  assert.deepStrictEqual(ids(arrange(nodes, { hidden: ["b"], pinned: ["d"] })), [["", "dac"]]);
+  assert.deepStrictEqual(ids(arrange(nodes, { group: true })), [["home", "ad"], ["lab", "c"], ["untagged", "b"]]);
+  assert.deepStrictEqual(ids(arrange(nodes, { group: true, pinned: ["c"] })), [["pinned", "c"], ["home", "ad"], ["untagged", "b"]]);
+  assert.deepStrictEqual(ids(arrange([], {})), []);
+  assert.deepStrictEqual(ids(arrange(nodes, { pinned: ["gone", "a"], hidden: ["gone"] })), [["", "abcd"]], "ids of revoked servers match nothing");
+});
+
+test("names and tags from servers are escaped in the servers section and the fleet's group titles", () => {
+  const fn = (name) => HTML.slice(HTML.indexOf(`function ${name}(`), HTML.indexOf("\n}\n", HTML.indexOf(`function ${name}(`)));
+  assert.match(fn("renderServers"), /value="\$\{esc\(n\.name\)\}"/);
+  assert.match(fn("renderServers"), /value="\$\{esc\(\(n\.tags \|\| \[\]\)\.join\(", "\)\)\}"/);
+  assert.match(fn("renderFleet"), /<div class="fgroup">\$\{esc\(g\.title\)\}<\/div>/);
+  assert.doesNotMatch(fn("renderServers") + fn("renderFleet"), /\$\{(n\.name|g\.title|n\.tags)/, "nothing unescaped");
+});
+
+test("fleet cards show the numbers chosen in settings", () => {
+  const cardNumbers = pageFn("cardNumbers", { cfg: { fleet: { card: ["disk", "containers", "bogus"] } } });
+  assert.deepStrictEqual(cardNumbers(), ["disk", "containers"]);
+  assert.deepStrictEqual(pageFn("cardNumbers", { cfg: {} })(), ["cpu", "mem", "temp"]);
+  for (const id of ["cfg-f-sort", "cfg-f-group", "cfg-servers"]) assert.ok(HTML.includes(`id="${id}"`), id);
+  assert.match(HTML, /for \(const g of arrangeFleet\(fleetNodes, cfg\.fleet \|\| \{\}\)\)/, "renderFleet uses it");
+});
