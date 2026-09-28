@@ -11,7 +11,7 @@ Vcs-Git: https://github.com/shri-studio/servitals.git
 Package: servitals
 Architecture: all
 Depends: ${misc:Depends}, nodejs (>= 18), jq, servitals-agent (= ${source:Version})
-Suggests: apprise
+Suggests: apprise, openssl
 Description: tiny terminal-styled dashboard for home servers
  servitals shows the health of one or more Linux servers on a single page:
  memory, CPU, temperatures, disks, network traffic and containers. It is a

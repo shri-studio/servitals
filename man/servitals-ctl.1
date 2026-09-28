@@ -45,6 +45,29 @@ Print a password hash for AUTH_PASS_HASH (Docker installs).
 Add or remove the docker group for the hub, for the container buttons.
 .B The docker group can take over the host as root.
 .TP
+.BR "node rotate" " \fIid\fR|\-\-all"
+A new secret for a server; the old one keeps working for 24 hours. Prints a
+join line to run on that server; the hub's own agent is updated at once.
+.TP
+.BR "backup" " [" \-\-encrypt "] \fIfile\fR"
+Write one tar (mode 0600) of the hub's state, /etc/servitals/hub.env and
+conf.d. It holds the admin hash and every node secret.
+.B \-\-encrypt
+asks for a passphrase (or reads SERVITALS_BACKUP_PASSPHRASE) and uses openssl.
+.TP
+.BR "backup enable" | disable
+A daily backup by systemd timer, the 7 newest kept in
+.IR /var/lib/servitals/backups .
+.TP
+.BR "restore" " [" \-\-etc "] \fIfile\fR"
+Check the backup, stop the hub, move the current state aside, restore, and
+start the hub.
+.B \-\-etc
+also restores hub.env and conf.d.
+.TP
+.B rotate session\-key
+A new session signing key; the hub restarts and every browser logs in again.
+.TP
 .BI import-docker " dir"
 Copy the login, dashboard settings, whitelist, bans and disk list from a
 Docker install in

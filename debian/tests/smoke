@@ -63,6 +63,19 @@ wait_for "curl -fsS $B/__auth/health >/dev/null 2>&1" || fail "hub not back afte
 [ "$(login owner another-pass-1)" = 302 ] || fail "login lost on reconfigure"
 [ "$(sed -n 's/^NODE_ID=//p' /etc/servitals/agent-credentials.env)" = "$node_id" ] || fail "node changed on reconfigure"
 
+# backups (spec 17): the daily service makes one; a restore brings the state back
+servitals-ctl backup enable >/dev/null || fail "backup enable"
+systemctl is-enabled --quiet servitals-backup.timer || fail "backup timer not enabled"
+systemctl start servitals-backup.service || { journalctl -u servitals-backup --no-pager | tail -20; fail "backup service"; }
+ls /var/lib/servitals/backups/servitals-*.tar.gz >/dev/null 2>&1 || fail "no daily backup file"
+servitals-ctl backup /tmp/hub.tar.gz >/dev/null || fail "backup"
+servitals-ctl node add after-backup >/dev/null
+servitals-ctl restore /tmp/hub.tar.gz >/dev/null || fail "restore"
+servitals-ctl node list | grep -q ' after-backup ' && fail "restore kept a node added after the backup"
+wait_for "curl -fsS $B/__auth/health >/dev/null 2>&1" || fail "hub not back after restore"
+[ "$(login owner another-pass-1)" = 302 ] || fail "login after restore"
+[ "$(stat -c '%U' /var/lib/servitals/nodes.json)" = _servitals ] || fail "restored files not owned by the hub"
+
 # the hardening holds: systemd rates both units 2.0 or lower ("OK")
 for u in servitals servitals-agent; do
 	line=$(systemd-analyze security "$u.service" --no-pager | tail -n 1)

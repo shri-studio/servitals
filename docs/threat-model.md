@@ -97,6 +97,8 @@ latest release.
 | node secret | `servitals-ctl node rotate <id\|--all>` | old and new accepted for 24 h, then old rejected |
 | admin password | `servitals-ctl passwd` | all sessions end |
 | session signing key | `servitals-ctl rotate session-key` | all sessions end |
-| VAPID keys | `servitals-ctl rotate vapid` | browsers must enable notifications again |
+| VAPID keys | `servitals-ctl rotate vapid` (arrives with Web Push, sub-project 6) | browsers must enable notifications again |
 | relay key | hosted UI, then `servitals-ctl relay set` | old key rejected at once |
 | hosted master key | operator runbook | re-encrypts stored secrets |
+
+Commands and details: [backup.md](backup.md).

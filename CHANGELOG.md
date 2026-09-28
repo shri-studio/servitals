@@ -7,6 +7,10 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- Backups and rotation (spec 17): `servitals-ctl backup [--encrypt]`,
+  `restore [--etc]` (stops and starts the hub, keeps the state it replaces),
+  daily backups on a timer (`backup enable`, 7 kept), `node rotate <id|--all>`
+  (the old secret works for 24 hours), `rotate session-key`; `docs/backup.md`.
 - Config as code (spec 12): `/etc/servitals/conf.d/*.json` sets dashboard
   defaults and server tags or names; file values win and show as "managed by
   file"; a bad file is skipped whole and logged; `servitals-ctl config check`.

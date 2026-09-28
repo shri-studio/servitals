@@ -152,6 +152,18 @@ them as "managed by file". A file with a mistake is skipped whole and logged.
 within a few seconds. `/etc/servitals/conf.d/README` has an example and every
 allowed value. Docker installs: mount a directory and set `CONFD_DIR`.
 
+## Backups and rotation
+
+```bash
+sudo servitals-ctl backup /root/servitals.tar.gz         # --encrypt asks for a passphrase
+sudo servitals-ctl backup enable                         # daily, the 7 newest kept
+sudo servitals-ctl restore /root/servitals.tar.gz        # --etc also restores hub.env and conf.d
+sudo servitals-ctl node rotate <id|--all>                # new secrets; old ones work for 24 hours
+sudo servitals-ctl rotate session-key                    # every browser logs in again
+```
+
+See [docs/backup.md](docs/backup.md).
+
 ## Styles, modes and kiosk
 
 Ten styles: classic, 8bit, phosphor (green CRT in dark mode, amber in
