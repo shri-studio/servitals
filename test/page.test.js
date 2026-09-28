@@ -70,7 +70,7 @@ test("vnStat bar titles from remote nodes are escaped, also in the tooltip", () 
 
 test("a panel whose group the node does not send is hidden, never left from the previous node", () => {
   assert.match(HTML, /for \(const \[panel, group\] of \[\["mem", "mem"\], \["cpu", "cpu"\], \["temp", "temp"\], \["storage", "disks"\], \["docker", "docker"\]\]\)/);
-  assert.match(HTML, /\.classList\.toggle\("hidden", !d\[group\] \|\| cfg\.panels\[panel\] === false\)/);
+  assert.match(HTML, /\.classList\.toggle\("hidden", !d\[group\] \|\| shown\[panel\] === false\)/);
 });
 
 test("without vnStat the network panel shows the live rate and says how to get history", () => {
@@ -276,4 +276,37 @@ test("fleet cards show the numbers chosen in settings", () => {
   assert.deepStrictEqual(pageFn("cardNumbers", { cfg: {} })(), ["cpu", "mem", "temp"]);
   for (const id of ["cfg-f-sort", "cfg-f-group", "cfg-servers"]) assert.ok(HTML.includes(`id="${id}"`), id);
   assert.match(HTML, /for \(const g of arrangeFleet\(fleetNodes, cfg\.fleet \|\| \{\}\)\)/, "renderFleet uses it");
+});
+
+test("a server can have its own panel set and sizes; every other server uses the shared one", () => {
+  const cfg = { panels: { mem: true, cpu: true, docker: true }, panelSize: { mem: "normal", docker: "full" },
+                nodePanels: { nasnasnasnas: { panels: { mem: true, cpu: true, docker: false }, panelSize: { mem: "wide", docker: "full" } } } };
+  const panelSet = pageFn("panelSet", { cfg });
+  assert.deepStrictEqual(panelSet("nasnasnasnas"), cfg.nodePanels.nasnasnasnas);
+  assert.deepStrictEqual(panelSet("othernode234"), { panels: cfg.panels, panelSize: cfg.panelSize });
+  assert.deepStrictEqual(panelSet(null), { panels: cfg.panels, panelSize: cfg.panelSize });
+  assert.match(HTML, /const set = panelSet\(currentNode \|\| localNode\);/, "the layout uses the shown server's set");
+  assert.doesNotMatch(HTML.slice(HTML.indexOf("function applyLayout")), /cfg\.panels\[(p|panel)\] === false|cfg\.panels\.network === false/);
+  assert.ok(HTML.includes('id="cfg-p-for"'));
+  assert.match(HTML, /data-up/, "order also with buttons, not only drag (touch screens)");
+});
+
+test("settings import takes an exported file, keeps only known settings and refuses anything else", () => {
+  const importSettings = pageFn("importSettings", {});
+  const ok = importSettings(JSON.stringify({ title: "home", units: { temp: "f" }, fleet: { sort: "cpu" }, nodes: "x", __proto__x: 1 }));
+  assert.deepStrictEqual(ok, { ok: true, cfg: { title: "home", units: { temp: "f" }, fleet: { sort: "cpu" } }, skipped: ["nodes", "__proto__x"] });
+  for (const bad of ["", "nope", "[1,2]", "null", "42", JSON.stringify({ title: 5 }), JSON.stringify({ units: [] })]) {
+    const r = importSettings(bad);
+    assert.strictEqual(r.ok, false, bad);
+    assert.match(r.error, /./);
+  }
+  assert.strictEqual(importSettings("x".repeat(600 * 1024)).ok, false, "too big");
+  assert.ok(HTML.includes('id="cfg-import"'));
+});
+
+test("the panel order always lists every panel once, also after an import", () => {
+  const cfg = { panelOrder: ["cpu", "cpu", "bogus", "mem"] };
+  pageFn("fixPanelOrder", { cfg, DEFAULTS: { panels: { mem: 1, cpu: 1, temp: 1 } } })();
+  assert.deepStrictEqual(cfg.panelOrder, ["cpu", "mem", "temp"]);
+  assert.match(HTML, /cfg = deepMerge\(structuredClone\(DEFAULTS\), r\.cfg\);\n    fixPanelOrder\(\);/);
 });

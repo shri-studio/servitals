@@ -506,8 +506,9 @@
   #fav-preview { width: 22px; height: 22px; object-fit: contain; background: var(--bg); border: var(--border-w, 1px) solid var(--border); }
 
   .panelcfg { display: flex; flex-direction: column; gap: 3px; }
+  #overlay .pcf button { padding: 1px 7px; }
   .pcf {
-    display: grid; grid-template-columns: 18px 1fr auto auto; gap: 8px; align-items: center;
+    display: grid; grid-template-columns: 18px 1fr auto auto auto auto; gap: 8px; align-items: center;
     padding: 5px 8px; background: var(--bg); border: var(--border-w, 1px) solid var(--border);
   }
   .pcf.drag-over { border-color: var(--cyan); }
@@ -689,8 +690,13 @@
       </section>
 
       <section>
-        <label>panels &mdash; drag to reorder</label>
+        <label>panels</label>
+        <div class="fields">
+          <label class="field"><span>which panels and sizes, for</span><select id="cfg-p-for"></select></label>
+        </div>
+        <p class="hint">the order is shared by every server: drag, or use the arrows</p>
         <div id="cfg-panels" class="panelcfg"></div>
+        <div class="addrow"><button id="cfg-p-reset" class="hidden">use the shared set for this server</button></div>
       </section>
 
       <section>
@@ -773,6 +779,8 @@
       <button id="cfg-save">save</button>
       <button id="cfg-reset">reset to defaults</button>
       <button id="cfg-export">export json</button>
+      <button id="cfg-import">import json</button>
+      <input type="file" id="cfg-import-file" accept="application/json,.json" hidden>
     </div>
     <div class="body hidden" id="export-wrap">
       <label id="export-lbl" style="color:var(--dim);font-size:12px"></label>
@@ -929,10 +937,13 @@ async function loadConfig() {
   let saved = null;
   try { saved = JSON.parse(lsGet("cfg") || "null"); } catch (e) {}
   cfg = saved ? deepMerge(structuredClone(DEFAULTS), saved) : structuredClone(DEFAULTS);
-  // make sure every panel appears exactly once in the order list
+  fixPanelOrder();
+}
+// every panel appears exactly once in the order list
+function fixPanelOrder() {
   const known = Object.keys(DEFAULTS.panels);
-  cfg.panelOrder = [...(cfg.panelOrder || []).filter(p => known.includes(p)),
-                    ...known.filter(p => !(cfg.panelOrder || []).includes(p))];
+  const order = Array.isArray(cfg.panelOrder) ? cfg.panelOrder : [];
+  cfg.panelOrder = [...new Set(order.filter(p => known.includes(p))), ...known.filter(p => !order.includes(p))];
 }
 
 function applyBranding() {
@@ -940,17 +951,23 @@ function applyBranding() {
   document.title = name;
   if (cfg.favicon) $("#favicon").href = cfg.favicon;
 }
+// the panel set of one server: its own when it has one, else the shared one (spec 10.4)
+function panelSet(id) {
+  const own = id && cfg.nodePanels && cfg.nodePanels[id];
+  return own || { panels: cfg.panels, panelSize: cfg.panelSize };
+}
 function applyLayout() {
   const grid = $("#grid");
+  const set = panelSet(currentNode || localNode);
   const order = (cfg.panelOrder && cfg.panelOrder.length) ? cfg.panelOrder : Object.keys(DEFAULTS.panels);
   order.forEach((p, i) => {
     const el = grid.querySelector(`[data-panel="${p}"]`);
     if (!el) return;
     el.style.order = i;
-    const size = (cfg.panelSize && cfg.panelSize[p]) || "normal";
+    const size = (set.panelSize && set.panelSize[p]) || "normal";
     el.classList.remove("p-normal", "p-wide", "p-full");
     el.classList.add("p-" + size);
-    el.classList.toggle("hidden", cfg.panels[p] === false);
+    el.classList.toggle("hidden", set.panels[p] === false);
   });
 }
 function deepMerge(a, b) {
@@ -1376,8 +1393,9 @@ function renderMetrics(d) {
     netData = n;
     renderNetBars();
   }
+  const shown = panelSet(currentNode || localNode).panels;
   $("[data-panel=network]").classList.toggle("hidden",
-    !d.net || cfg.panels.network === false);
+    !d.net || shown.network === false);
 
   // docker — stash and render (sort / expand handled separately)
   if (d.docker) { dockerData = d.docker; renderDocker(); } else dockerData = null;
@@ -1385,7 +1403,7 @@ function renderMetrics(d) {
   // a node without a group: hide its panel, never keep the previous node's
   for (const [panel, group] of [["mem", "mem"], ["cpu", "cpu"], ["temp", "temp"], ["storage", "disks"], ["docker", "docker"]]) {
     const el = $(`[data-panel=${panel}]`);
-    if (el) el.classList.toggle("hidden", !d[group] || cfg.panels[panel] === false);
+    if (el) el.classList.toggle("hidden", !d[group] || shown[panel] === false);
   }
 }
 
@@ -1647,6 +1665,26 @@ const COMMON_TZ = ["UTC",
   "Australia/Sydney","Pacific/Auckland",
   "Europe/Berlin","Europe/Istanbul","Europe/London","Europe/Madrid","Europe/Moscow","Europe/Paris"];
 
+// settings import: an exported file back in, known settings only, each of the right kind
+function importSettings(text) {
+  if (typeof text !== "string" || text.length > 512 * 1024) return { ok: false, error: "the file is empty or larger than 512 KB" };
+  let obj;
+  try { obj = JSON.parse(text); } catch (e) { return { ok: false, error: "that is not a JSON file" }; }
+  if (!obj || typeof obj !== "object" || Array.isArray(obj)) return { ok: false, error: "that is not a servitals settings file" };
+  const kinds = { title: "string", favicon: "string", portainerUrl: "string", style: "string", mode: "string",
+                  density: "string", refreshSec: "number", kioskSec: "number", kiosk: "boolean",
+                  weather: "array", clocks: "array", panelOrder: "array",
+                  panels: "object", panelSize: "object", nodePanels: "object", units: "object", fleet: "object", disks: "object" };
+  const kindOf = v => Array.isArray(v) ? "array" : v === null ? "null" : typeof v;
+  const out = {}, skipped = [];
+  for (const [k, v] of Object.entries(obj)) {
+    if (!Object.prototype.hasOwnProperty.call(kinds, k)) { skipped.push(k); continue; }
+    if (kindOf(v) !== kinds[k]) return { ok: false, error: `"${k}" should be ${kinds[k] === "array" ? "a list" : "a " + kinds[k]}` };
+    out[k] = v;
+  }
+  return { ok: true, cfg: out, skipped };
+}
+
 // settings → servers: fleet order and card numbers, and one row per server
 function renderServers() {
   const f = cfg.fleet || {};
@@ -1741,21 +1779,51 @@ async function saveAccount() {
   msg.textContent = `saved: log in as ${d.user} from now on; other sessions were logged out`;
 }
 
-/* panels: reorderable list with drag, size, show/hide */
+/* panels: order (drag, or the up and down buttons) is shared; which panels show
+   and their sizes can be one server's own (spec 10.4) */
 let dragPanel = null;
+let panelFor = "all";   // "all" or a node id
+function editedSet() {
+  if (panelFor === "all") return panelSet(null);
+  return panelSet(panelFor);
+}
+// a server's own set starts as a copy of the shared one, on its first change
+function ownSet() {
+  if (panelFor === "all") return panelSet(null);
+  cfg.nodePanels = cfg.nodePanels || {};
+  if (!cfg.nodePanels[panelFor]) cfg.nodePanels[panelFor] = structuredClone(panelSet(null));
+  return cfg.nodePanels[panelFor];
+}
+function drawPanelFor() {
+  const sel = $("#cfg-p-for");
+  sel.innerHTML = `<option value="all">every server</option>` + fleetNodes.map(n =>
+    `<option value="${esc(n.id)}">${esc(n.name)}${cfg.nodePanels && cfg.nodePanels[n.id] ? " (own set)" : ""}</option>`).join("");
+  if (panelFor !== "all" && !fleetNodes.some(n => n.id === panelFor)) panelFor = "all";
+  sel.value = panelFor;
+  $("#cfg-p-reset").classList.toggle("hidden", !(panelFor !== "all" && cfg.nodePanels && cfg.nodePanels[panelFor]));
+}
 function drawPanelCfg() {
   const host = $("#cfg-panels");
+  const set = editedSet();
+  drawPanelFor();
   host.innerHTML = cfg.panelOrder.map(p => {
-    const on = cfg.panels[p] !== false;
-    const sz = (cfg.panelSize && cfg.panelSize[p]) || "normal";
+    const on = set.panels[p] !== false;
+    const sz = (set.panelSize && set.panelSize[p]) || "normal";
     const opt = s => `<option value="${s}" ${sz === s ? "selected" : ""}>${s}</option>`;
     return `<div class="pcf ${on ? "" : "off"}" draggable="true" data-p="${p}">
       <span class="grip">⠿</span>
       <span class="pn">${p}</span>
-      <select data-sz>${opt("normal")}${opt("wide")}${opt("full")}</select>
+      <button data-up aria-label="move ${p} up">&uarr;</button><button data-down aria-label="move ${p} down">&darr;</button>
+      <select data-sz aria-label="size of ${p}">${opt("normal")}${opt("wide")}${opt("full")}</select>
       <label><input type="checkbox" data-vis ${on ? "checked" : ""}> show</label>
     </div>`;
   }).join("");
+  const move = (p, by) => {
+    const from = cfg.panelOrder.indexOf(p), to = from + by;
+    if (from < 0 || to < 0 || to >= cfg.panelOrder.length) return;
+    cfg.panelOrder.splice(to, 0, cfg.panelOrder.splice(from, 1)[0]);
+    drawPanelCfg();
+  };
   $$(".pcf", host).forEach(row => {
     row.ondragstart = e => { dragPanel = row.dataset.p; e.dataTransfer.effectAllowed = "move"; };
     row.ondragover  = e => { e.preventDefault(); row.classList.add("drag-over"); };
@@ -1767,12 +1835,17 @@ function drawPanelCfg() {
       cfg.panelOrder.splice(to, 0, cfg.panelOrder.splice(from, 1)[0]);
       drawPanelCfg();
     };
+    row.querySelector("[data-up]").onclick = () => move(row.dataset.p, -1);
+    row.querySelector("[data-down]").onclick = () => move(row.dataset.p, 1);
     row.querySelector("[data-vis]").onchange = e => {
-      cfg.panels[row.dataset.p] = e.target.checked;
+      ownSet().panels[row.dataset.p] = e.target.checked;
       row.classList.toggle("off", !e.target.checked);
+      drawPanelFor();
     };
     row.querySelector("[data-sz]").onchange = e => {
-      (cfg.panelSize = cfg.panelSize || {})[row.dataset.p] = e.target.value;
+      const set = ownSet();
+      (set.panelSize = set.panelSize || {})[row.dataset.p] = e.target.value;
+      drawPanelFor();
     };
   });
 }
@@ -1948,6 +2021,8 @@ document.addEventListener("visibilitychange", () => {
   $("#btn-settings").onclick = openSettings;
   $("#settings-close").onclick = closeSettings;
   $("#acct-save").onclick = saveAccount;
+  $("#cfg-p-for").onchange = e => { panelFor = e.target.value; drawPanelCfg(); };
+  $("#cfg-p-reset").onclick = () => { delete cfg.nodePanels[panelFor]; drawPanelCfg(); };
   $("#cfg-servers").addEventListener("change", e => {
     if (e.target.matches(".srv-name, .srv-tags")) saveServer(e.target.closest(".srv"));
   });
@@ -2038,6 +2113,19 @@ document.addEventListener("visibilitychange", () => {
     $("#export-lbl").textContent = "config.json in the hub's state directory — saving the settings writes it for you";
     $("#export-text").value = JSON.stringify(cfg, null, 2);
     $("#export-text").select();
+  };
+
+  // import: fills the form; nothing is saved until the person presses save
+  $("#cfg-import").onclick = () => $("#cfg-import-file").click();
+  $("#cfg-import-file").onchange = async e => {
+    const f = e.target.files[0]; e.target.value = "";
+    if (!f) return;
+    const r = importSettings(await f.text().catch(() => ""));
+    if (!r.ok) return toast(r.error, true);
+    cfg = deepMerge(structuredClone(DEFAULTS), r.cfg);
+    fixPanelOrder();
+    openSettings();
+    toast(`imported${r.skipped.length ? " (skipped " + r.skipped.join(", ") + ")" : ""}: check, then save`);
   };
 
   // favicon / name widgets
