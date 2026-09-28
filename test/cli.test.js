@@ -287,6 +287,7 @@ function startLink(url, env) {
     }
     throw new Error("no code printed: " + out.stdout + out.stderr);
   })();
+  code.catch(() => {});   // tests that expect no code never await it
   return { child, out, exited, code };
 }
 async function decideOnPage(hub, code, action) {
@@ -298,7 +299,7 @@ async function decideOnPage(hub, code, action) {
 }
 
 test("link: shows a code, waits for approval, saves the credentials and pushes", async () => {
-  const hub = await startHub();
+  const hub = await startHub({ LINK_ALLOW_LOOPBACK: "1" });
   try {
     const creds = path.join(tmp(), "agent-credentials.env");
     // a proxy for the internet must not catch a link to this machine itself
@@ -325,7 +326,7 @@ test("link: shows a code, waits for approval, saves the credentials and pushes",
 });
 
 test("link: a denied code saves nothing; a plain-http hub elsewhere is refused", async () => {
-  const hub = await startHub();
+  const hub = await startHub({ LINK_ALLOW_LOOPBACK: "1" });
   try {
     const creds = path.join(tmp(), "agent-credentials.env");
     const l = startLink(`http://127.0.0.1:${hub.port}`, joinEnv({ CREDENTIALS_FILE: creds }));
@@ -396,6 +397,18 @@ test("link approved but the test push fails: says which node the hub now lists a
     assert.match(l.out.stdout, /The hub now lists this server as node abcdefghijkm.*servitals-ctl node revoke abcdefghijkm/s);
     assert.ok(!fs.existsSync(creds));
   } finally { hub.close(); }
+});
+
+test("link says so when the address answers with a web page instead of servitals", async () => {
+  const http = require("node:http");
+  const site = http.createServer((req, res) => { req.resume(); res.writeHead(200, { "content-type": "text/html" }); res.end("<!doctype html><p>welcome"); });
+  await new Promise((r) => site.listen(0, "127.0.0.1", r));
+  try {
+    // async: the fake site answers from this same process
+    const l = startLink(`http://127.0.0.1:${site.address().port}`, joinEnv({ CREDENTIALS_FILE: path.join(tmp(), "c.env") }));
+    assert.strictEqual(await l.exited, 1, l.out.stdout + l.out.stderr);
+    assert.match(l.out.stderr, /the hub's answer does not look like servitals/);
+  } finally { site.close(); }
 });
 
 test("unlink removes the credentials, stops the agent and says how to revoke on the hub", () => {

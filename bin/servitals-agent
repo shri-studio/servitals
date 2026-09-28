@@ -141,7 +141,8 @@ link_post() {  # url json-file: sets LINK_STATUS, the reply is in $WORK_DIR/out
     -H "Content-Type: application/json" -H "Expect:" "${HUB_ARGS[@]}" \
     --data-binary @"$2" "$1" 2>/dev/null) || LINK_STATUS=000
 }
-reply() { jq -r "$1 // empty" "$WORK_DIR/out" 2>/dev/null; }
+# a field of the hub's JSON reply, or nothing (a web page or proxy error is not JSON)
+reply() { jq -r "$1 // empty" "$WORK_DIR/out" 2>/dev/null || true; }
 
 # pair by code (spec 6.1.1, protocol 5.3): this machine makes its own secret,
 # sends it once over HTTPS, and a person approves the short code on the hub

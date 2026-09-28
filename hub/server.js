@@ -337,14 +337,19 @@ const bannedPage = (ip, b) => SHELL(SITE + " · blocked", `
 /* ---------- code-based linking (spec 6.1.1, protocol 5.3) ---------- */
 const links = createLinks();
 const LOOPBACK = new Set(["127.0.0.1", "::1", "::ffff:127.0.0.1"]);
+// plain HTTP straight from this host: tests and the package smoke test only. A local
+// reverse proxy that adds no forwarding header looks exactly the same, so it is off by default.
+const LINK_ALLOW_LOOPBACK = process.env.LINK_ALLOW_LOOPBACK === "1";
+const FORWARDING = ["x-forwarded-for", "x-forwarded-proto", "x-forwarded-host", "x-real-ip", "forwarded", "via"];
 const lastValue = (v) => String(v || "").split(",").pop().trim().toLowerCase();
 // Stricter than requestIsHttps: the node secret crosses the network here, so this
 // connection itself must be TLS, or come from a trusted proxy that says https,
-// or come straight from this host. An https PUBLIC_URL alone is not enough.
+// or (LINK_ALLOW_LOOPBACK=1) come straight from this host. An https PUBLIC_URL alone is not enough.
 function linkTransportOk(req, client) {
   if (req.socket && req.socket.encrypted) return true;
   if (client.peerTrusted && req.headers["x-forwarded-proto"]) return lastValue(req.headers["x-forwarded-proto"]) === "https";
-  return LOOPBACK.has(req.socket && req.socket.remoteAddress) && !req.headers["x-forwarded-for"] && !req.headers[PROXY_HEADER];
+  return LINK_ALLOW_LOOPBACK && LOOPBACK.has(req.socket && req.socket.remoteAddress) &&
+    ![...FORWARDING, PROXY_HEADER].some((h) => req.headers[h] !== undefined);
 }
 // the address people type into a browser to reach this hub
 function publicBase(req, client) {

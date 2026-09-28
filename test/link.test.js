@@ -70,24 +70,63 @@ test("deny, expiry, unknown codes and polling too fast", () => {
   assert.deepStrictEqual(links.poll(undefined), { status: 400, body: { error: "invalid_request" } });
 });
 
-test("rate limits: 5 starts per address per hour, 10 code entries per address and per account per 10 minutes", () => {
+test("rate limits: 5 waiting per address, 20 starts an hour; only wrong codes count against the entry limit", () => {
   const t = clock(), links = createLinks({ now: t });
   for (let i = 0; i < 5; i++) assert.strictEqual(ask(links).status, 200);
-  assert.deepStrictEqual(ask(links), { status: 429, body: { error: "rate_limited" }, retryAfter: 3600 });
+  assert.deepStrictEqual(ask(links), { status: 429, body: { error: "rate_limited" }, retryAfter: 600 }, "5 already waiting");
   assert.strictEqual(ask(links, { ip: "203.0.113.8" }).status, 200, "another address is not affected");
-  t.add(3600e3);
-  assert.strictEqual(ask(links).status, 200);
+  t.add(601e3);   // those 5 expired: 15 more this hour
+  for (let i = 0; i < 3; i++) { for (let k = 0; k < 5; k++) assert.strictEqual(ask(links).status, 200); t.add(601e3); }
+  assert.deepStrictEqual(ask(links), { status: 429, body: { error: "rate_limited" }, retryAfter: 600 }, "20 in an hour");
 
+  // a person linking eight servers in a row is never slowed down
   const who = { ip: "10.0.0.2", account: "admin" };
-  for (let i = 0; i < 10; i++) assert.strictEqual(links.lookup("AAAA-AAAA", who).error, "unknown");
-  assert.strictEqual(links.lookup("AAAA-AAAA", who).error, "too_many");
-  assert.strictEqual(links.lookup("AAAA-AAAA", { ip: "10.0.0.3", account: "admin" }).error, "too_many", "per account too");
+  const fresh = createLinks({ now: t });
+  for (let i = 0; i < 8; i++) {
+    const code = ask(fresh, { ip: `198.51.100.${i}` }).body.user_code;
+    assert.strictEqual(fresh.lookup(code, who).ok, true, `lookup ${i}`);
+    assert.strictEqual(fresh.decide(code, true, who, () => ({})).ok, true, `decide ${i}`);
+  }
+  // guessing is: 10 wrong codes per address and per account in 10 minutes
+  for (let i = 0; i < 10; i++) assert.strictEqual(fresh.lookup("AAAA-AAAA", who).error, "unknown");
+  assert.strictEqual(fresh.lookup("AAAA-AAAA", who).error, "too_many");
+  assert.strictEqual(fresh.lookup("AAAA-AAAA", { ip: "10.0.0.3", account: "admin" }).error, "too_many", "per account too");
   t.add(600e3);
-  assert.strictEqual(links.lookup("AAAA-AAAA", who).error, "unknown");
+  assert.strictEqual(fresh.lookup("AAAA-AAAA", who).error, "unknown");
+});
+
+test("IPv6 addresses count per /64, IPv4-mapped addresses as IPv4", () => {
+  const links = createLinks();
+  for (let i = 1; i <= 5; i++) assert.strictEqual(ask(links, { ip: `2001:db8:1:2::${i}` }).status, 200);
+  assert.strictEqual(ask(links, { ip: "2001:db8:1:2:ffff:ffff:ffff:ffff" }).status, 429, "same /64");
+  assert.strictEqual(ask(links, { ip: "2001:db8:1:3::1" }).status, 200, "another /64");
+  for (let i = 1; i <= 5; i++) assert.strictEqual(ask(links, { ip: "::ffff:192.0.2.1" }).status, i <= 5 ? 200 : 429);
+  assert.strictEqual(ask(links, { ip: "192.0.2.1" }).status, 429, "::ffff:192.0.2.1 is 192.0.2.1");
+});
+
+test("a busy hub answers without counting the start, and the address table stays bounded", () => {
+  const t = clock(), links = createLinks({ now: t });
+  for (let i = 0; i < 100; i++) assert.strictEqual(ask(links, { ip: `198.51.100.${i}` }).status, 200);
+  for (let i = 0; i < 30; i++) assert.strictEqual(ask(links, { ip: "203.0.113.50" }).status, 503);
+  t.add(601e3);
+  assert.strictEqual(ask(links, { ip: "203.0.113.50" }).status, 200, "the 503s did not use up its starts");
+  assert.ok(links.tracked() <= 102, `tracked ${links.tracked()}`);
 });
 
 test("at most 100 requests wait at once", () => {
   const links = createLinks();
   for (let i = 0; i < 100; i++) assert.strictEqual(ask(links, { ip: `198.51.100.${i}` }).status, 200);
   assert.deepStrictEqual(ask(links, { ip: "198.51.100.200" }), { status: 503, body: { error: "busy" }, retryAfter: 60 });
+});
+
+test("a flood of starts from rotating addresses stays cheap", () => {
+  const t = clock(), links = createLinks({ now: t });
+  const begin = process.hrtime.bigint();
+  for (let i = 0; i < 20000; i++) {
+    ask(links, { ip: `2001:db8:${(i >> 16) & 0xffff}:${i & 0xffff}::1` });
+    if (i % 100 === 0) t.add(1000);
+  }
+  const ms = Number(process.hrtime.bigint() - begin) / 1e6;
+  assert.ok(ms < 3000, `20000 starts took ${Math.round(ms)} ms`);
+  assert.ok(links.tracked() <= 10000);
 });

@@ -17,8 +17,11 @@ const TTL_MS = 600e3;
 const INTERVAL_S = 5;
 const KEEP_MS = 2 * TTL_MS;          // answer "expired" (not "unknown") for a while after
 const MAX_PENDING = 100;
-const START_LIMIT = 5, START_WINDOW_MS = 3600e3;
-const ENTRY_LIMIT = 10, ENTRY_WINDOW_MS = 600e3;
+const PENDING_PER_ADDRESS = 5;                     // a NAT full of servers links fine, 5 at a time
+const START_LIMIT = 20, START_WINDOW_MS = 3600e3;
+const ENTRY_LIMIT = 10, ENTRY_WINDOW_MS = 600e3;   // wrong codes only: typing right ones never slows anyone
+const MAX_TRACKED = 10000;                         // addresses remembered for the limits
+const SWEEP_EVERY_MS = 1000;
 
 const SECRET_RE = /^[0-9a-f]{64}$/;
 const HOST_RE = /^[^\u0000-\u001f\u007f]{1,64}$/;
@@ -30,24 +33,38 @@ const normalizeCode = (s) => String(s == null ? "" : s).toUpperCase().replace(/[
 const showCode = (c) => `${c.slice(0, 4)}-${c.slice(4)}`;
 const newUserCode = () => [...crypto.randomBytes(8)].map((b) => ALPHABET[b & 31]).join("");
 
+// the rate-limit key for an address: IPv4 as is, IPv6 by its /64 (one host usually has a whole /64)
+function addressKey(ip) {
+  const s = String(ip || "").toLowerCase();
+  const v4 = /^(?:::ffff:)?(\d{1,3}(?:\.\d{1,3}){3})$/.exec(s);
+  if (v4) return v4[1];
+  if (!s.includes(":")) return s || "?";
+  const [head, tail = ""] = s.split("::");
+  const a = head ? head.split(":") : [], b = tail ? tail.split(":") : [];
+  const groups = [...a, ...Array(Math.max(0, 8 - a.length - b.length)).fill("0"), ...b];
+  return groups.slice(0, 4).map((g) => g.replace(/^0+(?=.)/, "")).join(":") + "::/64";
+}
+
 function createLinks({ now = Date.now } = {}) {
   const byDevice = new Map();   // hash(device code) -> request
   const byUser = new Map();     // hash(user code) -> request, while it can still be decided
-  const starts = new Map();     // ip -> [times]
-  const entries = new Map();    // "ip:<ip>" or "account:<name>" -> [times]
+  const starts = new Map();     // address key -> [times]
+  const entries = new Map();    // "ip:<key>" or "account:<name>" -> [times of wrong codes]
+  let lastSweep = -Infinity;
 
-  // true when this attempt is within the limit (and records it)
-  function allow(map, key, limit, windowMs) {
-    const t = now();
-    const recent = (map.get(key) || []).filter((x) => t - x < windowMs);
-    if (recent.length >= limit) { map.set(key, recent); return false; }
-    recent.push(t);
-    map.set(key, recent);
-    return true;
+  const recent = (map, key, windowMs) => (map.get(key) || []).filter((x) => now() - x < windowMs);
+  function record(map, key, windowMs) {
+    if (!map.has(key) && map.size >= MAX_TRACKED) return;   // full: the oldest entries are swept soon
+    const r = recent(map, key, windowMs);
+    r.push(now());
+    map.set(key, r);
   }
 
+  // expired requests and old counters go, at most once a second (each request would be O(n))
   function sweep() {
     const t = now();
+    if (t - lastSweep < SWEEP_EVERY_MS) return;
+    lastSweep = t;
     for (const [k, r] of byDevice) {
       if (t > r.expires + KEEP_MS) byDevice.delete(k);
       if (t > r.expires || r.status !== "pending") byUser.delete(r.userHash);
@@ -61,15 +78,23 @@ function createLinks({ now = Date.now } = {}) {
       return { status: 400, body: { error: "invalid_request" } };
     }
     sweep();
-    if (!allow(starts, ip || "?", START_LIMIT, START_WINDOW_MS)) {
-      return { status: 429, body: { error: "rate_limited" }, retryAfter: START_WINDOW_MS / 1000 };
+    // busy first: a refused start does not count against the address
+    if (byUser.size >= MAX_PENDING || (starts.size >= MAX_TRACKED && !starts.has(addressKey(ip)))) {
+      return { status: 503, body: { error: "busy" }, retryAfter: 60 };
     }
-    if (byUser.size >= MAX_PENDING) return { status: 503, body: { error: "busy" }, retryAfter: 60 };
+    const key = addressKey(ip);
+    const t0 = now();
+    let waiting = 0;
+    for (const r of byUser.values()) if (r.key === key && r.status === "pending" && t0 <= r.expires) waiting++;
+    if (waiting >= PENDING_PER_ADDRESS || recent(starts, key, START_WINDOW_MS).length >= START_LIMIT) {
+      return { status: 429, body: { error: "rate_limited" }, retryAfter: TTL_MS / 1000 };
+    }
+    record(starts, key, START_WINDOW_MS);
     const device = crypto.randomBytes(32).toString("base64url");
     let code;
     do { code = newUserCode(); } while (byUser.has(hash(code)));
     const t = now();
-    const req = { deviceHash: hash(device), userHash: hash(code), code, secret, host, os, agent, ip: ip || "",
+    const req = { deviceHash: hash(device), userHash: hash(code), code, secret, host, os, agent, ip: ip || "", key,
                   started: t, expires: t + TTL_MS, status: "pending", lastPoll: 0, result: null };
     byDevice.set(req.deviceHash, req);
     byUser.set(req.userHash, req);
@@ -95,15 +120,18 @@ function createLinks({ now = Date.now } = {}) {
     return { status: 202, body: { status: "pending" } };
   }
 
-  // a person typed a code: what would they approve? Counted against both limits.
+  // a person typed a code: what would they approve? Wrong codes count against
+  // the address and the account; after 10 in 10 minutes every code is refused.
   function find(code, { ip, account }) {
-    const okIp = allow(entries, "ip:" + (ip || "?"), ENTRY_LIMIT, ENTRY_WINDOW_MS);
-    const okAccount = allow(entries, "account:" + (account || "?"), ENTRY_LIMIT, ENTRY_WINDOW_MS);
-    if (!okIp || !okAccount) return { error: "too_many" };
+    const keys = ["ip:" + addressKey(ip), "account:" + (account || "?")];
+    if (keys.some((k) => recent(entries, k, ENTRY_WINDOW_MS).length >= ENTRY_LIMIT)) return { error: "too_many" };
     sweep();
     const c = normalizeCode(code);
     const r = c.length === 8 ? byUser.get(hash(c)) : null;
-    if (!r || r.status !== "pending" || now() > r.expires) return { error: "unknown" };
+    if (!r || r.status !== "pending" || now() > r.expires) {
+      for (const k of keys) record(entries, k, ENTRY_WINDOW_MS);
+      return { error: "unknown" };
+    }
     return { r };
   }
 
@@ -127,7 +155,8 @@ function createLinks({ now = Date.now } = {}) {
     return { ok: true, host: r.host, from: r.ip, result: r.result };
   }
 
-  return { start, poll, lookup, decide };
+  const tracked = () => starts.size + entries.size;
+  return { start, poll, lookup, decide, tracked };
 }
 
-module.exports = { createLinks, normalizeCode, TTL_MS, INTERVAL_S };
+module.exports = { createLinks, normalizeCode, addressKey, TTL_MS, INTERVAL_S };

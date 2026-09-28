@@ -20,7 +20,7 @@ const form = (port, fields, cookie, origin = `http://127.0.0.1:${port}`) => {
 };
 
 test("link needs HTTPS: a direct loopback connection or a trusted proxy that says https", async () => {
-  const hub = await startHub({ PUBLIC_URL: "https://hub.example" });
+  const hub = await startHub({ PUBLIC_URL: "https://hub.example", LINK_ALLOW_LOOPBACK: "1" });
   try {
     const direct = await post(hub.port, "/api/v1/link/start", startBody());
     assert.strictEqual(direct.status, 200, direct.body);
@@ -42,6 +42,21 @@ test("link needs HTTPS: a direct loopback connection or a trusted proxy that say
   } finally { await hub.stop(); }
 });
 
+test("plain HTTP from this host is refused unless LINK_ALLOW_LOOPBACK=1, and never with forwarding headers", async () => {
+  let hub = await startHub();
+  try {
+    const r = await post(hub.port, "/api/v1/link/start", startBody());
+    assert.deepStrictEqual([r.status, JSON.parse(r.body)], [403, { error: "https_required" }], "a local proxy without X-Forwarded-For looks just like this");
+  } finally { await hub.stop(); }
+  hub = await startHub({ LINK_ALLOW_LOOPBACK: "1" });
+  try {
+    for (const h of [{ via: "1.1 nginx" }, { "x-real-ip": "192.168.1.9" }, { forwarded: "for=192.168.1.9" }, { "x-forwarded-host": "hub.lan" }]) {
+      const r = await post(hub.port, "/api/v1/link/start", startBody(), h);
+      assert.strictEqual(r.status, 403, JSON.stringify(h));
+    }
+  } finally { await hub.stop(); }
+});
+
 test("a proxy the hub does not trust cannot vouch for https", async () => {
   const hub = await startHub({ TRUSTED_PROXIES: "" });
   try {
@@ -51,7 +66,7 @@ test("a proxy the hub does not trust cannot vouch for https", async () => {
 });
 
 test("a person approves on /link: login first, see what asks, name it, and the agent gets its node id", async () => {
-  const hub = await startHub();
+  const hub = await startHub({ LINK_ALLOW_LOOPBACK: "1" });
   try {
     const s = JSON.parse((await post(hub.port, "/api/v1/link/start", startBody({ host: "<b>nas</b>" }))).body);
     assert.strictEqual(s.verify_url, `http://127.0.0.1:${hub.port}/link`);
@@ -106,7 +121,7 @@ test("a person approves on /link: login first, see what asks, name it, and the a
 });
 
 test("/link: deny, a wrong code, a bad tag, and no approval from another site", async () => {
-  const hub = await startHub();
+  const hub = await startHub({ LINK_ALLOW_LOOPBACK: "1" });
   try {
     const s = JSON.parse((await post(hub.port, "/api/v1/link/start", startBody())).body);
     const cookie = cookieFrom(await login(hub.port));

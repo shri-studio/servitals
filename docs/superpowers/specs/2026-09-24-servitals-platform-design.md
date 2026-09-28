@@ -280,8 +280,11 @@ Rules:
 - `user_code`: 8 characters from an alphabet without look-alikes
   (`ABCDEFGHJKLMNPQRSTUVWXYZ23456789`), shown as `XXXX-XXXX`, single use,
   valid 10 minutes. `device_code`: 32 random bytes. Both are stored hashed.
-- Rate limits: 5 link starts per source IP per hour; 10 code entries per
-  account and per IP per 10 minutes; codes are compared in constant time.
+- Rate limits: 5 requests waiting per source address and 20 starts per
+  address per hour (IPv6 per /64; a busy refusal does not count); 10 wrong
+  code entries per account and per address per 10 minutes (right codes never
+  count); codes are found by hash. (Changed 2026-09-28 from 5 starts per hour
+  and 10 entries of any kind: those blocked a person linking a sixth server.)
 - Approval counts against the account's node limit (hosted: 5); over the
   limit the page says so and denies.
 - The agent prints the account it joined, so a person tricked into approving

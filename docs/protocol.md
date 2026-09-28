@@ -106,8 +106,10 @@ it like a network error. A `204` has an empty body.
 Unsigned (the agent has no node id yet). JSON bodies of at most 2 KiB.
 
 HTTPS only, else `403 https_required`: the connection itself is TLS, or comes
-from a trusted proxy whose `X-Forwarded-Proto` says `https`, or comes straight
-from the hub's own host (loopback, no forwarding headers). An `https://`
+from a trusted proxy whose `X-Forwarded-Proto` says `https`, or, only with
+`LINK_ALLOW_LOOPBACK=1` (tests), comes straight from the hub's own host with no
+forwarding header at all (a local proxy that adds none looks the same, so this
+is off by default). An `https://`
 `PUBLIC_URL` alone is not enough, because the request itself may still have
 travelled as plain HTTP. Pending requests live in the hub's memory; a hub
 restart expires them.
@@ -127,8 +129,12 @@ restart expires them.
 Other answers: `400 invalid_request` (a field is missing or out of range:
 `secret` 64 lowercase hex, `host` 1-64 characters without control characters,
 `os` and `agent` 1-32 of `A-Za-z0-9._-` and, for `agent`, `/+`),
-`429 rate_limited` with `Retry-After` (more than 5 starts from one address in
-an hour), `503 busy` with `Retry-After` (100 requests already waiting).
+`429 rate_limited` with `Retry-After` (5 requests from this address are already
+waiting, or 20 started in the last hour; IPv6 addresses count per /64),
+`503 busy` with `Retry-After` (100 requests already waiting). A start refused
+as busy does not count. On `/link`, 10 wrong codes per address and per account
+in 10 minutes lock code entry for the rest of those 10 minutes; right codes
+never count.
 
 `POST /api/v1/link/poll` with `{ "device_code": "…" }`:
 

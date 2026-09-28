@@ -29,7 +29,13 @@ join=$(servitals-ctl node add second | sed -n 's/^ *sudo servitals-agent join //
 wait_for "curl -fsS -b /tmp/jar $B/__ctl/nodes | jq -e 'map(select(.name == \"second\" and .status == \"online\")) | length == 1' >/dev/null" \
 	|| fail "second node not online in the fleet"
 
-# a third links by code (spec 6.1.1), over loopback, approved on /link as a person would
+# a third links by code (spec 6.1.1), over loopback, approved on /link as a person would.
+# Plain HTTP from this host is only accepted with LINK_ALLOW_LOOPBACK=1 (tests only).
+mkdir -p /etc/systemd/system/servitals.service.d
+printf '[Service]\nEnvironment=LINK_ALLOW_LOOPBACK=1\n' > /etc/systemd/system/servitals.service.d/link-test.conf
+systemctl daemon-reload
+systemctl restart servitals
+wait_for "curl -fsS $B/__auth/health >/dev/null 2>&1" || fail "hub not back with LINK_ALLOW_LOOPBACK"
 CREDENTIALS_FILE=/tmp/third.env servitals-agent link --no-start "$B" > /tmp/link.out 2>&1 &
 linker=$!
 wait_for "grep -q 'enter:' /tmp/link.out" || { cat /tmp/link.out; fail "link printed no code"; }
@@ -41,6 +47,10 @@ wait "$linker" || { cat /tmp/link.out; fail "servitals-agent link"; }
 grep -q '^ok$' /tmp/link.out || { cat /tmp/link.out; fail "the linked agent's test push"; }
 wait_for "curl -fsS -b /tmp/jar $B/__ctl/nodes | jq -e 'map(select(.name == \"third\" and .status == \"online\")) | length == 1' >/dev/null" \
 	|| fail "linked node not online in the fleet"
+rm /etc/systemd/system/servitals.service.d/link-test.conf
+systemctl daemon-reload
+systemctl restart servitals
+wait_for "curl -fsS $B/__auth/health >/dev/null 2>&1" || fail "hub not back after the link test"
 
 printf 'another-pass-1\n' | servitals-ctl passwd --user owner
 [ "$(curl -s -o /dev/null -w '%{http_code}' -b /tmp/jar "$B/__ctl/whoami")" = 401 ] || fail "old session survived passwd"
