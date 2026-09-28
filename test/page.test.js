@@ -264,8 +264,8 @@ test("the fleet: hidden nodes go, pinned ones lead, then the chosen order, optio
 
 test("names and tags from servers are escaped in the servers section and the fleet's group titles", () => {
   const fn = (name) => HTML.slice(HTML.indexOf(`function ${name}(`), HTML.indexOf("\n}\n", HTML.indexOf(`function ${name}(`)));
-  assert.match(fn("renderServers"), /value="\$\{esc\(n\.name\)\}"/);
-  assert.match(fn("renderServers"), /value="\$\{esc\(\(n\.tags \|\| \[\]\)\.join\(", "\)\)\}"/);
+  assert.match(fn("renderServers"), /value="\$\{esc\(typed\(n, "name", n\.name\)\)\}"/);
+  assert.match(fn("renderServers"), /value="\$\{esc\(typed\(n, "tags", \(n\.tags \|\| \[\]\)\.join\(", "\)\)\)\}"/);
   assert.match(fn("renderFleet"), /<div class="fgroup">\$\{esc\(g\.title\)\}<\/div>/);
   assert.doesNotMatch(fn("renderServers") + fn("renderFleet"), /\$\{(n\.name|g\.title|n\.tags)/, "nothing unescaped");
 });
@@ -309,4 +309,67 @@ test("the panel order always lists every panel once, also after an import", () =
   pageFn("fixPanelOrder", { cfg, DEFAULTS: { panels: { mem: 1, cpu: 1, temp: 1 } } })();
   assert.deepStrictEqual(cfg.panelOrder, ["cpu", "mem", "temp"]);
   assert.match(HTML, /cfg = deepMerge\(structuredClone\(DEFAULTS\), r\.cfg\);\n    fixPanelOrder\(\);/);
+});
+
+test("review: an imported file cannot reach Object.prototype, and nested junk is dropped", () => {
+  const deepMerge = pageFn("deepMerge", {});
+  deepMerge({}, JSON.parse('{"panels":{"__proto__":{"polluted":"yes"}},"constructor":{"prototype":{"p2":1}}}'));
+  assert.strictEqual(({}).polluted, undefined);
+  assert.strictEqual(({}).p2, undefined);
+  const importSettings = pageFn("importSettings", {});
+  const r = importSettings('{"fleet":{"hidden":5,"pinned":["a",3],"card":["cpu"],"sort":"cpu"},"panels":{"__proto__":{"x":1},"mem":true},'
+    + '"nodePanels":{"abcdefghijkm":{},"bcdefghijkmn":{"panels":{"mem":false},"panelSize":{"mem":"wide"}}},"portainerEndpoint":2}');
+  assert.strictEqual(r.ok, true);
+  assert.deepStrictEqual(r.cfg.fleet, { pinned: ["a"], card: ["cpu"], sort: "cpu" }, "hidden: 5 goes, a number in pinned goes");
+  assert.deepStrictEqual(Object.keys(r.cfg.panels), ["mem"]);
+  assert.deepStrictEqual(Object.keys(r.cfg.nodePanels), ["bcdefghijkmn"], "a panel set without panels goes");
+  assert.strictEqual(r.cfg.portainerEndpoint, 2, "export, then import, keeps every setting");
+});
+
+test("review: odd nested settings in config.json fall back instead of breaking the page", () => {
+  const arrange = pageFn("arrangeFleet", {});
+  const n = [{ id: "a", name: "a", status: "online", tags: [], summary: null }];
+  assert.strictEqual(arrange(n, { hidden: 5, pinned: {} })[0].nodes.length, 1);
+  const cfg = { panels: { mem: true }, panelSize: {}, nodePanels: { aaaaaaaaaaaa: {}, bbbbbbbbbbbb: { panels: null } } };
+  const panelSet = pageFn("panelSet", { cfg });
+  assert.strictEqual(panelSet("aaaaaaaaaaaa").panels, cfg.panels);
+  assert.strictEqual(panelSet("bbbbbbbbbbbb").panels, cfg.panels);
+  assert.deepStrictEqual([...pageFn("hiddenIds", { cfg: { fleet: { hidden: "x" } } })()], []);
+});
+
+test("review: hidden servers leave the status dot, the node count and kiosk rotation", () => {
+  assert.deepStrictEqual([...pageFn("hiddenIds", { cfg: { fleet: { hidden: ["a", 3] } } })()], ["a"]);
+  const fn = (name) => HTML.slice(HTML.indexOf(`function ${name}(`), HTML.indexOf("\n}\n", HTML.indexOf(`function ${name}(`)));
+  assert.match(fn("fleetStatus"), /const shown = fleetNodes\.filter\(n => !hidden\.has\(n\.id\)\);/);
+  assert.match(fn("startKiosk"), /!hiddenIds\(\)\.has\(n\.id\)/);
+});
+
+test("review: revoking the shown server moves the page on; settings rows keep what was not saved yet", () => {
+  const fn = (name) => HTML.slice(HTML.indexOf(`function ${name}(`), HTML.indexOf("\n}\n", HTML.indexOf(`function ${name}(`)));
+  assert.match(fn("revokeServer"), /route\(\);/);
+  assert.match(fn("revokeServer"), /drawPanelCfg\(\);/);
+  // what the rows show now, read back from the form
+  const row = (id, pin, hide, name, tags) => ({ dataset: { id }, q: { ".srv-pin": { checked: pin }, ".srv-hide": { checked: hide },
+    ".srv-name": { value: name }, ".srv-tags": { value: tags } } });
+  const form = { "#cfg-f-sort": { value: "cpu" }, "#cfg-f-group": { checked: true } };
+  const $ = (sel, root) => (root ? root.q[sel] : form[sel]);
+  const $$ = (sel) => sel === "#cfg-servers .srv" ? [row("aaaaaaaaaaaa", true, false, "nas2", "x"), row("bbbbbbbbbbbb", false, true, "b", "")]
+    : sel === "#cfg-f-card input:checked" ? [{ value: "disk" }] : [];
+  const state = pageFn("readServersForm", { $, $$ })();
+  assert.deepStrictEqual(state, { sort: "cpu", group: true, card: ["disk"], pinned: ["aaaaaaaaaaaa"], hidden: ["bbbbbbbbbbbb"],
+    names: { aaaaaaaaaaaa: { name: "nas2", tags: "x" }, bbbbbbbbbbbb: { name: "b", tags: "" } } });
+  assert.match(fn("openSettings"), /loadNodes\(\)\.then\(\(\) => renderServers\(\{ keep: true \}\)\)/);
+});
+
+test("review: a cancelled import changes nothing; zone clocks stay 24 hour unless asked", () => {
+  const fn = (name) => HTML.slice(HTML.indexOf(`function ${name}(`), HTML.indexOf("\n}\n", HTML.indexOf(`function ${name}(`)));
+  assert.match(fn("closeSettings"), /if \(beforeImport\) \{ cfg = beforeImport; beforeImport = null; \}/);
+  assert.match(fn("saveSettings"), /beforeImport = null;/);
+  const seen = [];
+  const D = class { toLocaleTimeString(loc, o) { seen.push([loc, o.hour12]); return ""; } };
+  const u = (clock) => () => ({ clock });
+  pageFn("fmtTime", { units: u("auto") })(new D(), "Asia/Kolkata");
+  pageFn("fmtTime", { units: u("auto") })(new D());
+  pageFn("fmtTime", { units: u("12h") })(new D(), "Asia/Kolkata");
+  assert.deepStrictEqual(seen, [["en-GB", undefined], [undefined, undefined], [undefined, true]]);
 });

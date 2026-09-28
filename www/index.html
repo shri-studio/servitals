@@ -842,7 +842,9 @@ function fmtTemp(c, withUnit) {
 }
 function fmtTime(date, timeZone) {
   const c = units().clock;
-  return date.toLocaleTimeString(undefined, { timeZone, hour12: c === "12h" ? true : c === "24h" ? false : undefined });
+  // zone clocks read 24 hour, as they always did, unless a clock is chosen
+  const locale = timeZone && c === "auto" ? "en-GB" : undefined;
+  return date.toLocaleTimeString(locale, { timeZone, hour12: c === "12h" ? true : c === "24h" ? false : undefined });
 }
 function fmtBytes(n) {
   n = Number(n) || 0;
@@ -954,7 +956,8 @@ function applyBranding() {
 // the panel set of one server: its own when it has one, else the shared one (spec 10.4)
 function panelSet(id) {
   const own = id && cfg.nodePanels && cfg.nodePanels[id];
-  return own || { panels: cfg.panels, panelSize: cfg.panelSize };
+  // a hand-edited or imported entry without panels falls back to the shared set
+  return own && own.panels && typeof own.panels === "object" ? own : { panels: cfg.panels, panelSize: cfg.panelSize };
 }
 function applyLayout() {
   const grid = $("#grid");
@@ -971,7 +974,9 @@ function applyLayout() {
   });
 }
 function deepMerge(a, b) {
-  for (const k in b) {
+  // own keys only, and never the ones that reach Object.prototype (settings can be imported)
+  for (const k of Object.keys(b)) {
+    if (k === "__proto__" || k === "constructor" || k === "prototype") continue;
     if (b[k] && typeof b[k] === "object" && !Array.isArray(b[k])) {
       a[k] = deepMerge(a[k] || {}, b[k]);
     } else { a[k] = b[k]; }
@@ -1074,8 +1079,8 @@ function startKiosk() {
   clearInterval(kioskTimer);
   if (!document.documentElement.hasAttribute("data-kiosk")) return;
   kioskTimer = setInterval(() => {
-    if (fleetNodes.length < 2) return;
-    const ids = fleetNodes.map(n => n.id);
+    const ids = fleetNodes.filter(n => !hiddenIds().has(n.id)).map(n => n.id);
+    if (ids.length < 2) return;
     const now = view === "fleet" ? -1 : ids.indexOf(currentNode || localNode);
     location.hash = "#node=" + ids[(now + 1) % ids.length];
   }, clamp(+cfg.kioskSec || 20, 5, 600) * 1000);
@@ -1169,7 +1174,8 @@ function arrangeFleet(nodes, f) {
       if (x === null || y === null) return x === y ? byName(a, b) : x === null ? 1 : -1;
       return (y - x) || byName(a, b);
     } : byName;
-  const hidden = new Set(f.hidden || []), pinned = new Set(f.pinned || []);
+  const list = v => (Array.isArray(v) ? v : []);   // a hand-edited config.json may hold anything
+  const hidden = new Set(list(f.hidden)), pinned = new Set(list(f.pinned));
   const shown = nodes.filter(n => !hidden.has(n.id)).sort(cmp);
   const pins = shown.filter(n => pinned.has(n.id)), rest = shown.filter(n => !pinned.has(n.id));
   if (!f.group) return shown.length ? [{ title: "", nodes: [...pins, ...rest] }] : [];
@@ -1183,6 +1189,11 @@ function arrangeFleet(nodes, f) {
   for (const t of [...groups.keys()].filter(Boolean).sort()) out.push({ title: t, nodes: groups.get(t) });
   if (groups.has("")) out.push({ title: "untagged", nodes: groups.get("") });
   return out;
+}
+// the servers hidden from the fleet (also from its status and kiosk rotation)
+function hiddenIds() {
+  const h = cfg.fleet && cfg.fleet.hidden;
+  return new Set(Array.isArray(h) ? h.filter(x => typeof x === "string") : []);
 }
 // which numbers a fleet card shows
 function cardNumbers() {
@@ -1224,12 +1235,14 @@ function fleetCard(n) {
     + `<div class="foot"><span>${foot}</span><span>${cont}</span></div></div>`;
 }
 function fleetStatus() {
-  const online = fleetNodes.filter(n => n.status === "online").length;
+  const hidden = hiddenIds();
+  const shown = fleetNodes.filter(n => !hidden.has(n.id));
+  const online = shown.filter(n => n.status === "online").length;
   const dot = $("#statusdot");
   dot.classList.remove("down", "stale");
-  if (online < fleetNodes.length) dot.classList.add(fleetNodes.some(n => n.status === "offline") ? "down" : "stale");
+  if (online < shown.length) dot.classList.add(shown.some(n => n.status === "offline") ? "down" : "stale");
   $("#hostname").textContent = cfg.title || "servitals";
-  $("#hostmeta").textContent = `${fleetNodes.length} nodes · ${online} online`;
+  $("#hostmeta").textContent = `${shown.length} nodes · ${online} online`;
   $("#lastupdate").textContent = `fleet · ${fmtTime(new Date())}`;
 }
 
@@ -1672,31 +1685,57 @@ function importSettings(text) {
   try { obj = JSON.parse(text); } catch (e) { return { ok: false, error: "that is not a JSON file" }; }
   if (!obj || typeof obj !== "object" || Array.isArray(obj)) return { ok: false, error: "that is not a servitals settings file" };
   const kinds = { title: "string", favicon: "string", portainerUrl: "string", style: "string", mode: "string",
-                  density: "string", refreshSec: "number", kioskSec: "number", kiosk: "boolean",
+                  density: "string", refreshSec: "number", kioskSec: "number", kiosk: "boolean", portainerEndpoint: "number",
                   weather: "array", clocks: "array", panelOrder: "array",
                   panels: "object", panelSize: "object", nodePanels: "object", units: "object", fleet: "object", disks: "object" };
   const kindOf = v => Array.isArray(v) ? "array" : v === null ? "null" : typeof v;
+  const UNSAFE = ["__proto__", "constructor", "prototype"];
+  // nested objects: own keys only, never the ones that reach Object.prototype
+  const plain = o => Object.fromEntries(Object.entries(o).filter(([k]) => !UNSAFE.includes(k))
+    .map(([k, v]) => [k, kindOf(v) === "object" ? plain(v) : v]));
+  const words = v => (Array.isArray(v) ? v.filter(x => typeof x === "string") : undefined);
+  const clean = {
+    fleet: f => Object.fromEntries(Object.entries(f).map(([k, v]) =>
+      [k, ["pinned", "hidden", "card"].includes(k) ? words(v) : k === "sort" && typeof v === "string" ? v
+        : k === "group" && typeof v === "boolean" ? v : undefined]).filter(([, v]) => v !== undefined)),
+    nodePanels: n => plain(Object.fromEntries(Object.entries(n).filter(([, v]) => kindOf(v) === "object" && kindOf(v.panels) === "object"))),
+  };
   const out = {}, skipped = [];
   for (const [k, v] of Object.entries(obj)) {
     if (!Object.prototype.hasOwnProperty.call(kinds, k)) { skipped.push(k); continue; }
     if (kindOf(v) !== kinds[k]) return { ok: false, error: `"${k}" should be ${kinds[k] === "array" ? "a list" : "a " + kinds[k]}` };
-    out[k] = v;
+    out[k] = clean[k] ? clean[k](v) : kinds[k] === "object" ? plain(v) : v;
   }
   return { ok: true, cfg: out, skipped };
 }
 
-// settings → servers: fleet order and card numbers, and one row per server
-function renderServers() {
-  const f = cfg.fleet || {};
+// what the servers section shows now, saved or not
+function readServersForm() {
+  const rows = $$("#cfg-servers .srv");
+  return {
+    sort: $("#cfg-f-sort").value, group: $("#cfg-f-group").checked,
+    card: $$("#cfg-f-card input:checked").map(i => i.value),
+    pinned: rows.filter(r => $(".srv-pin", r).checked).map(r => r.dataset.id),
+    hidden: rows.filter(r => $(".srv-hide", r).checked).map(r => r.dataset.id),
+    names: Object.fromEntries(rows.map(r => [r.dataset.id, { name: $(".srv-name", r).value, tags: $(".srv-tags", r).value }])),
+  };
+}
+// settings → servers: fleet order and card numbers, and one row per server.
+// keep: redraw for a changed server list without losing what the person has not saved yet
+function renderServers({ keep = false } = {}) {
+  const drawn = keep && $$("#cfg-servers .srv").length > 0;
+  const f = drawn ? readServersForm() : { ...(cfg.fleet || {}), card: cardNumbers(), names: {} };
+  const list = v => (Array.isArray(v) ? v : []);
   $("#cfg-f-sort").value = f.sort || "name";
   $("#cfg-f-group").checked = !!f.group;
-  const cards = cardNumbers(), names = { mem: "memory", temp: "temperature", disk: "fullest disk" };
+  const cards = list(f.card), names = { mem: "memory", temp: "temperature", disk: "fullest disk" };
   $("#cfg-f-card").innerHTML = Object.keys(CARD_LABEL).map(k => `<label class="check"><input type="checkbox" value="${k}"`
     + `${cards.includes(k) ? " checked" : ""}> ${names[k] || k}</label>`).join("");
-  const pinned = new Set(f.pinned || []), hidden = new Set(f.hidden || []);
+  const pinned = new Set(list(f.pinned)), hidden = new Set(list(f.hidden));
+  const typed = (n, k, saved) => (f.names[n.id] ? f.names[n.id][k] : saved);
   $("#cfg-servers").innerHTML = fleetNodes.map(n => `<div class="srv" data-id="${esc(n.id)}">`
-    + `<input type="text" class="srv-name" value="${esc(n.name)}" maxlength="64" aria-label="name of ${esc(n.name)}">`
-    + `<input type="text" class="srv-tags" value="${esc((n.tags || []).join(", "))}" placeholder="tags" aria-label="tags of ${esc(n.name)}">`
+    + `<input type="text" class="srv-name" value="${esc(typed(n, "name", n.name))}" maxlength="64" aria-label="name of ${esc(n.name)}">`
+    + `<input type="text" class="srv-tags" value="${esc(typed(n, "tags", (n.tags || []).join(", ")))}" placeholder="tags" aria-label="tags of ${esc(n.name)}">`
     + `<label class="check"><input type="checkbox" class="srv-pin"${pinned.has(n.id) ? " checked" : ""}> pin</label>`
     + `<label class="check"><input type="checkbox" class="srv-hide"${hidden.has(n.id) ? " checked" : ""}> hide</label>`
     + (n.local ? `<span class="local">this hub</span>` : `<button class="srv-revoke">revoke</button>`)
@@ -1722,7 +1761,10 @@ async function revokeServer(row) {
   if (!r.ok) return toast(j.error || "could not revoke that server", true);
   toast(`revoked ${name}`);
   await loadNodes();
-  renderServers();
+  route();   // the page may have been showing that server
+  if (view === "fleet") renderFleet();
+  renderServers({ keep: true });
+  drawPanelCfg();
 }
 
 function openSettings() {
@@ -1750,11 +1792,17 @@ function openSettings() {
   $("#cfg-kiosksec").value = cfg.kioskSec || 20;
   for (const [k, v] of Object.entries(units())) $("#cfg-u-" + k).value = v;
   renderServers();
-  loadNodes().then(renderServers);
+  loadNodes().then(() => renderServers({ keep: true }));
   $("#acct-msg").textContent = "";
   $("#overlay").classList.add("open");
 }
-function closeSettings() { $("#overlay").classList.remove("open"); }
+// an import not saved is undone when settings close
+let beforeImport = null;
+function closeSettings() {
+  if (beforeImport) { cfg = beforeImport; beforeImport = null; }
+  applyLayout();
+  $("#overlay").classList.remove("open");
+}
 
 /* ------------------------------------------------------------------ login
    Name and password live in the hub (admin.json). Changing them needs the
@@ -1889,6 +1937,7 @@ async function wxSearch() {
 }
 
 async function saveSettings() {
+  beforeImport = null;   // an import is kept once saved
   cfg.title = $("#cfg-name").value.trim() || "servitals";
   cfg.refreshSec = clamp(+$("#cfg-refresh").value || 60, 5, 900);
   // this browser's look becomes everyone's default only when asked
@@ -1903,13 +1952,12 @@ async function saveSettings() {
   if (cfg.kiosk && !was && lsGet("kiosk") === null) lsSet("kiosk", "0");
   cfg.kioskSec = clamp(+$("#cfg-kiosksec").value || 20, 5, 600);
   cfg.units = Object.fromEntries(Object.keys(UNIT_CHOICES).map((k) => [k, $("#cfg-u-" + k).value]));
-  const rows = $$("#cfg-servers .srv"), prev = cfg.fleet || {};
+  const form = readServersForm(), drawn = $$("#cfg-servers .srv").length > 0, prev = cfg.fleet || {};
   cfg.fleet = {
-    sort: $("#cfg-f-sort").value, group: $("#cfg-f-group").checked,
-    card: $$("#cfg-f-card input:checked").map(i => i.value).slice(0, 4),
+    sort: form.sort, group: form.group, card: form.card.slice(0, 4),
     // without the server list (the hub did not answer) keep what was saved
-    pinned: rows.length ? rows.filter(r => $(".srv-pin", r).checked).map(r => r.dataset.id) : prev.pinned || [],
-    hidden: rows.length ? rows.filter(r => $(".srv-hide", r).checked).map(r => r.dataset.id) : prev.hidden || [],
+    pinned: drawn ? form.pinned : prev.pinned || [],
+    hidden: drawn ? form.hidden : prev.hidden || [],
   };
   // panels/order/size/favicon are already updated live by the settings widgets
 
@@ -2122,6 +2170,7 @@ document.addEventListener("visibilitychange", () => {
     if (!f) return;
     const r = importSettings(await f.text().catch(() => ""));
     if (!r.ok) return toast(r.error, true);
+    if (!beforeImport) beforeImport = cfg;
     cfg = deepMerge(structuredClone(DEFAULTS), r.cfg);
     fixPanelOrder();
     openSettings();
