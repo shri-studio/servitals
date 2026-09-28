@@ -108,18 +108,29 @@ function parseFile(text) {
   return { settings, nodes };
 }
 
+// *.json entries of the directory; one that cannot be read is reported, never
+// hides the others. Dot files (an editor's lock or swap files) are not read.
 function jsonFiles(dir) {
-  try {
-    return fs.readdirSync(dir).filter((n) => n.endsWith(".json")).sort()
-      .map((name) => ({ name, file: path.join(dir, name), st: fs.statSync(path.join(dir, name)) }))
-      .filter((f) => f.st.isFile());
-  } catch (_) { return []; }
+  let names;
+  try { names = fs.readdirSync(dir); } catch (e) {
+    return e.code === "ENOENT" ? [] : [{ name: "(directory)", err: e.code || e.message }];
+  }
+  const out = [];
+  for (const name of names.filter((n) => n.endsWith(".json") && !n.startsWith(".")).sort()) {
+    const file = path.join(dir, name);
+    try {
+      const st = fs.statSync(file);
+      if (st.isFile()) out.push({ name, file, st });
+    } catch (e) { out.push({ name, file, err: e.code || e.message }); }
+  }
+  return out;
 }
 
 function readConfd(dir) {
   const out = { settings: {}, nodes: {}, managed: [], files: [] };
-  for (const { name, file, st } of jsonFiles(dir)) {
+  for (const { name, file, st, err } of jsonFiles(dir)) {
     try {
+      if (err) throw new Error(err);
       if (st.size > MAX_BYTES) throw new Invalid("larger than 256 KB");
       const { settings, nodes } = parseFile(fs.readFileSync(file, "utf8"));
       for (const [k, v] of Object.entries(settings)) {
@@ -148,7 +159,7 @@ function createConfd(dir, { log, now = Date.now } = {}) {
     const t = now();
     if (current && t - lastCheck < CHECK_EVERY_MS) return current;
     lastCheck = t;
-    const sig = jsonFiles(dir).map((f) => `${f.name}:${f.st.mtimeMs}:${f.st.size}`).join("|");
+    const sig = jsonFiles(dir).map((f) => (f.st ? `${f.name}:${f.st.mtimeMs}:${f.st.size}` : `${f.name}:${f.err}`)).join("|");
     if (current && sig === signature) return current;
     signature = sig;
     current = readConfd(dir);

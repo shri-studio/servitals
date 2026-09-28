@@ -154,7 +154,8 @@ test("?kiosk turns kiosk on and is remembered; ?kiosk=0 turns it off, even when 
 
 // runs one page function from the source with the stubs it needs
 function pageFn(name, stubs) {
-  const i = HTML.indexOf(`function ${name}(`);
+  let i = HTML.indexOf(`function ${name}(`);
+  if (HTML.slice(i - 6, i) === "async ") i -= 6;   // keep "async" for async page functions
   let depth = 0, j = HTML.indexOf("{", i);
   for (let k = j; k < HTML.length; k++) {
     if (HTML[k] === "{") depth++;
@@ -394,3 +395,37 @@ test("conf.d values win over a copy saved in this browser, and their fields are 
   assert.match(fn("renderServers"), /\(n\.managed \|\| \[\]\)\.includes\("tags"\) \? " disabled/, "file-managed tags cannot be edited");
   assert.match(fn("openSettings"), /markManaged\(\);/);
 });
+
+test("conf.d review: a file with a few panels keeps the built-in panel list and sizes (fresh hub)", async () => {
+  const src = HTML.slice(HTML.indexOf("async function loadConfig("), HTML.indexOf("\n}\n", HTML.indexOf("async function loadConfig(")) + 2);
+  const helpers = ["deepMerge", "fixPanelOrder", "managedPaths", "applyManaged"].map((n) =>
+    HTML.slice(HTML.indexOf(`function ${n}(`), HTML.indexOf("\n}\n", HTML.indexOf(`function ${n}(`)) + 2)).join("\n");
+  const fromHub = { panels: { weather: false }, panelSize: { docker: "full" }, _managed: ["panelSize.docker", "panels.weather"] };
+  const run = new Function("fetch", "lsGet", `let DEFAULTS = {}, cfg = {}; ${helpers}\n${src}\nreturn loadConfig().then(() => ({ DEFAULTS, cfg }));`);
+  const { cfg } = await run(async () => ({ json: async () => structuredClone(fromHub) }), () => null);
+  assert.deepStrictEqual(cfg.panelOrder, ["mem", "cpu", "temp", "storage", "network", "docker", "clocks", "weather"]);
+  assert.strictEqual(cfg.panels.weather, false);
+  assert.strictEqual(cfg.panels.mem, 1, "built-in panels stay");
+  assert.deepStrictEqual([cfg.panelSize.storage, cfg.panelSize.docker], ["wide", "full"]);
+});
+
+test("conf.d review: the page never sends a managed field, never drags a managed order, and managed panels are the shared set", async () => {
+  const sent = [];
+  const row = { dataset: { id: "abcdefghijkm", managed: "tags" }, q: { ".srv-name": { value: "nas2" }, ".srv-tags": { value: "storage" } } };
+  const saveServer = pageFn("saveServer", {
+    $: (sel, root) => root.q[sel], toast: () => {}, loadNodes: async () => {},
+    fetch: async (url, o) => { sent.push(JSON.parse(o.body)); return { ok: true, json: async () => ({}) }; },
+  });
+  await saveServer(row);
+  assert.deepStrictEqual(sent, [{ name: "nas2" }]);
+  const fn = (name) => HTML.slice(HTML.indexOf(`function ${name}(`), HTML.indexOf("\n}\n", HTML.indexOf(`function ${name}(`)));
+  assert.match(fn("renderServers"), /data-managed="\$\{esc\(\(n\.managed \|\| \[\]\)\.join\(" "\)\)\}"/);
+  assert.match(fn("drawPanelCfg"), /draggable="\$\{orderManaged \? "false" : "true"\}"/);
+  assert.match(fn("drawPanelCfg"), /if \(orderManaged\) return;/);
+  const disabled = [];
+  const markManaged = pageFn("markManaged", { panelFor: "abcdefghijkm", managedPaths: () => ["panels.mem", "title"],
+    managedSelector: (p) => p, $$: (sel) => { disabled.push(sel); return []; } });
+  markManaged();
+  assert.deepStrictEqual(disabled, ["title"], "a server's own panel set is not what files set");
+});
+

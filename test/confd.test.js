@@ -93,3 +93,14 @@ test("servitals-ctl config check: one line per file, exit 1 when any file is wro
   assert.strictEqual(r.status, 0);
   assert.match(r.stdout, /no files in \/nonexistent\/dir/);
 });
+
+test("an editor's lock file or a broken link does not drop the other files, and is reported", () => {
+  const d = dir({ "10-a.json": { settings: { title: "one" } } });
+  fs.symlinkSync("user@host.1234", path.join(d, ".#10-a.json"));   // emacs lock file, dangling
+  fs.symlinkSync("/nonexistent/x.json", path.join(d, "20-gone.json"));
+  const c = readConfd(d);
+  assert.strictEqual(c.settings.title, "one");
+  assert.deepStrictEqual(c.files.map((f) => [f.name, f.ok]), [["10-a.json", true], ["20-gone.json", false]], "dot files are not read");
+  assert.match(c.files[1].error, /could not read/);
+});
+

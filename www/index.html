@@ -929,14 +929,19 @@ async function loadConfig() {
   try {
     DEFAULTS = await (await fetch("config.json?t=" + Date.now())).json();
   } catch (e) { DEFAULTS = {}; }
-  DEFAULTS = Object.assign({
+  const builtin = {
     title: "servitals", favicon: "", refreshSec: 60,
     weather: [], clocks: [], disks: {},
     panels: { mem: 1, cpu: 1, temp: 1, storage: 1, network: 1, docker: 1, clocks: 1, weather: 1 },
     panelOrder: ["mem", "cpu", "temp", "storage", "network", "docker", "clocks", "weather"],
     panelSize: { mem: "normal", cpu: "normal", temp: "normal", storage: "wide",
                  network: "wide", docker: "full", clocks: "normal", weather: "normal" }
-  }, DEFAULTS);
+  };
+  // a conf.d file may set only a few panels: the others keep their built-in values
+  for (const k of ["panels", "panelSize"]) {
+    if (DEFAULTS[k] && typeof DEFAULTS[k] === "object") DEFAULTS[k] = { ...builtin[k], ...DEFAULTS[k] };
+  }
+  DEFAULTS = Object.assign(builtin, DEFAULTS);
 
   let saved = null;
   try { saved = JSON.parse(lsGet("cfg") || "null"); } catch (e) {}
@@ -975,6 +980,8 @@ function managedSelector(p) {
 function markManaged() {
   const note = "managed by a file in /etc/servitals/conf.d";
   for (const p of managedPaths()) {
+    // files set the shared panel set; a server's own set stays its own
+    if (panelFor !== "all" && /^panel(s|Size)\./.test(p)) continue;
     const sel = managedSelector(p);
     if (!sel) continue;
     for (const el of $$(sel)) {
@@ -1777,7 +1784,7 @@ function renderServers({ keep = false } = {}) {
     + `${cards.includes(k) ? " checked" : ""}> ${names[k] || k}</label>`).join("");
   const pinned = new Set(list(f.pinned)), hidden = new Set(list(f.hidden));
   const typed = (n, k, saved) => (f.names[n.id] ? f.names[n.id][k] : saved);
-  $("#cfg-servers").innerHTML = fleetNodes.map(n => `<div class="srv" data-id="${esc(n.id)}">`
+  $("#cfg-servers").innerHTML = fleetNodes.map(n => `<div class="srv" data-id="${esc(n.id)}" data-managed="${esc((n.managed || []).join(" "))}">`
     + `<input type="text" class="srv-name" value="${esc(typed(n, "name", n.name))}" maxlength="64" aria-label="name of ${esc(n.name)}"`
     + `${(n.managed || []).includes("name") ? " disabled title=\"managed by a file in conf.d\"" : ""}>`
     + `<input type="text" class="srv-tags" value="${esc(typed(n, "tags", (n.tags || []).join(", ")))}" placeholder="tags" aria-label="tags of ${esc(n.name)}"`
@@ -1789,8 +1796,11 @@ function renderServers({ keep = false } = {}) {
   markManaged();
 }
 async function saveServer(row) {
-  const body = { name: $(".srv-name", row).value,
-                 tags: $(".srv-tags", row).value.split(/[\s,]+/).filter(Boolean) };
+  // a field a conf.d file manages is never sent (the hub would refuse the whole change)
+  const managed = (row.dataset.managed || "").split(" ");
+  const body = {};
+  if (!managed.includes("name")) body.name = $(".srv-name", row).value;
+  if (!managed.includes("tags")) body.tags = $(".srv-tags", row).value.split(/[\s,]+/).filter(Boolean);
   const r = await fetch(`/__ctl/node/${row.dataset.id}`, { method: "POST",
     headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
   const j = await r.json().catch(() => ({}));
@@ -1901,12 +1911,13 @@ function drawPanelFor() {
 function drawPanelCfg() {
   const host = $("#cfg-panels");
   const set = editedSet();
+  const orderManaged = managedPaths().includes("panelOrder");
   drawPanelFor();
   host.innerHTML = cfg.panelOrder.map(p => {
     const on = set.panels[p] !== false;
     const sz = (set.panelSize && set.panelSize[p]) || "normal";
     const opt = s => `<option value="${s}" ${sz === s ? "selected" : ""}>${s}</option>`;
-    return `<div class="pcf ${on ? "" : "off"}" draggable="true" data-p="${p}">
+    return `<div class="pcf ${on ? "" : "off"}" draggable="${orderManaged ? "false" : "true"}" data-p="${p}">
       <span class="grip">⠿</span>
       <span class="pn">${p}</span>
       <button data-up aria-label="move ${p} up">&uarr;</button><button data-down aria-label="move ${p} down">&darr;</button>
@@ -1921,11 +1932,15 @@ function drawPanelCfg() {
     drawPanelCfg();
   };
   $$(".pcf", host).forEach(row => {
-    row.ondragstart = e => { dragPanel = row.dataset.p; e.dataTransfer.effectAllowed = "move"; };
+    row.ondragstart = e => {
+      if (orderManaged) return;
+      dragPanel = row.dataset.p; e.dataTransfer.effectAllowed = "move";
+    };
     row.ondragover  = e => { e.preventDefault(); row.classList.add("drag-over"); };
     row.ondragleave = () => row.classList.remove("drag-over");
     row.ondrop = e => {
       e.preventDefault(); row.classList.remove("drag-over");
+      if (orderManaged) return;
       const from = cfg.panelOrder.indexOf(dragPanel), to = cfg.panelOrder.indexOf(row.dataset.p);
       if (from < 0 || to < 0 || from === to) return;
       cfg.panelOrder.splice(to, 0, cfg.panelOrder.splice(from, 1)[0]);

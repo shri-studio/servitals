@@ -165,10 +165,11 @@ test("conf.d: file settings win in config.json and are listed as managed; file t
     assert.strictEqual(saved._managed, undefined, "the list is never saved");
 
     const n = (await getJSON(hub, cookie, "/__ctl/nodes")).body.find((x) => x.id === c.id);
-    assert.deepStrictEqual([n.tags, n.managed], [["storage"], ["tags"]]);
+    assert.deepStrictEqual([n.tags, n.managed], [["storage"], ["name", "tags"]], "found by its name: the name is pinned too");
     const r = await ctlPost(hub.port, cookie, `/__ctl/node/${c.id}`, JSON.stringify({ tags: ["other"] }));
     assert.deepStrictEqual([r.status, JSON.parse(r.body).error], [409, "tags are managed by a file in conf.d"]);
-    assert.strictEqual((await ctlPost(hub.port, cookie, `/__ctl/node/${c.id}`, JSON.stringify({ name: "nas2" }))).status, 200, "the name is not managed");
+    assert.strictEqual((await ctlPost(hub.port, cookie, `/__ctl/node/${c.id}`, JSON.stringify({ name: "nas2" }))).status, 409,
+      "a file that finds the node by its name pins that name: a rename would detach it");
 
     fs.writeFileSync(path.join(confd, "20-bad.json"), "{ nope");
     await sleep(2100);
@@ -176,3 +177,28 @@ test("conf.d: file settings win in config.json and are listed as managed; file t
     assert.match(hub.logs(), /config\.file_skipped.*20-bad\.json/);
   } finally { await hub.stop(); fs.rmSync(confd, { recursive: true, force: true }); }
 });
+
+test("conf.d review: entries by id and by name merge; saving settings never copies file values into config.json", async () => {
+  const confd = fs.mkdtempSync(path.join(os.tmpdir(), "sv-confd-"));
+  const hub = await startHub({ CONFD_DIR: confd });
+  try {
+    const c = addNode(hub, "nas");
+    const cookie = cookieFrom(await login(hub.port));
+    assert.strictEqual((await ctlPost(hub.port, cookie, "/__ctl/config", JSON.stringify({ title: "my lab", units: { temp: "c" } }))).status, 200);
+    fs.writeFileSync(path.join(confd, "10-a.json"), JSON.stringify({ settings: { title: "from file", units: { temp: "f" } }, nodes: { nas: { tags: ["home"] } } }));
+    fs.writeFileSync(path.join(confd, "20-b.json"), JSON.stringify({ nodes: { [c.id]: { name: "big nas" } } }));
+    await sleep(2100);
+    const n = (await getJSON(hub, cookie, "/__ctl/nodes")).body.find((x) => x.id === c.id);
+    assert.deepStrictEqual([n.name, n.tags, n.managed], ["big nas", ["home"], ["name", "tags"]]);
+
+    // the page saves its whole config, file values included
+    const shown = (await getJSON(hub, cookie, "/config.json")).body;
+    assert.strictEqual((await ctlPost(hub.port, cookie, "/__ctl/config", JSON.stringify({ ...shown, refreshSec: 30 }))).status, 200);
+    const saved = JSON.parse(fs.readFileSync(path.join(hub.dataDir, "config.json"), "utf8"));
+    assert.deepStrictEqual([saved.title, saved.units.temp, saved.refreshSec], ["my lab", "c", 30], "the page's own values stay underneath");
+    fs.rmSync(path.join(confd, "10-a.json"));
+    await sleep(2100);
+    assert.strictEqual((await getJSON(hub, cookie, "/config.json")).body.title, "my lab", "and come back when the file goes");
+  } finally { await hub.stop(); fs.rmSync(confd, { recursive: true, force: true }); }
+});
+

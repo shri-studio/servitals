@@ -43,4 +43,8 @@ fleet.card any of cpu mem temp disk containers; mode system|light|dark;
 density compact|comfortable|large; refreshSec 5-900; kioskSec 5-600; panel
 names mem cpu temp storage network docker clocks weather, sizes
 normal|wide|full; tags lowercase letters, digits, dot, dash, underscore.
-Match servers by node id (servitals-ctl node list) when names may change.
+Match servers by node id (servitals-ctl node list) when names may change:
+an entry found by a server's name also pins that name. Entries for the same
+server by id and by name are merged. "panels" and "panelSize" set the shared
+panel set; a server with its own set in the page keeps it. fleet.pinned and
+fleet.hidden take node ids.

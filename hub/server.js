@@ -134,12 +134,18 @@ const confd = createConfd(CONFD_DIR, { log });
   const c = confd.get();
   log.info("config.confd", { dir: CONFD_DIR, files: c.files.length, skipped: c.files.filter((f) => !f.ok).length });
 }
-// a node as the page sees it: tags and name from a conf.d file win (matched by id, else by name)
+// a node as the page sees it: tags and name from conf.d win. Entries for its id and
+// for its name merge (the id's win); an entry found by the name pins the name,
+// because a rename would detach it.
 function withFile(n) {
   const all = confd.get().nodes;
-  const f = all[n.id] || all[n.name] || null;
-  if (!f) return { ...n, managed: [] };
-  return { ...n, ...f, managed: Object.keys(f).sort() };
+  const byName = Object.prototype.hasOwnProperty.call(all, n.name) ? all[n.name] : null;
+  const byId = Object.prototype.hasOwnProperty.call(all, n.id) ? all[n.id] : null;
+  if (!byName && !byId) return { ...n, managed: [] };
+  const f = { ...(byName || {}), ...(byId || {}) };
+  const managed = new Set(Object.keys(f));
+  if (byName) managed.add("name");
+  return { ...n, ...f, managed: [...managed].sort() };
 }
 
 /* ---------- nodes: the hub's own host is the local node ---------- */
@@ -784,6 +790,18 @@ async function handle(req, res) {
       try { obj = JSON.parse(body); } catch { return json(400, { error: "invalid json" }); }
       if (!obj || typeof obj !== "object" || Array.isArray(obj)) return json(400, { error: "not an object" });
       delete obj._managed;   // what conf.d sets comes from the files, never from a save
+      // managed values keep what was saved before, so removing the file brings the page's own value back
+      let before = {};
+      try { before = JSON.parse(fs.readFileSync(CONFIG_F, "utf8")) || {}; } catch (_) { /* nothing saved yet */ }
+      for (const p of confd.get().managed) {
+        const [k, sub] = p.split(".");
+        if (sub === undefined) {
+          if (before[k] !== undefined) obj[k] = before[k]; else delete obj[k];
+        } else if (obj[k] && typeof obj[k] === "object") {
+          const was = before[k] && typeof before[k] === "object" ? before[k][sub] : undefined;
+          if (was !== undefined) obj[k][sub] = was; else delete obj[k][sub];
+        }
+      }
       if (obj.favicon && !/^data:image\/[a-z.+-]+;base64,[A-Za-z0-9+/=]+$/.test(obj.favicon))
         return json(400, { error: "favicon must be a base64 data:image URI" });
       if (obj.portainerUrl && !/^https?:\/\/[^\s"'<>]+$/i.test(obj.portainerUrl))
