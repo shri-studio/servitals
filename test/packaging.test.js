@@ -106,3 +106,13 @@ test("the package ships the style files and the VT323 font", () => {
 test("the Docker install also tells browsers to revalidate the page", () => {
   assert.match(read("nginx.conf"), /location \/ \{\n\s+add_header Cache-Control "no-cache" always;/);
 });
+
+test("the package and install-local.sh create /etc/servitals/conf.d with a README", () => {
+  assert.match(read("debian/servitals.install"), /^packaging\/etc\/conf\.d\/README etc\/servitals\/conf\.d\/$/m);
+  assert.match(read("packaging/install-local.sh"), /install -d -m 755 "\$ETC\/conf\.d"/);
+  const readme = read("packaging/etc/conf.d/README");
+  assert.match(readme, /servitals-ctl config check/);
+  // the example in the README is a valid conf.d file
+  const example = /```json\n([\s\S]*?)\n```/.exec(readme)[1];
+  assert.doesNotThrow(() => require("../hub/lib/confd").parseFile(example));
+});

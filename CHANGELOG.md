@@ -7,6 +7,9 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- Config as code (spec 12): `/etc/servitals/conf.d/*.json` sets dashboard
+  defaults and server tags or names; file values win and show as "managed by
+  file"; a bad file is skipped whole and logged; `servitals-ctl config check`.
 - Customize (spec 10.4): units (°C/°F, 1024/1000 sizes, bits or bytes per
   second, 12/24 hour clock); rename, tag, pin, hide and revoke servers from
   settings; sort and group the fleet and choose the numbers on its cards;

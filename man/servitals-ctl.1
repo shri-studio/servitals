@@ -49,10 +49,25 @@ Add or remove the docker group for the hub, for the container buttons.
 Copy the login, dashboard settings, whitelist, bans and disk list from a
 Docker install in
 .IR dir .
+.TP
+.BR "config check" " [" \fIdir\fR ]
+Check the configuration files in
+.I /etc/servitals/conf.d
+(or
+.IR dir ):
+one line per file,
+.B ok
+or
+.B error
+with the place of the first mistake; exit status 1 when any file is wrong.
+The hub skips such a file whole.
 .SH ENVIRONMENT
 .TP
 .B STATE_DIR
 The hub's state directory (default /var/lib/servitals).
+.TP
+.B ETC_DIR
+Where hub.env and conf.d are (default /etc/servitals).
 .SH SEE ALSO
 .BR servitals (8),
 .BR servitals-agent (1)

@@ -142,6 +142,16 @@ Settings (`s`) has everything in one place:
 - **Export and import** the settings as one JSON file. An imported file fills
   the form; nothing changes until you save.
 
+## Config as code
+
+Settings can also come from files: every `*.json` in `/etc/servitals/conf.d`
+(read in name order, later files win) can set the dashboard's defaults and
+tags or names for servers. Values from files win over the page, which shows
+them as "managed by file". A file with a mistake is skipped whole and logged.
+`sudo servitals-ctl config check` checks them; the hub picks up changes
+within a few seconds. `/etc/servitals/conf.d/README` has an example and every
+allowed value. Docker installs: mount a directory and set `CONFD_DIR`.
+
 ## Styles, modes and kiosk
 
 Ten styles: classic, 8bit, phosphor (green CRT in dark mode, amber in

@@ -1,0 +1,46 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+servitals: configuration as code
+
+Every *.json file in this directory is read by the hub in name order (for
+example 10-site.json, then 20-units.json). Later files win, key by key.
+Values set here win over values edited in the dashboard, which shows them as
+"managed by file" and read-only. A file with any mistake is skipped whole and
+logged; nothing in it is applied. Check files before relying on them:
+
+  sudo servitals-ctl config check
+
+The hub notices changes within a few seconds; no restart is needed.
+
+A file holds "settings" (the dashboard's defaults) and/or "nodes" (tags or a
+name for a server, found by its node id or by its name):
+
+```json
+{
+  "settings": {
+    "title": "home lab",
+    "refreshSec": 60,
+    "units": { "temp": "c", "size": "binary", "rate": "bits", "clock": "24h" },
+    "fleet": { "sort": "status", "group": true, "card": ["cpu", "mem", "disk"] },
+    "style": "nord",
+    "mode": "system",
+    "density": "comfortable",
+    "kiosk": false,
+    "kioskSec": 20,
+    "panels": { "weather": false },
+    "panelSize": { "docker": "full" },
+    "panelOrder": ["cpu", "mem", "temp", "storage", "network", "docker", "clocks", "weather"]
+  },
+  "nodes": {
+    "nas": { "tags": ["home", "storage"] },
+    "k3j7q2m4x5ab": { "name": "garage pi", "tags": ["home"] }
+  }
+}
+```
+
+Allowed values: units.temp c|f, units.size binary|decimal, units.rate
+bytes|bits, units.clock auto|24h|12h; fleet.sort name|status|cpu|mem|temp|disk,
+fleet.card any of cpu mem temp disk containers; mode system|light|dark;
+density compact|comfortable|large; refreshSec 5-900; kioskSec 5-600; panel
+names mem cpu temp storage network docker clocks weather, sizes
+normal|wide|full; tags lowercase letters, digits, dot, dash, underscore.
+Match servers by node id (servitals-ctl node list) when names may change.

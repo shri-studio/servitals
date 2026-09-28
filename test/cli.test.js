@@ -427,3 +427,19 @@ test("unlink removes the credentials, stops the agent and says how to revoke on 
   assert.strictEqual(again.status, 1);
   assert.match(again.stderr, /not paired/);
 });
+
+test("servitals-ctl config check reads ETC_DIR/conf.d and fails on a bad file", () => {
+  const etc = tmp();
+  fs.mkdirSync(path.join(etc, "conf.d"));
+  fs.writeFileSync(path.join(etc, "conf.d", "10-site.json"), JSON.stringify({ settings: { title: "lab" } }));
+  let r = run("servitals-ctl", ["config", "check"], { ETC_DIR: etc });
+  assert.strictEqual(r.status, 0, r.stderr);
+  assert.match(r.stdout, /^ok +10-site\.json$/m);
+  fs.writeFileSync(path.join(etc, "conf.d", "20-bad.json"), "{ nope");
+  r = run("servitals-ctl", ["config", "check"], { ETC_DIR: etc });
+  assert.strictEqual(r.status, 1);
+  assert.match(r.stdout, /^error +20-bad\.json: not valid JSON/m);
+  const other = run("servitals-ctl", ["config", "check", path.join(etc, "conf.d")], {});
+  assert.strictEqual(other.status, 1, "a directory can be named");
+  assert.notStrictEqual(run("servitals-ctl", ["config"], {}).status, 0);
+});

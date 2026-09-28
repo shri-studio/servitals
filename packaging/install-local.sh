@@ -73,6 +73,8 @@ systemd-sysusers /usr/lib/sysusers.d/servitals.conf /usr/lib/sysusers.d/servital
 
 # 4. configuration, first install only
 install -d -m 755 "$ETC"
+install -d -m 755 "$ETC/conf.d"
+[ -e "$ETC/conf.d/README" ] || install -m 644 "$SRC/packaging/etc/conf.d/README" "$ETC/conf.d/README"
 if [ ! -e "$ETC/hub.env" ]; then
   port=${HUB_PORT:-20002}
   [[ $port =~ ^[0-9]{1,5}$ ]] || die "HUB_PORT must be a port number"

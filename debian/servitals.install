@@ -7,3 +7,4 @@ www/fonts/*.woff2 usr/share/servitals/www/fonts/
 www/styles/*.css usr/share/servitals/www/styles/
 bin/servitals-ctl usr/bin/
 packaging/etc/hub.env etc/servitals/
+packaging/etc/conf.d/README etc/servitals/conf.d/
