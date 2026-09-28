@@ -76,8 +76,8 @@ wait_for "curl -fsS $B/__auth/health >/dev/null 2>&1" || fail "hub not back afte
 [ "$(login owner another-pass-1)" = 302 ] || fail "login after restore"
 [ "$(stat -c '%U' /var/lib/servitals/nodes.json)" = _servitals ] || fail "restored files not owned by the hub"
 
-# the hardening holds: systemd rates both units 2.0 or lower ("OK")
-for u in servitals servitals-agent; do
+# the hardening holds: systemd rates the units 2.0 or lower ("OK")
+for u in servitals servitals-agent servitals-backup; do
 	line=$(systemd-analyze security "$u.service" --no-pager | tail -n 1)
 	echo "$line"
 	score=$(echo "$line" | awk '{ for (i = 1; i <= NF; i++) if ($i ~ /^[0-9]+\.[0-9]+$/) print $i }')

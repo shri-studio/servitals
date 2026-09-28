@@ -129,3 +129,12 @@ test("daily backups: a hardened oneshot service and a daily timer, shipped off",
   assert.match(read("debian/rules"), /dh_installsystemd -pservitals --name=servitals-backup --no-enable --no-start/);
   assert.match(read("packaging/install-local.sh"), /debian\/servitals\.servitals-backup\.service" "\$UNITS\/servitals-backup\.service"/);
 });
+
+test("review: the backup unit has the hub's hardening and makes its directory", () => {
+  const svc = lines(read("debian/servitals.servitals-backup.service"));
+  for (const want of ["CapabilityBoundingSet=CAP_DAC_READ_SEARCH", "ProtectProc=invisible", "ProcSubset=pid", "SystemCallErrorNumber=EPERM",
+                      "ExecStartPre=+/usr/bin/install -d -o root -g root -m 700 /var/lib/servitals/backups"]) {
+    assert.ok(svc.includes(want), want);
+  }
+  assert.match(read("debian/tests/smoke"), /for u in servitals servitals-agent servitals-backup; do/);
+});

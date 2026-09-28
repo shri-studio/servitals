@@ -98,3 +98,12 @@ test("rotate: a new secret, the old one kept for 24 hours; revoke drops both", (
   assert.deepStrictEqual([raw.secret, raw.oldSecret], ["", undefined]);
   assert.throws(() => store.rotate("aaaaaaaaaaaa"), /no node/);
 });
+
+test("review: rotating twice within 24 hours keeps the original secret working", () => {
+  const store = createNodeStore(tmpfile());
+  const { id, secret: original } = store.add("nas");
+  store.rotate(id);
+  const { secret: third } = store.rotate(id);
+  const n = store.get(id);
+  assert.deepStrictEqual([n.secret, n.oldSecret], [third, original], "the server still holds the original");
+});

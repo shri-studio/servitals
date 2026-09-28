@@ -6,6 +6,8 @@ Documentation=man:servitals-ctl(1)
 
 [Service]
 Type=oneshot
+# the directory for backups is root's, even if someone removed it
+ExecStartPre=+/usr/bin/install -d -o root -g root -m 700 /var/lib/servitals/backups
 ExecStart=/usr/bin/servitals-ctl backup --auto
 UMask=0077
 ProtectSystem=strict
@@ -29,3 +31,9 @@ MemoryDenyWriteExecute=yes
 RestrictAddressFamilies=AF_UNIX
 SystemCallArchitectures=native
 SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+# root, but only to read the hub's files
+CapabilityBoundingSet=CAP_DAC_READ_SEARCH
+AmbientCapabilities=
+ProtectProc=invisible
+ProcSubset=pid

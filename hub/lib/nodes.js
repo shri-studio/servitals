@@ -112,8 +112,12 @@ function createNodeStore(file) {
   function rotate(id) {
     const secret = crypto.randomBytes(32).toString("hex");
     change(id, (n) => {
-      n.oldSecret = n.secret;
-      n.oldUntil = Date.now() + OVERLAP_MS;
+      // rotated again within 24 hours: the original secret, which the server may still
+      // hold, keeps its window; the one in between is dropped
+      if (!(n.oldSecret && Number(n.oldUntil) > Date.now())) {
+        n.oldSecret = n.secret;
+        n.oldUntil = Date.now() + OVERLAP_MS;
+      }
       n.secret = secret;
     });
     return { id, secret };

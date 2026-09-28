@@ -607,3 +607,79 @@ test("backup --auto keeps the 7 newest in the state dir; backup enable and disab
   assert.deepStrictEqual(fs.readFileSync(h.calls, "utf8").trim().split("\n"),
     ["enable --now servitals-backup.timer", "disable --now servitals-backup.timer"]);
 });
+
+// a backup archive made by hand from a list of [path, content | {link}] entries
+function craftedBackup(entries, manifest = { format: 1, version: "0.0.1" }) {
+  const d = tmp();
+  fs.writeFileSync(path.join(d, "manifest.json"), JSON.stringify(manifest));
+  fs.mkdirSync(path.join(d, "state"));
+  for (const [p, v] of entries) {
+    fs.mkdirSync(path.dirname(path.join(d, p)), { recursive: true });
+    if (v && v.link) fs.symlinkSync(v.link, path.join(d, p)); else fs.writeFileSync(path.join(d, p), typeof v === "string" ? v : "x");
+    if (v && v.mode) fs.chmodSync(path.join(d, p), v.mode);
+  }
+  const out = path.join(tmp(), "crafted.tar.gz");
+  spawnSync("tar", ["-C", d, "-czf", out, "."]);
+  return out;
+}
+
+test("review: restore refuses links and special files in a backup, and changes nothing", () => {
+  const h = hubFiles();
+  for (const bad of [[["state/nodes.json", { link: "/etc/shadow" }]], [["state/x", { mode: 0o4755 }]]]) {
+    const r = run("servitals-ctl", ["restore", craftedBackup(bad)], h.env);
+    assert.strictEqual(r.status, 1, JSON.stringify(bad));
+    assert.match(r.stderr, /refused: .* is not a plain file or directory|refused: .* has special permission bits/);
+    assert.strictEqual(fs.readFileSync(path.join(h.state, "nodes.json"), "utf8"), '{"a":1}\n');
+    assert.ok(!fs.existsSync(h.calls), "the hub was not stopped");
+  }
+  // servitals-ctl never follows a link where nodes.json should be
+  const s = tmp();
+  fs.symlinkSync(path.join(s, "elsewhere"), path.join(s, "nodes.json"));
+  const r = run("servitals-ctl", ["node", "list"], { STATE_DIR: s });
+  assert.strictEqual(r.status, 1);
+  assert.match(r.stderr, /nodes\.json is a symbolic link/);
+});
+
+test("review: restore keeps the state dir's own mode, never touches backups, and says so when the hub does not start", () => {
+  const h = hubFiles();
+  fs.chmodSync(h.state, 0o750);
+  const out = path.join(tmp(), "hub.tar.gz");
+  assert.strictEqual(run("servitals-ctl", ["backup", out], h.env).status, 0);
+  let r = run("servitals-ctl", ["restore", out], h.env);
+  assert.strictEqual(r.status, 0, r.stderr);
+  assert.strictEqual(fs.statSync(h.state).mode & 0o777, 0o750);
+  assert.strictEqual(fs.readFileSync(path.join(h.state, "backups", "old.tar.gz"), "utf8"), "x");
+  const failing = path.join(tmp(), "systemctl");
+  fs.writeFileSync(failing, '#!/bin/sh\n[ "$1" = start ] && exit 1\nexit 0\n', { mode: 0o755 });
+  r = run("servitals-ctl", ["restore", out], { ...h.env, SYSTEMCTL: failing });
+  assert.strictEqual(r.status, 1);
+  assert.match(r.stderr, /the hub did not start again/);
+  assert.notStrictEqual(run("servitals-ctl", ["restore", out], { ...h.env, STATE_DIR: path.join(tmp(), "missing") }).status, 0);
+});
+
+test("review: after a restore the hub's own agent gets the restored credentials", () => {
+  const h = hubFiles();
+  fs.writeFileSync(path.join(h.state, "local-agent.env"), `HUB_URL=http://127.0.0.1:20002\nNODE_ID=restoredid23\nNODE_SECRET=${"cd".repeat(32)}\n`);
+  const out = path.join(tmp(), "hub.tar.gz");
+  assert.strictEqual(run("servitals-ctl", ["backup", out], h.env).status, 0);
+  fs.writeFileSync(path.join(h.etc, "agent-credentials.env"), `HUB_URL=http://127.0.0.1:20002\nNODE_ID=freshnodeid2\nNODE_SECRET=${"ef".repeat(32)}\n`, { mode: 0o600 });
+  const r = run("servitals-ctl", ["restore", out], h.env);
+  assert.strictEqual(r.status, 0, r.stderr);
+  const creds = fs.readFileSync(path.join(h.etc, "agent-credentials.env"), "utf8");
+  assert.match(creds, /^NODE_ID=restoredid23$/m);
+  assert.match(creds, new RegExp(`^NODE_SECRET=${"cd".repeat(32)}$`, "m"));
+  assert.strictEqual(fs.statSync(path.join(h.etc, "agent-credentials.env")).mode & 0o777, 0o600);
+  assert.match(fs.readFileSync(h.calls, "utf8"), /^try-restart servitals-agent\.service$/m);
+});
+
+test("review: daily backups skip the hub's temp files and never prune an admin's own files", () => {
+  const h = hubFiles();
+  fs.writeFileSync(path.join(h.state, "replay.json.123.tmp"), "half");
+  fs.writeFileSync(path.join(h.state, "snapshots", "a.json.9.tmp"), "half");
+  fs.writeFileSync(path.join(h.state, "backups", "servitals-mine-keep.tar.gz"), "mine");
+  for (let i = 0; i < 8; i++) assert.strictEqual(run("servitals-ctl", ["backup", "--auto"], h.env).status, 0);
+  assert.ok(fs.existsSync(path.join(h.state, "backups", "servitals-mine-keep.tar.gz")));
+  const newest = fs.readdirSync(path.join(h.state, "backups")).filter((n) => /^servitals-\d/.test(n)).sort().pop();
+  const names = list(path.join(h.state, "backups", newest)).stdout;
+  assert.doesNotMatch(names, /\.tmp/);
+});

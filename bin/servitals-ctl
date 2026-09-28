@@ -241,6 +241,8 @@ hub_url() {
 
 nodes_js() {  # run the node store CLI, then give the file back to the hub's user
   local f="$DATA_DIR/nodes.json" rc=0
+  # root follows no link here: a chown or chmod through one could hand out any file
+  [ ! -L "$f" ] || die "$f is a symbolic link; refusing to follow it"
   node "$ROOT/hub/lib/nodes.js" "$f" "$@" || rc=$?
   if [ -e "$f" ]; then
     chown --reference="$DATA_DIR" "$f" 2>/dev/null || true
@@ -338,6 +340,8 @@ cmd_backup() {
   case "${1:-}" in
     enable)
       install -d -m 700 "$DATA_DIR/backups"
+      # root's, never the hub's: the network-facing hub user must not rewrite backups
+      if [ "$(id -u)" = 0 ]; then chown root:root "$DATA_DIR/backups"; fi
       "${SYSTEMCTL:-systemctl}" enable --now servitals-backup.timer
       echo "daily backups on: 7 kept in $DATA_DIR/backups (not encrypted: copy them somewhere safe)"
       return ;;
@@ -368,9 +372,18 @@ cmd_backup() {
   trap 'rm -rf "$BACKUP_DIR"' EXIT
   chmod 700 "$BACKUP_DIR"
   mkdir "$BACKUP_DIR/state" "$BACKUP_DIR/etc"
-  # cp, not tar -x: under the backup unit's filters tar on newer releases cannot create
-  # files in subdirectories (openat2 is refused with ENOSYS)
-  find "$DATA_DIR" -mindepth 1 -maxdepth 1 ! -name backups -exec cp -a -t "$BACKUP_DIR/state/" {} +
+  # plain copies (mode and times, never owners, never links), without earlier backups and
+  # the hub's temp files; a file the hub renames away meanwhile is simply not in it.
+  # (cp, not tar -x: under the unit's filters tar -x on newer releases cannot create files
+  # in subdirectories, openat2 is refused with ENOSYS)
+  (cd "$DATA_DIR" && find . -mindepth 1 -path ./backups -prune -o -name '*.tmp' -o -print) |
+    while IFS= read -r p; do
+      if [ -d "$DATA_DIR/$p" ] && [ ! -L "$DATA_DIR/$p" ]; then mkdir -p "$BACKUP_DIR/state/$p"
+      elif [ -f "$DATA_DIR/$p" ] && [ ! -L "$DATA_DIR/$p" ]; then
+        cp --preserve=mode,timestamps "$DATA_DIR/$p" "$BACKUP_DIR/state/$p" 2>/dev/null ||
+          [ ! -e "$DATA_DIR/$p" ] || die "could not copy $p"
+      fi
+    done
   if [ -r "$ETC_DIR/hub.env" ]; then cp -p "$ETC_DIR/hub.env" "$BACKUP_DIR/etc/"; fi
   if [ -d "$ETC_DIR/conf.d" ]; then cp -rp "$ETC_DIR/conf.d" "$BACKUP_DIR/etc/"; fi
   jq -n --arg v "$(sv_version)" --arg h "$(hostname 2>/dev/null || echo unknown)" --arg t "$(date -u +%FT%TZ)" \
@@ -386,13 +399,25 @@ cmd_backup() {
   chmod 600 "$out"
   echo "backup written: $out$([ "$encrypt" = 1 ] && echo " (encrypted)")"
   if [ "$auto" = 1 ]; then   # keep the 7 newest
-    find "$DATA_DIR/backups" -maxdepth 1 -name 'servitals-*.tar.gz' -printf '%T@ %p\n' | sort -rn | tail -n +8 | cut -d' ' -f2- |
+    find "$DATA_DIR/backups" -maxdepth 1 -name 'servitals-[0-9]*-[0-9]*-[0-9]*.tar.gz' -printf '%T@ %p\n' | sort -rn | tail -n +8 | cut -d' ' -f2- |
       while IFS= read -r old; do rm -f -- "$old"; done
   fi
 }
 
+# every member of a backup must be a plain file or directory, with a plain name
+# and no set-id or sticky bits: restore runs as root
+check_members() {  # archive.tar.gz
+  local line kind mode name
+  while IFS= read -r line; do
+    mode=${line%% *}; kind=${mode:0:1}; name=${line##* }
+    case "$kind" in -|d) ;; *) die "refused: $name is not a plain file or directory" ;; esac
+    [[ $mode == *[sStT]* ]] && die "refused: $name has special permission bits"
+    case "/$name/" in */../*|//*) die "refused: $name leaves the backup" ;; esac
+  done < <(tar -tvzf "$1" 2>/dev/null || echo "? broken")
+}
+
 cmd_restore() {
-  local with_etc=0 in="" pass made here keep
+  local with_etc=0 in="" pass made here keep archive
   while [ $# -gt 0 ]; do
     case "$1" in
       --etc) with_etc=1 ;;
@@ -402,37 +427,74 @@ cmd_restore() {
     shift
   done
   [ -n "$in" ] && [ -f "$in" ] || die "usage: servitals-ctl restore [--etc] <file>"
-  # global, not local: the EXIT trap runs after this function has returned
+  [ -d "$DATA_DIR" ] || die "no hub state directory $DATA_DIR"
+  # globals, not locals: the EXIT trap runs after this function has returned
   RESTORE_DIR=$(mktemp -d)
-  trap 'rm -rf "$RESTORE_DIR"' EXIT
+  NEW_DIR=""
+  trap 'rm -rf "$RESTORE_DIR" ${NEW_DIR:+"$NEW_DIR"}' EXIT
   chmod 700 "$RESTORE_DIR"
+  archive="$RESTORE_DIR/archive.tar.gz"
   if [ "$(head -c 8 "$in" | tr -d '\000')" = "Salted__" ]; then   # openssl's header
     command -v openssl >/dev/null || die "this backup is encrypted; restoring it needs openssl"
     pass=$(backup_passphrase)
-    SV_BACKUP_PASS="$pass" openssl enc -d -aes-256-cbc -pbkdf2 -iter 600000 -pass env:SV_BACKUP_PASS -in "$in" 2>/dev/null |
-      tar -C "$RESTORE_DIR" -xzf - 2>/dev/null || die "could not read $in: a wrong passphrase or a damaged file"
+    SV_BACKUP_PASS="$pass" openssl enc -d -aes-256-cbc -pbkdf2 -iter 600000 -pass env:SV_BACKUP_PASS \
+      -in "$in" -out "$archive" 2>/dev/null && gzip -t "$archive" 2>/dev/null ||
+      die "could not read $in: a wrong passphrase or a damaged file"
   else
-    tar -C "$RESTORE_DIR" -xzf "$in" 2>/dev/null || die "could not read $in: not a servitals backup, or damaged"
+    cp "$in" "$archive"
+    gzip -t "$archive" 2>/dev/null || die "could not read $in: not a servitals backup, or damaged"
   fi
-  [ -f "$RESTORE_DIR/manifest.json" ] && [ -d "$RESTORE_DIR/state" ] || die "$in is not a servitals backup"
-  [ "$(jq -r .format "$RESTORE_DIR/manifest.json")" = 1 ] || die "$in has a backup format this servitals does not know"
-  made=$(jq -r '.version // "0"' "$RESTORE_DIR/manifest.json")
+  check_members "$archive"
+  mkdir "$RESTORE_DIR/x"
+  tar -C "$RESTORE_DIR/x" --no-same-owner --no-same-permissions -xzf "$archive" 2>/dev/null ||
+    die "could not read $in: not a servitals backup, or damaged"
+  [ -z "$(find "$RESTORE_DIR/x" ! -type f ! -type d)" ] || die "refused: $in holds links or special files"
+  [ -f "$RESTORE_DIR/x/manifest.json" ] && [ -d "$RESTORE_DIR/x/state" ] || die "$in is not a servitals backup"
+  [ "$(jq -r .format "$RESTORE_DIR/x/manifest.json")" = 1 ] || die "$in has a backup format this servitals does not know"
+  made=$(jq -r '.version // "0"' "$RESTORE_DIR/x/manifest.json")
   here=$(sv_version)
   if [ "$(printf '%s\n%s\n' "$made" "$here" | sort -V | tail -n 1)" != "$here" ]; then
     die "$in was made by servitals $made, newer than this one ($here); update servitals first"
   fi
+  # the restored tree waits next to the state directory (same filesystem), owned like it
+  NEW_DIR=$(mktemp -d "$DATA_DIR.restore-XXXX")
+  cp -R --preserve=mode,timestamps "$RESTORE_DIR/x/state/." "$NEW_DIR/"
+  find "$NEW_DIR" -mindepth 1 -exec chown --reference="$DATA_DIR" {} + 2>/dev/null || true
+  rm -rf "$NEW_DIR/backups"   # the backups directory is never replaced
+
   "${SYSTEMCTL:-systemctl}" stop "$UNIT" >/dev/null 2>&1 || true
   keep=$(mktemp -d "$DATA_DIR.before-restore-$(date +%Y%m%d-%H%M%S)-XXXX")   # 0700, never an old one
-  find "$DATA_DIR" -mindepth 1 -maxdepth 1 ! -name backups -exec mv -t "$keep" {} +
-  cp -a "$RESTORE_DIR/state/." "$DATA_DIR/"
-  chown -R --reference="$DATA_DIR" "$DATA_DIR" 2>/dev/null || true
-  if [ "$with_etc" = 1 ]; then
-    if [ -f "$RESTORE_DIR/etc/hub.env" ]; then cp -p "$RESTORE_DIR/etc/hub.env" "$ETC_DIR/hub.env"; fi
-    if [ -d "$RESTORE_DIR/etc/conf.d" ]; then install -d -m 755 "$ETC_DIR/conf.d"; cp -rp "$RESTORE_DIR/etc/conf.d/." "$ETC_DIR/conf.d/"; fi
+  # from here on only mv; on any failure the old state goes back and the hub starts again
+  if ! { find "$DATA_DIR" -mindepth 1 -maxdepth 1 ! -name backups -exec mv -t "$keep" {} + &&
+         find "$NEW_DIR" -mindepth 1 -maxdepth 1 -exec mv -t "$DATA_DIR" {} +; }; then
+    find "$DATA_DIR" -mindepth 1 -maxdepth 1 ! -name backups -exec rm -rf {} +
+    find "$keep" -mindepth 1 -maxdepth 1 -exec mv -t "$DATA_DIR" {} +
+    "${SYSTEMCTL:-systemctl}" start "$UNIT" >/dev/null 2>&1 || true
+    die "the restore failed; the state before it is back"
   fi
-  "${SYSTEMCTL:-systemctl}" start "$UNIT" >/dev/null 2>&1 || true
+  if [ "$with_etc" = 1 ]; then
+    if [ -f "$RESTORE_DIR/x/etc/hub.env" ]; then cp "$RESTORE_DIR/x/etc/hub.env" "$ETC_DIR/hub.env"; fi
+    if [ -d "$RESTORE_DIR/x/etc/conf.d" ]; then install -d -m 755 "$ETC_DIR/conf.d"; cp -R "$RESTORE_DIR/x/etc/conf.d/." "$ETC_DIR/conf.d/"; fi
+  fi
+  restore_local_agent
+  "${SYSTEMCTL:-systemctl}" start "$UNIT" >/dev/null 2>&1 ||
+    die "restored $in, but the hub did not start again: journalctl -u servitals"
   echo "restored $in (made by servitals $made)$([ "$with_etc" = 1 ] && echo ", with /etc/servitals")"
   echo "the state before the restore is in $keep"
+}
+
+# the hub's own agent must hold the restored hub's credentials for its node
+# (after a reinstall or a rotation its file names another node or secret)
+restore_local_agent() {
+  local local_env="$DATA_DIR/local-agent.env" creds="$ETC_DIR/agent-credentials.env" id secret
+  [ -f "$local_env" ] && [ -f "$creds" ] && [ ! -L "$creds" ] || return 0
+  id=$(sed -n 's/^NODE_ID=//p' "$local_env"); secret=$(sed -n 's/^NODE_SECRET=//p' "$local_env")
+  [[ $id =~ ^[a-z2-7]{12}$ && $secret =~ ^[0-9a-f]{64}$ ]] || return 0
+  if ! grep -qx "NODE_ID=$id" "$creds" || ! grep -qx "NODE_SECRET=$secret" "$creds"; then
+    sed -e "s/^NODE_ID=.*/NODE_ID=$id/" -e "s/^NODE_SECRET=.*/NODE_SECRET=$secret/" "$creds" | atomic_write "$creds"
+    "${SYSTEMCTL:-systemctl}" try-restart servitals-agent.service >/dev/null 2>&1 || true
+    echo "the hub's own agent now uses the restored credentials"
+  fi
 }
 
 cmd_rotate() {
