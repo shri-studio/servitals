@@ -267,3 +267,150 @@ test("join reads agent.env without running it, HUB_HEADERS included", async () =
     assert.ok(!fs.existsSync(marker));
   } finally { await hub.stop(); }
 });
+
+// servitals-agent link against a test hub: returns the process, its output so far and the code it printed
+const { spawn } = require("node:child_process");
+const { formBody } = require("./helpers/hub");
+function startLink(url, env) {
+  const child = spawn("bash", [path.join(BIN, "servitals-agent"), "link", "--no-start", url],
+    { env: { PATH: process.env.PATH, ...env } });
+  const out = { stdout: "", stderr: "" };
+  child.stdout.on("data", (d) => { out.stdout += d; });
+  child.stderr.on("data", (d) => { out.stderr += d; });
+  const exited = new Promise((r) => child.once("exit", (code) => r(code)));
+  const code = (async () => {
+    for (let i = 0; i < 100; i++) {
+      const m = /enter: +([A-Z0-9]{4}-[A-Z0-9]{4})/.exec(out.stdout);
+      if (m) return m[1];
+      if (child.exitCode !== null) break;
+      await new Promise((r) => setTimeout(r, 100));
+    }
+    throw new Error("no code printed: " + out.stdout + out.stderr);
+  })();
+  return { child, out, exited, code };
+}
+async function decideOnPage(hub, code, action) {
+  const cookie = cookieFrom(await login(hub.port));
+  const body = formBody({ step: "decide", code, action, name: "linked-box", tags: "lab" });
+  return request(hub.port, { method: "POST", path: "/link", body, headers: {
+    "content-type": "application/x-www-form-urlencoded", "content-length": Buffer.byteLength(body), cookie,
+    origin: `http://127.0.0.1:${hub.port}` } });
+}
+
+test("link: shows a code, waits for approval, saves the credentials and pushes", async () => {
+  const hub = await startHub();
+  try {
+    const creds = path.join(tmp(), "agent-credentials.env");
+    // a proxy for the internet must not catch a link to this machine itself
+    const agentEnv = path.join(tmp(), "agent.env");
+    fs.writeFileSync(agentEnv, "http_proxy=http://127.0.0.1:9\nHTTPS_PROXY=http://127.0.0.1:9\n");
+    const l = startLink(`http://127.0.0.1:${hub.port}/`, joinEnv({ CREDENTIALS_FILE: creds, AGENT_ENV: agentEnv }));
+    const code = await l.code;
+    assert.match(l.out.stdout, new RegExp(`Open http://127\\.0\\.0\\.1:${hub.port}/link and enter: +${code}`));
+    assert.match(l.out.stdout, /Only enter this code on that site/);
+    assert.ok(!fs.existsSync(creds), "nothing saved before approval");
+    assert.match((await decideOnPage(hub, code, "approve")).body, /Linked "linked-box"/);
+    assert.strictEqual(await l.exited, 0, l.out.stdout + l.out.stderr);
+    assert.match(l.out.stdout, /^ok$/m, "the test push landed");
+    assert.match(l.out.stdout, new RegExp(`Linked as "linked-box" to a\\*\\*\\*n on 127\\.0\\.0\\.1:${hub.port}\\.`));
+    assert.strictEqual(fs.statSync(creds).mode & 0o777, 0o600);
+    const saved = fs.readFileSync(creds, "utf8");
+    const secret = /^NODE_SECRET=([0-9a-f]{64})$/m.exec(saved)[1];
+    assert.ok(!l.out.stdout.includes(secret) && !l.out.stderr.includes(secret), "the secret is never printed");
+    const id = /^NODE_ID=([a-z2-7]{12})$/m.exec(saved)[1];
+    const cookie = cookieFrom(await login(hub.port));
+    const list = JSON.parse((await request(hub.port, { path: "/__ctl/nodes", headers: { cookie } })).body);
+    assert.strictEqual(list.find((x) => x.id === id).status, "online");
+  } finally { await hub.stop(); }
+});
+
+test("link: a denied code saves nothing; a plain-http hub elsewhere is refused", async () => {
+  const hub = await startHub();
+  try {
+    const creds = path.join(tmp(), "agent-credentials.env");
+    const l = startLink(`http://127.0.0.1:${hub.port}`, joinEnv({ CREDENTIALS_FILE: creds }));
+    await decideOnPage(hub, await l.code, "deny");
+    assert.strictEqual(await l.exited, 1);
+    assert.match(l.out.stderr, /denied on the hub; nothing was saved/);
+    assert.ok(!fs.existsSync(creds));
+  } finally { await hub.stop(); }
+  for (const url of ["http://hub.example", "http://192.168.1.5:20002", "ftp://hub.example", "https://user:pw@hub.example"]) {
+    const r = run("servitals-agent", ["link", url], joinEnv({ CREDENTIALS_FILE: path.join(tmp(), "c.env") }));
+    assert.strictEqual(r.status, 1, url);
+    assert.match(r.stderr, /https:\/\/ hub address/, url);
+  }
+  const down = run("servitals-agent", ["link", "https://127.0.0.1:9"], joinEnv({ CREDENTIALS_FILE: path.join(tmp(), "c.env") }));
+  assert.match(down.stderr, /^servitals-agent: unreachable: /m);
+});
+
+test("link prints what a hostile hub sends without terminal escapes", async () => {
+  const http = require("node:http");
+  const { signReply } = require("../hub/lib/agentsig");
+  let secret = "";
+  const ESC = "\u001b";
+  const hub = http.createServer((req, res) => {
+    let body = "";
+    req.on("data", (d) => { body += d; });
+    req.on("end", () => {
+      const send = (code, obj, headers = {}) => { res.writeHead(code, { "content-type": "application/json", ...headers }); res.end(JSON.stringify(obj)); };
+      if (req.url === "/api/v1/link/start") {
+        secret = JSON.parse(body).secret;
+        return send(200, { device_code: "d".repeat(43), user_code: "ABCD-EFGH", expires_in: 60, interval: 1,
+                           verify_url: `http://127.0.0.1/${ESC}[2Jlink` });
+      }
+      if (req.url === "/api/v1/link/poll") {
+        return send(200, { node_id: "abcdefghijkm", name: `evil${ESC}[31mname`, account: `${ESC}]0;pwned\u0007acct` });
+      }
+      // the test push: a correctly signed empty answer
+      const reply = "{}", ts = req.headers["x-servitals-ts"];
+      return send(200, {}, { "x-servitals-sig": signReply(secret, ts, reply) });
+    });
+  });
+  await new Promise((r) => hub.listen(0, "127.0.0.1", r));
+  try {
+    const creds = path.join(tmp(), "agent-credentials.env");
+    const l = startLink(`http://127.0.0.1:${hub.address().port}`, joinEnv({ CREDENTIALS_FILE: creds }));
+    assert.strictEqual(await l.exited, 0, l.out.stdout + l.out.stderr);
+    assert.ok(!l.out.stdout.includes(ESC) && !l.out.stdout.includes("\u0007"), JSON.stringify(l.out.stdout));
+    assert.match(l.out.stdout, /Linked as "evil\[31mname" to \]0;pwnedacct\./);
+  } finally { hub.close(); }
+});
+
+test("link approved but the test push fails: says which node the hub now lists and saves nothing", async () => {
+  const http = require("node:http");
+  const hub = http.createServer((req, res) => {
+    req.resume();
+    req.on("end", () => {
+      const send = (code, obj) => { res.writeHead(code, { "content-type": "application/json" }); res.end(JSON.stringify(obj)); };
+      if (req.url === "/api/v1/link/start") return send(200, { device_code: "d".repeat(43), user_code: "ABCD-EFGH", expires_in: 60, interval: 1 });
+      if (req.url === "/api/v1/link/poll") return send(200, { node_id: "abcdefghijkm", name: "nas", account: "a***n on hub" });
+      return send(401, { error: "clock_skew" });
+    });
+  });
+  await new Promise((r) => hub.listen(0, "127.0.0.1", r));
+  try {
+    const creds = path.join(tmp(), "agent-credentials.env");
+    const l = startLink(`http://127.0.0.1:${hub.address().port}`, joinEnv({ CREDENTIALS_FILE: creds }));
+    assert.strictEqual(await l.exited, 1);
+    assert.match(l.out.stdout, /^clock skew: /m);
+    assert.match(l.out.stdout, /The hub now lists this server as node abcdefghijkm.*servitals-ctl node revoke abcdefghijkm/s);
+    assert.ok(!fs.existsSync(creds));
+  } finally { hub.close(); }
+});
+
+test("unlink removes the credentials, stops the agent and says how to revoke on the hub", () => {
+  const dir = tmp();
+  const creds = path.join(dir, "agent-credentials.env");
+  fs.writeFileSync(creds, `HUB_URL=https://hub.example\nNODE_ID=abcdefghijkm\nNODE_SECRET=${"ab".repeat(32)}\n`, { mode: 0o600 });
+  const calls = path.join(dir, "calls");
+  const stub = path.join(dir, "systemctl");
+  fs.writeFileSync(stub, `#!/bin/sh\necho "$@" >> ${calls}\n`, { mode: 0o755 });
+  const r = run("servitals-agent", ["unlink"], { CREDENTIALS_FILE: creds, SYSTEMCTL: stub });
+  assert.strictEqual(r.status, 0, r.stderr);
+  assert.ok(!fs.existsSync(creds));
+  assert.match(fs.readFileSync(calls, "utf8"), /^disable --now servitals-agent\.service$/m);
+  assert.match(r.stdout, /servitals-ctl node revoke abcdefghijkm/);
+  const again = run("servitals-agent", ["unlink"], { CREDENTIALS_FILE: creds, SYSTEMCTL: stub });
+  assert.strictEqual(again.status, 1);
+  assert.match(again.stderr, /not paired/);
+});

@@ -2,6 +2,8 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # servitals-agent: run and inspect the servitals agent.
 #   servitals-agent join <hub-url> <node-id>:<secret>   pair with a hub (from servitals-ctl node add)
+#   servitals-agent link <https://hub>   pair by typing a short code on the hub's /link page
+#   servitals-agent unlink           forget the hub and stop the agent
 #   servitals-agent status           show the hub, the node and the last push
 #   servitals-agent run              run the agent (the systemd unit uses this)
 #   servitals-agent test             sample once and print the snapshot; nothing is sent
@@ -81,30 +83,31 @@ join_result() {  # status error
   esac
 }
 
-cmd_join() {
-  local start=1 url cred id secret state status err result
-  if [ "${1:-}" = --no-start ]; then start=0; shift; fi
-  [ $# -eq 2 ] || die "usage: servitals-agent join [--no-start] <hub-url> <node-id>:<secret>"
-  url=${1%/} cred=$2
-  id=${cred%%:*} secret=${cred#*:}
-  [[ $url =~ ^https?://[^[:space:]/@]+(/[^[:space:]@]*)?$ ]] || die "hub url: http:// or https://, no user:password@"
-  [[ $id =~ ^[a-z2-7]{12}$ && $secret =~ ^[0-9a-f]{64}$ ]] || die "the join string is <12-character node id>:<64 hex characters>"
-  # global, not local: the EXIT trap runs after this function has returned
-  JOIN_DIR=$(mktemp -d)
-  trap 'rm -rf "$JOIN_DIR"' EXIT
-  chmod 700 "$JOIN_DIR"
-  printf 'HUB_URL=%s\nNODE_ID=%s\nNODE_SECRET=%s\n' "$url" "$id" "$secret" > "$JOIN_DIR/credentials.env"
-  state="$JOIN_DIR/state"
+# a private scratch directory, removed on exit. A global, not a local: the
+# EXIT trap runs after the function that made it has returned.
+work_dir() {
+  WORK_DIR=$(mktemp -d)
+  trap 'rm -rf "$WORK_DIR"' EXIT
+  chmod 700 "$WORK_DIR"
+}
+
+# one test push with these credentials; on "ok" save them and start the service
+pair() {  # start url id secret
+  local start=$1 url=$2 id=$3 secret=$4 state="$WORK_DIR/state" status err result
+  printf 'HUB_URL=%s\nNODE_ID=%s\nNODE_SECRET=%s\n' "$url" "$id" "$secret" > "$WORK_DIR/credentials.env"
   echo "testing $url as node $id ..."
-  # the same settings the service uses (proxy, HUB_HEADERS, HUB_CA_FILE, disks)
-  load_agent_env "${AGENT_ENV:-/etc/servitals/agent.env}"
-  STATE_DIR="$state" CREDENTIALS_FILE="$JOIN_DIR/credentials.env" ONCE=1 HOST_ROOT="${HOST_ROOT:-/}" \
-    bash "$AGENT_HOME/collect.sh" > "$JOIN_DIR/log" 2>&1 || true
+  STATE_DIR="$state" CREDENTIALS_FILE="$WORK_DIR/credentials.env" ONCE=1 HOST_ROOT="${HOST_ROOT:-/}" \
+    bash "$AGENT_HOME/collect.sh" > "$WORK_DIR/log" 2>&1 || true
   read -r _ status err 2>/dev/null < "$state/last-push" || { status=000; err=-; }
   result=$(join_result "$status" "$err")
   echo "$result"
-  [ "$result" = ok ] || exit 1
-  install -m 600 "$JOIN_DIR/credentials.env" "$CREDENTIALS_FILE"
+  if [ "$result" != ok ]; then
+    # after a link the hub already made the node, with a secret only this run knew
+    [ -n "${LINKED:-}" ] && echo "The hub now lists this server as node $id, which nothing can use." \
+      "Ask its admin to run: servitals-ctl node revoke $id, then fix this and run servitals-agent link again."
+    exit 1
+  fi
+  install -m 600 "$WORK_DIR/credentials.env" "$CREDENTIALS_FILE"
   # the service reads it as _servitals-agent (only root can hand it over)
   if [ "$(id -u)" = 0 ] && getent passwd _servitals-agent >/dev/null 2>&1; then
     chown _servitals-agent:_servitals-agent "$CREDENTIALS_FILE"
@@ -114,6 +117,111 @@ cmd_join() {
     "${SYSTEMCTL:-systemctl}" enable servitals-agent.service >/dev/null 2>&1 || true
     "${SYSTEMCTL:-systemctl}" restart servitals-agent.service && echo "servitals-agent started"
   fi
+}
+
+cmd_join() {
+  local start=1 url cred id secret
+  if [ "${1:-}" = --no-start ]; then start=0; shift; fi
+  [ $# -eq 2 ] || die "usage: servitals-agent join [--no-start] <hub-url> <node-id>:<secret>"
+  url=${1%/} cred=$2
+  id=${cred%%:*} secret=${cred#*:}
+  [[ $url =~ ^https?://[^[:space:]/@]+(/[^[:space:]@]*)?$ ]] || die "hub url: http:// or https://, no user:password@"
+  [[ $id =~ ^[a-z2-7]{12}$ && $secret =~ ^[0-9a-f]{64}$ ]] || die "the join string is <12-character node id>:<64 hex characters>"
+  work_dir
+  # the same settings the service uses (proxy, HUB_HEADERS, HUB_CA_FILE, disks)
+  load_agent_env "${AGENT_ENV:-/etc/servitals/agent.env}"
+  pair "$start" "$url" "$id" "$secret"
+}
+
+# strings from the hub reach the terminal without control characters
+printable() { printf '%s' "$1" | tr -d '\000-\037\177' | head -c 200; }
+
+link_post() {  # url json-file: sets LINK_STATUS, the reply is in $WORK_DIR/out
+  LINK_STATUS=$(curl -sS -o "$WORK_DIR/out" -w '%{http_code}' -X POST --max-time 20 \
+    -H "Content-Type: application/json" -H "Expect:" "${HUB_ARGS[@]}" \
+    --data-binary @"$2" "$1" 2>/dev/null) || LINK_STATUS=000
+}
+reply() { jq -r "$1 // empty" "$WORK_DIR/out" 2>/dev/null; }
+
+# pair by code (spec 6.1.1, protocol 5.3): this machine makes its own secret,
+# sends it once over HTTPS, and a person approves the short code on the hub
+cmd_link() {
+  local start=1 url secret host version device code verify interval expires deadline id name account
+  if [ "${1:-}" = --no-start ]; then start=0; shift; fi
+  [ $# -eq 1 ] || die "usage: servitals-agent link [--no-start] <https://hub>"
+  url=${1%/}
+  # plain http only to this machine itself: the secret must not cross a network unencrypted
+  [[ $url =~ ^https://[^[:space:]/@]+(/[^[:space:]@]*)?$ ||
+     $url =~ ^http://(localhost|127\.0\.0\.1|\[::1\])(:[0-9]+)?(/[^[:space:]@]*)?$ ]] ||
+    die "link needs an https:// hub address (the new secret travels to the hub once). For a plain-http hub, use servitals-agent join"
+  work_dir
+  load_agent_env "${AGENT_ENV:-/etc/servitals/agent.env}"
+  # like the service: a proxy never carries requests to this machine itself
+  export NO_PROXY="${NO_PROXY:+$NO_PROXY,}localhost,127.0.0.1,::1"
+  export no_proxy="$NO_PROXY"
+  # HUB_HEADERS and HUB_CA_FILE exactly as the service sends them
+  # shellcheck disable=SC2034  # read by hub_args in lib/api.sh
+  STATE=$WORK_DIR
+  # shellcheck source=/dev/null
+  . "$AGENT_HOME/lib/log.sh"
+  # shellcheck source=/dev/null
+  . "$AGENT_HOME/lib/api.sh"
+  hub_args
+  secret=$(od -An -tx1 -N32 /dev/urandom | tr -d ' \n')
+  host=$(hostname 2>/dev/null | tr -d '\000-\037\177' | head -c 64)
+  version=$(cat "$AGENT_HOME/VERSION" "$AGENT_HOME/../VERSION" 2>/dev/null | head -n 1 || true)
+  jq -n --arg s "$secret" --arg h "${host:-server}" --arg a "bash/${version:-unknown}" \
+    '{secret: $s, host: $h, os: "linux", agent: $a}' > "$WORK_DIR/start.json"
+  link_post "$url/api/v1/link/start" "$WORK_DIR/start.json"
+  case $LINK_STATUS in
+    200) ;;
+    000) die "unreachable: no answer from $url (address, port, firewall, proxy, certificate?)" ;;
+    403) die "the hub only links over HTTPS; use its https:// address, or servitals-agent join" ;;
+    404|405) die "this hub cannot link by code (update servitals on the hub), or use servitals-agent join" ;;
+    429) die "too many link attempts from this address; try again in an hour" ;;
+    *) die "the hub answered HTTP $LINK_STATUS $(printable "$(reply .error)")" ;;
+  esac
+  device=$(reply .device_code) code=$(reply .user_code) verify=$(printable "$(reply .verify_url)")
+  interval=$(reply .interval) expires=$(reply .expires_in)
+  [[ $device =~ ^[A-Za-z0-9_-]{16,64}$ && $code =~ ^[A-Z0-9]{4}-[A-Z0-9]{4}$ &&
+     $interval =~ ^[0-9]{1,3}$ && $expires =~ ^[0-9]{1,5}$ ]] || die "the hub's answer does not look like servitals"
+  [[ $verify =~ ^https?://[^[:space:]]+$ ]] || verify="$url/link"
+  [ "$interval" -ge 1 ] || interval=5
+  echo "Open $verify and enter:  $code"
+  echo "Only enter this code on that site, in your own account."
+  echo "Waiting for approval... (expires in $(( (expires + 59) / 60 )) min)"
+  jq -n --arg d "$device" '{device_code: $d}' > "$WORK_DIR/poll.json"
+  deadline=$(( $(date +%s) + expires + 30 ))
+  while :; do
+    sleep "$interval"
+    link_post "$url/api/v1/link/poll" "$WORK_DIR/poll.json"
+    case $LINK_STATUS in
+      200) break ;;
+      202|000) ;;   # still waiting, or a network blip: ask again
+      429) interval=$(( interval + 5 )) ;;
+      410) [ "$(reply .error)" = denied ] && die "denied on the hub; nothing was saved"
+           die "the code expired (or the hub restarted); run servitals-agent link again" ;;
+      *) die "the hub answered HTTP $LINK_STATUS $(printable "$(reply .error)")" ;;
+    esac
+    [ "$(date +%s)" -lt "$deadline" ] || die "the code expired; run servitals-agent link again"
+  done
+  id=$(reply .node_id) name=$(printable "$(reply .name)") account=$(printable "$(reply .account)")
+  [[ $id =~ ^[a-z2-7]{12}$ ]] || die "the hub's answer does not look like servitals"
+  LINKED=1
+  pair "$start" "$url" "$id" "$secret"
+  echo "Linked as \"$name\" to ${account:-this hub}."
+  echo "Not your account? Run: sudo servitals-agent unlink"
+}
+
+cmd_unlink() {
+  local k v id=""
+  [ -e "$CREDENTIALS_FILE" ] || die "not paired: nothing to unlink"
+  [ -r "$CREDENTIALS_FILE" ] || die "run with sudo to change $CREDENTIALS_FILE"
+  while IFS='=' read -r k v; do [ "$k" = NODE_ID ] && id=${v%$'\r'}; done < "$CREDENTIALS_FILE"
+  "${SYSTEMCTL:-systemctl}" disable --now servitals-agent.service >/dev/null 2>&1 || true
+  rm -f "$CREDENTIALS_FILE" || die "could not remove $CREDENTIALS_FILE"
+  echo "unlinked: removed $CREDENTIALS_FILE and stopped servitals-agent."
+  echo "The hub still lists this server until its admin runs: servitals-ctl node revoke ${id:-<node id>}"
 }
 
 cmd_status() {
@@ -141,9 +249,11 @@ cmd_status() {
 
 case "${1:-}" in
   join)   shift; cmd_join "$@" ;;
+  link)   shift; cmd_link "$@" ;;
+  unlink) shift; cmd_unlink ;;
   status) shift; cmd_status "$@" ;;
   run)    shift; exec bash "$AGENT_HOME/collect.sh" "$@" ;;
   test)   shift; cmd_test ;;
   docker) shift; docker_access "$@" ;;
-  *) sed -n '3,9p' "$0" | sed 's/^# \{0,1\}//'; exit 1 ;;
+  *) sed -n '3,11p' "$0" | sed 's/^# \{0,1\}//'; exit 1 ;;
 esac
