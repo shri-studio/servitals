@@ -586,7 +586,7 @@
 
     <div class="panel" data-panel="temp">
       <h2>thermal</h2>
-      <div class="big"><span id="temp-pkg">--</span><span class="unit">&deg;C package</span></div>
+      <div class="big"><span id="temp-pkg">--</span><span class="unit" id="temp-unit">&deg;C package</span></div>
       <div id="temp-bar"></div>
       <div class="sparkmini" id="temp-spark"></div>
       <div class="row" style="margin-top:10px"><span class="k">range (session)</span><span class="v" id="temp-range">--</span></div>
@@ -708,6 +708,16 @@
       </section>
 
       <section>
+        <label>units</label>
+        <div class="fields">
+          <label class="field"><span>temperature</span><select id="cfg-u-temp"><option value="c">°C</option><option value="f">°F</option></select></label>
+          <label class="field"><span>sizes</span><select id="cfg-u-size"><option value="binary">1024 (like df -h)</option><option value="decimal">1000 (like drive labels)</option></select></label>
+          <label class="field"><span>network</span><select id="cfg-u-rate"><option value="bytes">bytes per second</option><option value="bits">bits per second</option></select></label>
+          <label class="field"><span>clock</span><select id="cfg-u-clock"><option value="auto">browser default</option><option value="24h">24 hour</option><option value="12h">12 hour</option></select></label>
+        </div>
+      </section>
+
+      <section>
         <label>appearance</label>
         <p class="hint">changes this browser at once</p>
         <div class="fields">
@@ -785,19 +795,41 @@ const clamp = (n, a, b) => Math.max(a, Math.min(b, n));
 // package temp (°C) -> 0-100% of the display band, for the meter and sparkline
 const tempPct = t => clamp((t - 30) / 65 * 100, 0, 100);
 
+/* units (spec 10.4): the hub's default from config.json, like the other settings */
+const UNIT_CHOICES = { temp: ["c", "f"], size: ["binary", "decimal"], rate: ["bytes", "bits"], clock: ["auto", "24h", "12h"] };
+function units() {
+  const u = (typeof cfg === "object" && cfg && cfg.units) || {};
+  const out = {};
+  for (const [k, choices] of Object.entries(UNIT_CHOICES)) out[k] = choices.includes(u[k]) ? u[k] : choices[0];
+  return out;
+}
+// temperatures are Celsius everywhere inside the page; only the text changes
+function tempUnit() { return units().temp === "f" ? "°F" : "°C"; }
+function fmtTemp(c, withUnit) {
+  if (c == null || !Number.isFinite(Number(c))) return "–";
+  const n = Math.round(units().temp === "f" ? Number(c) * 9 / 5 + 32 : Number(c));
+  return withUnit ? n + tempUnit() : n + tempUnit().slice(0, 1);
+}
+function fmtTime(date, timeZone) {
+  const c = units().clock;
+  return date.toLocaleTimeString(undefined, { timeZone, hour12: c === "12h" ? true : c === "24h" ? false : undefined });
+}
 function fmtBytes(n) {
   n = Number(n) || 0;
+  const base = units().size === "decimal" ? 1000 : 1024;
   const u = ["B", "K", "M", "G", "T", "P"];
   let i = 0;
-  while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; }
+  while (n >= base && i < u.length - 1) { n /= base; i++; }
   return (n < 10 && i > 0 ? n.toFixed(1) : Math.round(n)) + u[i];
 }
 function fmtRate(Bps) {
   Bps = Number(Bps) || 0;
-  const u = ["B/s", "KB/s", "MB/s", "GB/s"];
-  let i = 0;
-  while (Bps >= 1024 && i < u.length - 1) { Bps /= 1024; i++; }
-  return (Bps < 10 && i > 0 ? Bps.toFixed(1) : Math.round(Bps)) + " " + u[i];
+  const bits = units().rate === "bits";
+  const base = bits || units().size === "decimal" ? 1000 : 1024;   // network speeds in bits are always powers of 1000
+  const u = bits ? ["bit/s", "kbit/s", "Mbit/s", "Gbit/s"] : ["B/s", "KB/s", "MB/s", "GB/s"];
+  let v = bits ? Bps * 8 : Bps, i = 0;
+  while (v >= base && i < u.length - 1) { v /= base; i++; }
+  return (v < 10 && i > 0 ? v.toFixed(1) : Math.round(v)) + " " + u[i];
 }
 function fmtDur(sec) {
   sec = Number(sec) || 0;
@@ -1098,7 +1130,7 @@ function renderFleet() {
       + `<div class="nhead"><span class="lamp ${esc(n.status)}"></span>${esc(n.name)}</div>`
       + `<div class="kv"><span><small>cpu</small>${fmtVal(s.cpu, "%")}</span>`
       + `<span><small>mem</small>${fmtVal(s.mem, "%")}</span>`
-      + `<span><small>temp</small>${fmtVal(s.temp, "°C")}</span></div>`
+      + `<span><small>temp</small>${fmtTemp(s.temp, true)}</span></div>`
       + `<div class="sparkmini">${sparkSvg(s.trend || [])}</div>`
       + (disk ? meter(disk.pct, dcls) : "")
       + `<div class="foot"><span>${foot}</span><span>${cont}</span></div></div>`;
@@ -1109,7 +1141,7 @@ function renderFleet() {
   if (online < fleetNodes.length) dot.classList.add(fleetNodes.some(n => n.status === "offline") ? "down" : "stale");
   $("#hostname").textContent = cfg.title || "servitals";
   $("#hostmeta").textContent = `${fleetNodes.length} nodes · ${online} online`;
-  $("#lastupdate").textContent = `fleet · ${new Date().toLocaleTimeString()}`;
+  $("#lastupdate").textContent = `fleet · ${fmtTime(new Date())}`;
 }
 
 async function tick() {
@@ -1137,7 +1169,7 @@ function setStatus(ts, hardFail) {
   else if (age > budget) { dot.classList.add("stale"); label = "stale " + fmtDur(age) + " old"; }
   else { label = "online"; }
   $("#lastupdate").textContent = label + " · " +
-    new Date(ts || 0).toLocaleTimeString();
+    fmtTime(new Date(ts || 0));
 }
 
 function renderMetrics(d) {
@@ -1198,21 +1230,22 @@ function renderMetrics(d) {
     const t = d.temp, pkg = t.package;
     if (pkg != null) pushHist("temp", pkg);
     const hc = HCLS[pkg == null ? "ok" : health(pkg, 70, 85)];
-    $("#temp-pkg").textContent = pkg != null ? Math.round(pkg) : "—";
+    $("#temp-pkg").textContent = pkg != null ? fmtTemp(pkg).replace("°", "") : "—";
+    $("#temp-unit").textContent = tempUnit() + " package";
     $("#temp-pkg").closest(".big").className = "big " + hc;
     const tp = pkg != null ? tempPct(pkg) : 0;
     $("#temp-bar").innerHTML = meter(tp, hc).replace(/<span class="pct">.*?<\/span>/,
-      `<span class="pct">${pkg != null ? Math.round(pkg) + "°" : "--"}</span>`);
+      `<span class="pct">${pkg != null ? fmtTemp(pkg) : "--"}</span>`);
     $("#temp-spark").innerHTML = sparkSvg(hist.temp.map(tempPct));
     if (hist.temp.length) {
       const lo = Math.min(...hist.temp), hi = Math.max(...hist.temp);
       const av = hist.temp.reduce((a, b) => a + b, 0) / hist.temp.length;
-      $("#temp-range").textContent = `${Math.round(lo)}° – ${Math.round(hi)}°  ·  avg ${Math.round(av)}°`;
+      $("#temp-range").textContent = `${fmtTemp(lo)} – ${fmtTemp(hi)}  ·  avg ${fmtTemp(av)}`;
     }
     const cores = (t.sensors || []).filter(s => /core/i.test(s.label));
     $("#temp-cores").textContent = cores.length
-      ? cores.map(s => s.label.replace(/^Core /, "c") + " " + Math.round(s.value) + "°").join("  ")
-      : (t.sensors || []).map(s => s.label + " " + Math.round(s.value) + "°").join("  ");
+      ? cores.map(s => s.label.replace(/^Core /, "c") + " " + fmtTemp(s.value)).join("  ")
+      : (t.sensors || []).map(s => s.label + " " + fmtTemp(s.value)).join("  ");
   }
 
   // storage
@@ -1467,7 +1500,7 @@ function renderClocks() {
 }
 function tickClocks() {
   const now = new Date();
-  $("#headclock").textContent = now.toLocaleTimeString();
+  $("#headclock").textContent = fmtTime(now);
   $("#headdate").textContent = now.toLocaleDateString(undefined,
     { weekday: "short", day: "numeric", month: "short", year: "numeric" });
   $$("#clocks .clock").forEach(el => {
@@ -1475,7 +1508,7 @@ function tickClocks() {
     if (!c) return;
     try {
       el.querySelector(".ct").textContent =
-        now.toLocaleTimeString("en-GB", { timeZone: c.tz });
+        fmtTime(now, c.tz);
       el.querySelector(".cdte").textContent =
         now.toLocaleDateString("en-GB", { timeZone: c.tz, weekday: "short", day: "numeric", month: "short" });
     } catch (e) { el.querySelector(".ct").textContent = "bad tz"; }
@@ -1511,15 +1544,15 @@ async function renderWeather(force) {
         const n = i + 1, fw = WMO[d.weather_code[n]] || ["", ""];
         const day = dow[new Date(iso + "T12:00").getDay()];
         return `<span class="fc"><span class="fcd">${day}</span> ${fw[0]}
-          <span class="fct">${Math.round(d.temperature_2m_max[n])}°<span class="fcl">${Math.round(d.temperature_2m_min[n])}°</span></span></span>`;
+          <span class="fct">${fmtTemp(d.temperature_2m_max[n])}<span class="fcl">${fmtTemp(d.temperature_2m_min[n])}</span></span></span>`;
       }).join("");
       return `<div class="wc">
         <div class="wnow">
           <span class="wicon">${w[0]}</span>
           <span>
-            <span class="wname">${esc(l.name)}</span> <span class="wtemp">${Math.round(r.current.temperature_2m)}°</span><br>
-            <span class="wsub">${w[1]} · feels ${Math.round(r.current.apparent_temperature)}°
-            · H ${Math.round(d.temperature_2m_max[0])}° L ${Math.round(d.temperature_2m_min[0])}°</span>
+            <span class="wname">${esc(l.name)}</span> <span class="wtemp">${fmtTemp(r.current.temperature_2m)}</span><br>
+            <span class="wsub">${w[1]} · feels ${fmtTemp(r.current.apparent_temperature)}
+            · H ${fmtTemp(d.temperature_2m_max[0])} L ${fmtTemp(d.temperature_2m_min[0])}</span>
           </span>
         </div>
         <div class="wfc">${fc}</div>
@@ -1565,6 +1598,7 @@ function openSettings() {
   $("#cfg-lookdefault").checked = false;
   $("#cfg-kiosk").checked = !!cfg.kiosk;
   $("#cfg-kiosksec").value = cfg.kioskSec || 20;
+  for (const [k, v] of Object.entries(units())) $("#cfg-u-" + k).value = v;
   $("#acct-msg").textContent = "";
   $("#overlay").classList.add("open");
 }
@@ -1681,6 +1715,7 @@ async function saveSettings() {
   // whoever turns kiosk on for everyone keeps the controls in this browser
   if (cfg.kiosk && !was && lsGet("kiosk") === null) lsSet("kiosk", "0");
   cfg.kioskSec = clamp(+$("#cfg-kiosksec").value || 20, 5, 600);
+  cfg.units = Object.fromEntries(Object.keys(UNIT_CHOICES).map((k) => [k, $("#cfg-u-" + k).value]));
   // panels/order/size/favicon are already updated live by the settings widgets
 
   applyBranding();

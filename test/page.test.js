@@ -51,7 +51,7 @@ test("the fleet grid and node tabs are wired up", () => {
 
 test("snapshot times are milliseconds", () => {
   assert.match(HTML, /const age = \(Date\.now\(\) - \(ts \|\| 0\)\) \/ 1000;/);
-  assert.match(HTML, /new Date\(ts \|\| 0\)\.toLocaleTimeString\(\)/);
+  assert.match(HTML, /fmtTime\(new Date\(ts \|\| 0\)\)/);
 });
 
 test("fleet numbers show a dash when unknown", () => {
@@ -200,4 +200,43 @@ test("native controls (checkboxes, dropdown lists) follow the page's light or da
   assert.match(block(":root"), /color-scheme: light;/);
   assert.match(block(':root[data-theme="dark"]'), /color-scheme: dark;/);
   assert.match(block(':root:not([data-theme="light"])'), /color-scheme: dark;/, "system dark");
+});
+
+test("units: temperature, sizes, network rates and the clock follow the settings", () => {
+  const u = (over) => () => Object.assign({ temp: "c", size: "binary", rate: "bytes", clock: "auto" }, over);
+  const fmtTemp = (over) => pageFn("fmtTemp", { units: u(over), tempUnit: pageFn("tempUnit", { units: u(over) }) });
+  assert.strictEqual(fmtTemp()(48.4), "48°");
+  assert.strictEqual(fmtTemp()(48.4, true), "48°C");
+  assert.strictEqual(fmtTemp({ temp: "f" })(48.4, true), "119°F");
+  assert.strictEqual(fmtTemp({ temp: "f" })(-40), "-40°");
+  assert.strictEqual(fmtTemp()(null), "–");
+
+  const fmtBytes = (over) => pageFn("fmtBytes", { units: u(over) });
+  assert.strictEqual(fmtBytes()(1024 ** 3 * 4.7), "4.7G");
+  assert.strictEqual(fmtBytes({ size: "decimal" })(1e12), "1.0T", "a 1 TB drive reads 1.0T");
+  assert.strictEqual(fmtBytes()(1e12), "931G");
+
+  const fmtRate = (over) => pageFn("fmtRate", { units: u(over) });
+  assert.strictEqual(fmtRate()(1536), "1.5 KB/s");
+  assert.strictEqual(fmtRate({ size: "decimal" })(1500), "1.5 KB/s");
+  assert.strictEqual(fmtRate({ rate: "bits" })(1.25e6), "10 Mbit/s", "bits are always powers of 1000");
+  assert.strictEqual(fmtRate({ rate: "bits" })(0), "0 bit/s");
+
+  const seen = [];
+  const Date_ = class { toLocaleTimeString(loc, o) { seen.push(o); return "t"; } };
+  const fmtTime = (over) => pageFn("fmtTime", { units: u(over) });
+  fmtTime()(new Date_()); fmtTime({ clock: "24h" })(new Date_()); fmtTime({ clock: "12h" })(new Date_(), "Asia/Kolkata");
+  assert.deepStrictEqual(seen, [{ timeZone: undefined, hour12: undefined }, { timeZone: undefined, hour12: false },
+                                { timeZone: "Asia/Kolkata", hour12: true }]);
+
+  const UNIT_CHOICES = new Function(`${/const UNIT_CHOICES = [^\n]+/.exec(HTML)[0]}; return UNIT_CHOICES;`)();
+  const units = pageFn("units", { cfg: { units: { temp: "k", clock: "12h" } }, UNIT_CHOICES });
+  assert.deepStrictEqual(units(), { temp: "c", size: "binary", rate: "bytes", clock: "12h" }, "unknown values fall back");
+});
+
+test("every temperature and time on the page goes through the unit helpers", () => {
+  const script = HTML.slice(HTML.indexOf('<script>\n"use strict"')).replace(/function (tempUnit|fmtTemp)\([\s\S]*?\n}\n/g, "");
+  assert.doesNotMatch(script, /\+ "°"|\}°|°C"/, "no hand-made degree signs");
+  assert.doesNotMatch(script.replace(/function fmtTime[\s\S]*?\n}\n/, ""), /toLocaleTimeString\(/, "times through fmtTime");
+  for (const id of ["cfg-u-temp", "cfg-u-size", "cfg-u-rate", "cfg-u-clock"]) assert.ok(HTML.includes(`id="${id}"`), id);
 });
