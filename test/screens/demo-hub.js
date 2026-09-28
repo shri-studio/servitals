@@ -19,7 +19,7 @@ const { signRequest } = require(path.join(REPO, "hub/lib/agentsig"));
 const state = fs.mkdtempSync(path.join(os.tmpdir(), "sv-demo-"));
 const hub = spawn(process.execPath, [path.join(REPO, "hub/server.js")], {
   env: { PATH: process.env.PATH, PORT: String(PORT), STATE_DIR: state, UPSTREAM: "", AUTH_USER: "demo",
-         AUTH_PASS: "demo-pass-1", LOG_LEVEL: "error" },
+         AUTH_PASS: "demo-pass-1", LOG_LEVEL: "error", CONFD_DIR: path.join(state, "conf.d") },
   stdio: "inherit",
 });
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));

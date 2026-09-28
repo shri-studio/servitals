@@ -31,6 +31,7 @@ const { view: snapshotView } = require("./lib/snapshot");
 const fleet = require("./lib/fleet");
 const { createAdminStore, USER_RE } = require("./lib/admin");
 const { createLinks } = require("./lib/link");
+const { createConfd } = require("./lib/confd");
 
 const UP        = process.env.UPSTREAM     || "";   // unset: serve WWW_DIR directly (native install)
 const WWW_DIR   = path.resolve(process.env.WWW_DIR || path.join(__dirname, "..", "www"));
@@ -124,6 +125,21 @@ if (!fs.existsSync(CONFIG_F) && fs.existsSync(LEGACY_CONFIG)) {
     fs.copyFileSync(LEGACY_CONFIG, CONFIG_F);
     log.info("config.migrated", { from: LEGACY_CONFIG, to: CONFIG_F });
   } catch (e) { log.warn("config.migrate_failed", { from: LEGACY_CONFIG, error: e.code || String(e) }); }
+}
+
+/* ---------- config as code (spec 12): conf.d files win over the page ---------- */
+const CONFD_DIR = process.env.CONFD_DIR || "/etc/servitals/conf.d";
+const confd = createConfd(CONFD_DIR, { log });
+{
+  const c = confd.get();
+  log.info("config.confd", { dir: CONFD_DIR, files: c.files.length, skipped: c.files.filter((f) => !f.ok).length });
+}
+// a node as the page sees it: tags and name from a conf.d file win (matched by id, else by name)
+function withFile(n) {
+  const all = confd.get().nodes;
+  const f = all[n.id] || all[n.name] || null;
+  if (!f) return { ...n, managed: [] };
+  return { ...n, ...f, managed: Object.keys(f).sort() };
 }
 
 /* ---------- nodes: the hub's own host is the local node ---------- */
@@ -629,11 +645,17 @@ async function handle(req, res) {
   }
 
   // dashboard settings: from the state dir, not www/ (the page falls back to its defaults)
+  // settings from the page, with conf.d values on top; _managed lists what the files set
   if (authed && req.method === "GET" && pathname === "/config.json") {
-    let body = "{}\n";
-    try { body = fs.readFileSync(CONFIG_F, "utf8"); } catch (_) { /* nothing saved yet */ }
+    let saved = {};
+    try { saved = JSON.parse(fs.readFileSync(CONFIG_F, "utf8")); } catch (_) { /* nothing saved yet */ }
+    const out = saved && typeof saved === "object" && !Array.isArray(saved) ? saved : {};
+    const c = confd.get();
+    const isObj = (v) => v && typeof v === "object" && !Array.isArray(v);
+    for (const [k, v] of Object.entries(c.settings)) out[k] = isObj(v) && isObj(out[k]) ? { ...out[k], ...v } : v;
+    out._managed = c.managed;
     res.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" });
-    return res.end(body);
+    return res.end(JSON.stringify(out, null, 2) + "\n");
   }
 
   // the local node's latest snapshot, where the page and old scripts expect it
@@ -665,7 +687,7 @@ async function handle(req, res) {
 
     // the fleet: every node with its status and the numbers a card shows
     if (req.method === "GET" && pathname === "/__ctl/nodes") {
-      const list = nodes.list().map((n) => {
+      const list = nodes.list().map(withFile).map((n) => {
         const rec = latest.get(n.id);
         return { ...n, status: nodeStatus(n.id), lastSeen: rec ? rec.at : null,
                  interval: rec ? rec.snap.interval : null, summary: rec ? fleet.summary(rec.view) : null };
@@ -677,7 +699,7 @@ async function handle(req, res) {
     // one node's latest view
     const nm = /^\/__ctl\/node\/([a-z2-7]{12})$/.exec(pathname);
     if (req.method === "GET" && nm) {
-      const n = nodes.list().find((x) => x.id === nm[1]);
+      const n = nodes.list().map(withFile).find((x) => x.id === nm[1]);
       if (!n) return json(404, { error: "no such node" });
       const rec = latest.get(n.id);
       if (!rec) return json(503, { error: "no snapshot yet", node: { ...n, status: "waiting" } });
@@ -701,6 +723,10 @@ async function handle(req, res) {
       let body = null;
       try { body = JSON.parse(await readBodyN(req, 4096)); } catch (_) { /* answered below */ }
       if (!body || typeof body !== "object" || Array.isArray(body)) return json(400, { error: "invalid json" });
+      const managed = withFile(nodes.list().find((x) => x.id === id)).managed;
+      for (const k of ["tags", "name"]) {
+        if (body[k] !== undefined && managed.includes(k)) return json(409, { error: `${k === "tags" ? "tags are" : "the name is"} managed by a file in conf.d` });
+      }
       try {
         // check both before changing either
         const name = body.name !== undefined ? nodes.check(body.name) : nodes.get(id).name;
@@ -757,6 +783,7 @@ async function handle(req, res) {
       let obj;
       try { obj = JSON.parse(body); } catch { return json(400, { error: "invalid json" }); }
       if (!obj || typeof obj !== "object" || Array.isArray(obj)) return json(400, { error: "not an object" });
+      delete obj._managed;   // what conf.d sets comes from the files, never from a save
       if (obj.favicon && !/^data:image\/[a-z.+-]+;base64,[A-Za-z0-9+/=]+$/.test(obj.favicon))
         return json(400, { error: "favicon must be a base64 data:image URI" });
       if (obj.portainerUrl && !/^https?:\/\/[^\s"'<>]+$/i.test(obj.portainerUrl))

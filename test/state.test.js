@@ -41,7 +41,7 @@ test("config.json lives in the state dir and needs a session", async () => {
     const empty = await request(hub.port, { path: "/config.json?t=1", headers: { cookie } });
     assert.strictEqual(empty.status, 200);
     assert.strictEqual(empty.headers["cache-control"], "no-store");
-    assert.deepStrictEqual(JSON.parse(empty.body), {});
+    assert.deepStrictEqual(JSON.parse(empty.body), { _managed: [] }, "nothing saved, no conf.d files");
     const saved = await ctlPost(hub.port, cookie, "/__ctl/config", JSON.stringify({ title: "lab" }));
     assert.strictEqual(saved.status, 200);
     const back = await request(hub.port, { path: "/config.json", headers: { cookie } });

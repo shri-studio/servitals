@@ -144,3 +144,35 @@ test("the page renames, tags and revokes a node; revoking is LAN-only and never 
     assert.match(fs.readFileSync(path.join(hub.dataDir, "audit.log"), "utf8"), /node\.revoked/);
   } finally { await hub.stop(); }
 });
+
+test("conf.d: file settings win in config.json and are listed as managed; file tags and names win for nodes", async () => {
+  const confd = fs.mkdtempSync(path.join(os.tmpdir(), "sv-confd-"));
+  fs.writeFileSync(path.join(confd, "10-site.json"), JSON.stringify({
+    settings: { title: "from file", units: { temp: "f" } },
+    nodes: { nas: { tags: ["storage"] } },
+  }));
+  const hub = await startHub({ CONFD_DIR: confd });
+  try {
+    const c = addNode(hub, "nas");
+    const cookie = cookieFrom(await login(hub.port));
+    assert.strictEqual((await ctlPost(hub.port, cookie, "/__ctl/config",
+      JSON.stringify({ title: "from page", units: { temp: "c", clock: "12h" }, _managed: ["x"] }))).status, 200);
+    const cfg = (await getJSON(hub, cookie, "/config.json")).body;
+    assert.strictEqual(cfg.title, "from file");
+    assert.deepStrictEqual(cfg.units, { temp: "f", clock: "12h" }, "key by key: the page's clock stays");
+    assert.deepStrictEqual(cfg._managed, ["title", "units.temp"]);
+    const saved = JSON.parse(fs.readFileSync(path.join(hub.dataDir, "config.json"), "utf8"));
+    assert.strictEqual(saved._managed, undefined, "the list is never saved");
+
+    const n = (await getJSON(hub, cookie, "/__ctl/nodes")).body.find((x) => x.id === c.id);
+    assert.deepStrictEqual([n.tags, n.managed], [["storage"], ["tags"]]);
+    const r = await ctlPost(hub.port, cookie, `/__ctl/node/${c.id}`, JSON.stringify({ tags: ["other"] }));
+    assert.deepStrictEqual([r.status, JSON.parse(r.body).error], [409, "tags are managed by a file in conf.d"]);
+    assert.strictEqual((await ctlPost(hub.port, cookie, `/__ctl/node/${c.id}`, JSON.stringify({ name: "nas2" }))).status, 200, "the name is not managed");
+
+    fs.writeFileSync(path.join(confd, "20-bad.json"), "{ nope");
+    await sleep(2100);
+    assert.strictEqual((await getJSON(hub, cookie, "/config.json")).body.title, "from file", "a bad file changes nothing");
+    assert.match(hub.logs(), /config\.file_skipped.*20-bad\.json/);
+  } finally { await hub.stop(); fs.rmSync(confd, { recursive: true, force: true }); }
+});

@@ -66,6 +66,7 @@ function baseEnv(port, dataDir, upstreamPort) {
     AUTH_USER: "admin",
     AUTH_PASS: DEFAULT_PASS,
     LOG_LEVEL: "debug",
+    CONFD_DIR: "/nonexistent/servitals-test/conf.d",   // never this host's /etc/servitals/conf.d
   };
 }
 
