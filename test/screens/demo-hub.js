@@ -17,6 +17,10 @@ const REPO = path.join(__dirname, "..", "..");
 const PORT = Number(process.argv[2] || 20090);
 const { signRequest } = require(path.join(REPO, "hub/lib/agentsig"));
 const state = fs.mkdtempSync(path.join(os.tmpdir(), "sv-demo-"));
+// config as code: one setting and one node's tags come from a file (shown as managed)
+fs.mkdirSync(path.join(state, "conf.d"));
+fs.writeFileSync(path.join(state, "conf.d", "10-demo.json"),
+  JSON.stringify({ settings: { refreshSec: 60 }, nodes: { nas: { tags: ["home", "storage"] } } }));
 const hub = spawn(process.execPath, [path.join(REPO, "hub/server.js")], {
   env: { PATH: process.env.PATH, PORT: String(PORT), STATE_DIR: state, UPSTREAM: "", AUTH_USER: "demo",
          AUTH_PASS: "demo-pass-1", LOG_LEVEL: "error", CONFD_DIR: path.join(state, "conf.d") },

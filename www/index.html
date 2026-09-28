@@ -216,6 +216,8 @@
          background: var(--bg); border: var(--border-w, 1px) solid var(--border); }
   .srv input[type=text] { flex: 1 1 140px; min-width: 0; }
   .srv .local { color: var(--dim); font-size: 11px; }
+  .modal .managed { opacity: .8; }
+  .modal .field.managed > span::after, .modal .check.managed::after { content: " · managed by file"; color: var(--dim); }
   .ncard .kv small { display: block; color: var(--dim); font-size: 10px; letter-spacing: .1em; text-transform: uppercase; }
   .ncard .foot { display: flex; justify-content: space-between; gap: 6px; color: var(--dim); font-size: 12px; }
   .ncard.stale, .ncard.offline, .ncard.waiting { opacity: .62; }
@@ -939,7 +941,49 @@ async function loadConfig() {
   let saved = null;
   try { saved = JSON.parse(lsGet("cfg") || "null"); } catch (e) {}
   cfg = saved ? deepMerge(structuredClone(DEFAULTS), saved) : structuredClone(DEFAULTS);
+  applyManaged();
   fixPanelOrder();
+}
+/* config as code (spec 12): what files in /etc/servitals/conf.d set (the hub
+   lists it in _managed) wins, also over a copy saved in this browser */
+function managedPaths() {
+  return Array.isArray(DEFAULTS._managed) ? DEFAULTS._managed.filter(p => typeof p === "string") : [];
+}
+function applyManaged() {
+  for (const p of managedPaths()) {
+    const [k, sub] = p.split(".");
+    if (sub === undefined) { if (DEFAULTS[k] !== undefined) cfg[k] = structuredClone(DEFAULTS[k]); }
+    else if (DEFAULTS[k] && DEFAULTS[k][sub] !== undefined) {
+      if (!cfg[k] || typeof cfg[k] !== "object") cfg[k] = {};
+      cfg[k][sub] = structuredClone(DEFAULTS[k][sub]);
+    }
+  }
+}
+// the settings control for a managed path, or null
+function managedSelector(p) {
+  const plain = { title: "#cfg-name", refreshSec: "#cfg-refresh", kiosk: "#cfg-kiosk", kioskSec: "#cfg-kiosksec",
+                  style: "#cfg-lookdefault", mode: "#cfg-lookdefault", density: "#cfg-lookdefault",
+                  panelOrder: "#cfg-panels [data-up], #cfg-panels [data-down]",
+                  "fleet.sort": "#cfg-f-sort", "fleet.group": "#cfg-f-group", "fleet.card": "#cfg-f-card input",
+                  "fleet.pinned": "#cfg-servers .srv-pin", "fleet.hidden": "#cfg-servers .srv-hide" };
+  if (plain[p]) return plain[p];
+  const m = /^(units|panels|panelSize)\.([a-z]+)$/.exec(p);
+  if (!m) return null;
+  if (m[1] === "units") return `#cfg-u-${m[2]}`;
+  return `#cfg-panels [data-p="${m[2]}"] [data-${m[1] === "panels" ? "vis" : "sz"}]`;
+}
+function markManaged() {
+  const note = "managed by a file in /etc/servitals/conf.d";
+  for (const p of managedPaths()) {
+    const sel = managedSelector(p);
+    if (!sel) continue;
+    for (const el of $$(sel)) {
+      el.disabled = true;
+      el.title = note;
+      const box = el.closest(".field, .check, .pcf");
+      if (box) box.classList.add("managed");
+    }
+  }
 }
 // every panel appears exactly once in the order list
 function fixPanelOrder() {
@@ -1734,12 +1778,15 @@ function renderServers({ keep = false } = {}) {
   const pinned = new Set(list(f.pinned)), hidden = new Set(list(f.hidden));
   const typed = (n, k, saved) => (f.names[n.id] ? f.names[n.id][k] : saved);
   $("#cfg-servers").innerHTML = fleetNodes.map(n => `<div class="srv" data-id="${esc(n.id)}">`
-    + `<input type="text" class="srv-name" value="${esc(typed(n, "name", n.name))}" maxlength="64" aria-label="name of ${esc(n.name)}">`
-    + `<input type="text" class="srv-tags" value="${esc(typed(n, "tags", (n.tags || []).join(", ")))}" placeholder="tags" aria-label="tags of ${esc(n.name)}">`
+    + `<input type="text" class="srv-name" value="${esc(typed(n, "name", n.name))}" maxlength="64" aria-label="name of ${esc(n.name)}"`
+    + `${(n.managed || []).includes("name") ? " disabled title=\"managed by a file in conf.d\"" : ""}>`
+    + `<input type="text" class="srv-tags" value="${esc(typed(n, "tags", (n.tags || []).join(", ")))}" placeholder="tags" aria-label="tags of ${esc(n.name)}"`
+    + `${(n.managed || []).includes("tags") ? " disabled title=\"managed by a file in conf.d\"" : ""}>`
     + `<label class="check"><input type="checkbox" class="srv-pin"${pinned.has(n.id) ? " checked" : ""}> pin</label>`
     + `<label class="check"><input type="checkbox" class="srv-hide"${hidden.has(n.id) ? " checked" : ""}> hide</label>`
     + (n.local ? `<span class="local">this hub</span>` : `<button class="srv-revoke">revoke</button>`)
     + `</div>`).join("");
+  markManaged();
 }
 async function saveServer(row) {
   const body = { name: $(".srv-name", row).value,
@@ -1793,6 +1840,7 @@ function openSettings() {
   for (const [k, v] of Object.entries(units())) $("#cfg-u-" + k).value = v;
   renderServers();
   loadNodes().then(() => renderServers({ keep: true }));
+  markManaged();
   $("#acct-msg").textContent = "";
   $("#overlay").classList.add("open");
 }
@@ -1896,6 +1944,7 @@ function drawPanelCfg() {
       drawPanelFor();
     };
   });
+  markManaged();
 }
 
 function drawWeatherCfg() {

@@ -373,3 +373,24 @@ test("review: a cancelled import changes nothing; zone clocks stay 24 hour unles
   pageFn("fmtTime", { units: u("12h") })(new D(), "Asia/Kolkata");
   assert.deepStrictEqual(seen, [["en-GB", undefined], [undefined, undefined], [undefined, true]]);
 });
+
+test("conf.d values win over a copy saved in this browser, and their fields are marked managed", () => {
+  const DEFAULTS = { title: "file", units: { temp: "f", clock: "12h" }, panels: { mem: false }, _managed: ["title", "units.temp", "panels.mem", 5] };
+  const cfg = { title: "browser", units: { temp: "c", clock: "24h" }, panels: { mem: true, cpu: true } };
+  pageFn("applyManaged", { cfg, DEFAULTS, managedPaths: pageFn("managedPaths", { DEFAULTS }) })();
+  assert.deepStrictEqual(cfg, { title: "file", units: { temp: "f", clock: "24h" }, panels: { mem: false, cpu: true } });
+  DEFAULTS.units.temp = "c";
+  assert.strictEqual(cfg.units.temp, "f", "a copy, not the same object");
+  const sel = pageFn("managedSelector", {});
+  assert.strictEqual(sel("title"), "#cfg-name");
+  assert.strictEqual(sel("units.temp"), "#cfg-u-temp");
+  assert.strictEqual(sel("fleet.card"), "#cfg-f-card input");
+  assert.strictEqual(sel("panels.mem"), '#cfg-panels [data-p="mem"] [data-vis]');
+  assert.strictEqual(sel("panelSize.docker"), '#cfg-panels [data-p="docker"] [data-sz]');
+  assert.strictEqual(sel("style"), "#cfg-lookdefault");
+  assert.strictEqual(sel("nonsense"), null);
+  assert.match(HTML, /cfg = saved \? deepMerge\(structuredClone\(DEFAULTS\), saved\) : structuredClone\(DEFAULTS\);\n  applyManaged\(\);/);
+  const fn = (name) => HTML.slice(HTML.indexOf(`function ${name}(`), HTML.indexOf("\n}\n", HTML.indexOf(`function ${name}(`)));
+  assert.match(fn("renderServers"), /\(n\.managed \|\| \[\]\)\.includes\("tags"\) \? " disabled/, "file-managed tags cannot be edited");
+  assert.match(fn("openSettings"), /markManaged\(\);/);
+});
