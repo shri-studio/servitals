@@ -7,6 +7,10 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- Link a server by code on HTTPS hubs: `servitals-agent link https://hub`
+  prints a short code, a person approves it on the hub's `/link` page, and the
+  agent joins with a secret it made itself (RFC 8628 pattern).
+  `servitals-agent unlink` forgets the hub again.
 - Styles: phosphor, e-ink, high contrast, nord, gruvbox, dracula,
   catppuccin and solarized join classic and 8bit. Each loads only when chosen
   (at most 3 KB); text contrast is checked for every style and mode.

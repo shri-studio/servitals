@@ -60,6 +60,13 @@ These hold in every version. A change that breaks one needs its own review.
   end-to-end encrypted.
 - Cloudflare Bot Fight Mode can block agents that report through a tunnel.
   This is an availability issue documented in the tunnel guide.
+- Code-based linking can be abused by talking someone into approving a code
+  they did not start. The approval page shows the requesting host, system,
+  agent version and source address and says to approve only a code started
+  just now; the agent prints the account it joined, so a person tricked the
+  other way round (a code approved in someone else's account) sees the wrong
+  account and runs `servitals-agent unlink`. Codes are single use, valid 10
+  minutes, stored hashed, and rate limited per address and per account.
 
 ## Compromise and recovery
 

@@ -21,6 +21,29 @@ On the server (after `apt install servitals-agent`), run the printed line.
 `/etc/servitals/hub.env` when agents should use another address than the
 hub's host name, for example a tunnel hostname.
 
+### Or link with a short code (HTTPS hubs)
+
+When the hub is reachable over HTTPS (a tunnel, a reverse proxy with TLS, or
+Tailscale with `tailscale cert`), skip the copying. On the server:
+
+```bash
+sudo servitals-agent link https://dash.example.org
+#   Open https://dash.example.org/link and enter:  WXKP-4M7R
+#   Only enter this code on that site, in your own account.
+#   Waiting for approval... (expires in 10 min)
+```
+
+Open `/link` on the hub, log in, type the code, check the host name, system
+and address shown, pick a name and tags, and approve. The agent then tests
+a push, saves its credentials and starts:
+`Linked as "nas" to a***n on dash.example.org.` If that is not your hub,
+run `sudo servitals-agent unlink`.
+
+The server makes its own secret and sends it to the hub once, inside TLS.
+For that reason `link` refuses `http://` addresses (except this machine
+itself), and the hub refuses link requests that did not arrive over HTTPS.
+Plain-HTTP hubs on a LAN keep using `join`.
+
 ## Pick a setup
 
 | situation | what to do |
@@ -98,6 +121,8 @@ failing.
 | `bad secret: the hub does not know this node id` | the node was revoked, or the join line is for another hub | `servitals-ctl node list` on the hub |
 | `clock skew` | the server's clock is more than 2 minutes off | enable NTP: `timedatectl set-ntp true` |
 | `unsupported protocol` | the agent and hub versions do not share a protocol | update both packages |
+| `the hub only links over HTTPS` | `link` reached the hub over plain HTTP, or through a proxy that does not send `X-Forwarded-Proto: https` | use the `https://` address; check `TRUSTED_PROXIES`; or use `join` |
+| `the code expired (or the hub restarted)` | not approved within 10 minutes, or the hub restarted meanwhile | run `servitals-agent link` again |
 
 Protocol errors in the agent's log (`journalctl -u servitals-agent`):
 

@@ -1,6 +1,7 @@
 #!/bin/sh
 # Installed packages on a booted system: the hub and the local agent run under
-# their hardened units, the first password works, passwd ends old sessions,
+# their hardened units, the first password works, a second agent joins and a
+# third links by code, passwd ends old sessions,
 # and reconfiguring keeps the login and the node.
 set -eu
 B=http://127.0.0.1:20002
@@ -27,6 +28,19 @@ join=$(servitals-ctl node add second | sed -n 's/^ *sudo servitals-agent join //
 	|| fail "second agent could not join"
 wait_for "curl -fsS -b /tmp/jar $B/__ctl/nodes | jq -e 'map(select(.name == \"second\" and .status == \"online\")) | length == 1' >/dev/null" \
 	|| fail "second node not online in the fleet"
+
+# a third links by code (spec 6.1.1), over loopback, approved on /link as a person would
+CREDENTIALS_FILE=/tmp/third.env servitals-agent link --no-start "$B" > /tmp/link.out 2>&1 &
+linker=$!
+wait_for "grep -q 'enter:' /tmp/link.out" || { cat /tmp/link.out; fail "link printed no code"; }
+code=$(sed -n 's/.*enter: *//p' /tmp/link.out)
+curl -fsS -b /tmp/jar -H "Origin: $B" --data-urlencode step=decide --data-urlencode "code=$code" \
+	--data-urlencode action=approve --data-urlencode name=third "$B/link" | grep -q 'Linked "third"' \
+	|| fail "approving the code on /link"
+wait "$linker" || { cat /tmp/link.out; fail "servitals-agent link"; }
+grep -q '^ok$' /tmp/link.out || { cat /tmp/link.out; fail "the linked agent's test push"; }
+wait_for "curl -fsS -b /tmp/jar $B/__ctl/nodes | jq -e 'map(select(.name == \"third\" and .status == \"online\")) | length == 1' >/dev/null" \
+	|| fail "linked node not online in the fleet"
 
 printf 'another-pass-1\n' | servitals-ctl passwd --user owner
 [ "$(curl -s -o /dev/null -w '%{http_code}' -b /tmp/jar "$B/__ctl/whoami")" = 401 ] || fail "old session survived passwd"

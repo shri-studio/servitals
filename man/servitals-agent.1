@@ -7,8 +7,12 @@ servitals-agent \- metrics agent for the servitals dashboard
 .RB [ \-\-no\-start ]
 .I hub-url node-id:secret
 .br
+.B servitals-agent link
+.RB [ \-\-no\-start ]
+.I https://hub
+.br
 .B servitals-agent
-.RB { status | run | test }
+.RB { unlink | status | run | test }
 .br
 .B servitals-agent docker
 .RB { enable | disable }
@@ -32,6 +36,25 @@ or
 On success it writes the credentials file and starts the service
 .RB ( \-\-no\-start
 skips that).
+.TP
+.BI link " https://hub"
+Pair by code, without copying a secret. The agent makes its own secret,
+sends it to the hub once over HTTPS and prints a short code; open
+.I /link
+on the hub, log in, check what asks and approve. The agent then tests a
+push like
+.BR join ,
+saves the credentials, starts the service and prints the account it
+joined. Refuses
+.B http://
+addresses other than this machine; use
+.B join
+for plain-HTTP hubs.
+.TP
+.B unlink
+Remove the credentials file and stop and disable the service. The hub keeps
+listing the node until its admin runs
+.BR "servitals\-ctl node revoke" .
 .TP
 .B status
 Show the hub, the node id, the service state and the last push.

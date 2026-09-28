@@ -157,6 +157,10 @@ sudo servitals-ctl node add nas --tag home        # on the hub: prints a join co
 sudo servitals-agent join http://hub.lan:20002 <node-id>:<secret>   # on the server
 ```
 
+On an HTTPS hub (a tunnel or a reverse proxy with TLS) there is nothing to
+copy: run `sudo servitals-agent link https://dash.example.org` on the server,
+then open `/link` on the hub and type the short code it shows.
+
 With a second server the dashboard opens on the fleet grid: one card per
 server with its status lamp, CPU, memory, temperature, a CPU sparkline and
 the fullest disk. Click a card, or a tab, for that server's panels; `f`
