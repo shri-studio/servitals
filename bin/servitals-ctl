@@ -4,6 +4,7 @@
 #   servitals-ctl node add <name> [--tag T]...  add a server; prints the join command for it
 #   servitals-ctl node list            list servers (id, name, tags, last push)
 #   servitals-ctl node rename <id> <name> | node revoke <id>
+#   servitals-ctl node rotate <id|--all> new secrets; the old ones work for 24 hours
 #   servitals-ctl bans                 list blocked IPs and the whitelist
 #   servitals-ctl unban <ip>           remove a block (takes effect immediately)
 #   servitals-ctl whitelist <ip|cidr>  never block this address again (also unbans)
@@ -244,6 +245,29 @@ nodes_js() {  # run the node store CLI, then give the file back to the hub's use
   return "$rc"
 }
 
+# rotate one node's secret. The hub's own agent gets the new secret at once;
+# every other server needs the printed join line within 24 hours.
+rotate_node() {  # id
+  local id=$1 out secret is_local name creds="$ETC_DIR/agent-credentials.env"
+  out=$(nodes_js rotate "$id") || exit 1
+  secret=$(jq -r .secret <<< "$out")
+  is_local=$(nodes_js list | jq -r --arg id "$id" '.[] | select(.id == $id) | .local')
+  name=$(nodes_js list | jq -r --arg id "$id" '.[] | select(.id == $id) | .name')
+  if [ "$is_local" = true ]; then
+    if [ -f "$creds" ] && grep -qx "NODE_ID=$id" "$creds"; then
+      sed "s/^NODE_SECRET=.*/NODE_SECRET=$secret/" "$creds" | atomic_write "$creds"
+    fi
+    if [ -f "$DATA_DIR/local-agent.env" ]; then
+      sed "s/^NODE_SECRET=.*/NODE_SECRET=$secret/" "$DATA_DIR/local-agent.env" | atomic_write "$DATA_DIR/local-agent.env"
+    fi
+    "${SYSTEMCTL:-systemctl}" try-restart servitals-agent.service >/dev/null 2>&1 || true
+    echo "rotated \"$name\" ($id): the hub's own agent was updated"
+  else
+    echo "rotated \"$name\" ($id); the old secret keeps working for 24 hours. On that server run:"
+    echo "  sudo servitals-agent join $(hub_url) $id:$secret"
+  fi
+}
+
 cmd_node() {
   local sub=${1:-} out id at
   shift || true
@@ -278,7 +302,13 @@ cmd_node() {
       [ $# -eq 1 ] || die "usage: servitals-ctl node revoke <id>"
       nodes_js revoke "$1" >/dev/null && echo "revoked $1: its agent is refused from now on"
       ;;
-    *) die "usage: servitals-ctl node add|list|rename|revoke" ;;
+    rotate)
+      [ $# -eq 1 ] || die "usage: servitals-ctl node rotate <id|--all>"
+      local ids
+      if [ "$1" = --all ]; then ids=$(nodes_js list | jq -r '.[].id'); else ids=$1; fi
+      for id in $ids; do rotate_node "$id"; done
+      ;;
+    *) die "usage: servitals-ctl node add|list|rename|revoke|rotate" ;;
   esac
 }
 
@@ -299,5 +329,5 @@ case "${1:-}" in
   unban)         shift; cmd_unban "$@" ;;
   whitelist)     shift; cmd_whitelist "$@" ;;
   hash-password) shift; cmd_hash_password "$@" ;;
-  *) sed -n '3,16p' "$0" | sed 's/^# \{0,1\}//'; exit 1 ;;
+  *) sed -n '3,17p' "$0" | sed 's/^# \{0,1\}//'; exit 1 ;;
 esac

@@ -443,3 +443,37 @@ test("servitals-ctl config check reads ETC_DIR/conf.d and fails on a bad file", 
   assert.strictEqual(other.status, 1, "a directory can be named");
   assert.notStrictEqual(run("servitals-ctl", ["config"], {}).status, 0);
 });
+
+test("servitals-ctl node rotate prints new join lines; the hub's own agent is updated in place", () => {
+  const state = tmp(), etc = tmp();
+  fs.writeFileSync(path.join(etc, "hub.env"), "PUBLIC_URL=https://hub.example\n");
+  const node = (args) => JSON.parse(spawnSync(process.execPath, [path.join(__dirname, "..", "hub", "lib", "nodes.js"),
+    path.join(state, "nodes.json"), ...args], { encoding: "utf8" }).stdout);
+  const nas = node(["add", "nas"]);
+  // the hub's own node, as the hub creates it
+  const all = JSON.parse(fs.readFileSync(path.join(state, "nodes.json"), "utf8"));
+  all.localnodeid2 = { name: "hub", secret: "11".repeat(32), local: true, created: 1 };
+  fs.writeFileSync(path.join(state, "nodes.json"), JSON.stringify(all));
+  fs.writeFileSync(path.join(etc, "agent-credentials.env"), `HUB_URL=http://127.0.0.1:20002\nNODE_ID=localnodeid2\nNODE_SECRET=${"11".repeat(32)}\n`, { mode: 0o600 });
+  const calls = path.join(state, "calls");
+  const stub = path.join(state, "systemctl");
+  fs.writeFileSync(stub, `#!/bin/sh\necho "$@" >> ${calls}\n`, { mode: 0o755 });
+
+  let r = run("servitals-ctl", ["node", "rotate", nas.id], { STATE_DIR: state, ETC_DIR: etc, SYSTEMCTL: stub });
+  assert.strictEqual(r.status, 0, r.stderr);
+  const m = /sudo servitals-agent join https:\/\/hub\.example ([a-z2-7]{12}):([0-9a-f]{64})/.exec(r.stdout);
+  assert.ok(m && m[1] === nas.id && m[2] !== nas.secret, r.stdout);
+  assert.match(r.stdout, /old secret keeps working for 24 hours/);
+
+  r = run("servitals-ctl", ["node", "rotate", "--all"], { STATE_DIR: state, ETC_DIR: etc, SYSTEMCTL: stub });
+  assert.strictEqual(r.status, 0, r.stderr);
+  const creds = fs.readFileSync(path.join(etc, "agent-credentials.env"), "utf8");
+  const secret = /^NODE_SECRET=([0-9a-f]{64})$/m.exec(creds)[1];
+  assert.notStrictEqual(secret, "11".repeat(32));
+  assert.strictEqual(JSON.parse(fs.readFileSync(path.join(state, "nodes.json"), "utf8")).localnodeid2.secret, secret);
+  assert.strictEqual(fs.statSync(path.join(etc, "agent-credentials.env")).mode & 0o777, 0o600);
+  assert.match(fs.readFileSync(calls, "utf8"), /^try-restart servitals-agent\.service$/m);
+  assert.match(r.stdout, /the hub's own agent was updated/);
+  assert.strictEqual((r.stdout.match(/sudo servitals-agent join/g) || []).length, 1, "a join line for the remote node only");
+  assert.notStrictEqual(run("servitals-ctl", ["node", "rotate", "aaaaaaaaaaaa"], { STATE_DIR: state, ETC_DIR: etc, SYSTEMCTL: stub }).status, 0);
+});

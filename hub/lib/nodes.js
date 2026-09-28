@@ -104,7 +104,20 @@ function createNodeStore(file) {
     if (n.local) throw new Error("the local node cannot be revoked");
     n.revoked = true;
     n.secret = "";
+    delete n.oldSecret;
+    delete n.oldUntil;
   });
+  // a new secret; the old one keeps working for 24 hours (spec 17)
+  const OVERLAP_MS = 24 * 3600e3;
+  function rotate(id) {
+    const secret = crypto.randomBytes(32).toString("hex");
+    change(id, (n) => {
+      n.oldSecret = n.secret;
+      n.oldUntil = Date.now() + OVERLAP_MS;
+      n.secret = secret;
+    });
+    return { id, secret };
+  }
 
   // every node that is not revoked, without secrets
   function list() {
@@ -114,14 +127,14 @@ function createNodeStore(file) {
     }));
   }
 
-  return { get, localId, ensureLocal, check, add, rename, setTags, revoke, list, all: load };
+  return { get, localId, ensureLocal, check, add, rename, setTags, revoke, rotate, list, all: load };
 }
 
 const localAgentEnv = (hubUrl, id, secret) => `HUB_URL=${hubUrl}\nNODE_ID=${id}\nNODE_SECRET=${secret}\n`;
 
 module.exports = { createNodeStore, newNodeId, localAgentEnv };
 
-// CLI for servitals-ctl: node nodes.js <nodes.json> add <name> [tag...] | list | rename <id> <name> | revoke <id>
+// CLI for servitals-ctl: node nodes.js <nodes.json> add <name> [tag...] | list | rename <id> <name> | revoke <id> | rotate <id>
 if (require.main === module) {
   const [file, cmd, ...args] = process.argv.slice(2);
   try {
@@ -131,7 +144,8 @@ if (require.main === module) {
     else if (cmd === "list") out = store.list();
     else if (cmd === "rename") { store.rename(args[0], args[1]); out = { ok: true }; }
     else if (cmd === "revoke") { store.revoke(args[0]); out = { ok: true }; }
-    else throw new Error("usage: nodes.js <nodes.json> add|list|rename|revoke ...");
+    else if (cmd === "rotate") out = store.rotate(args[0]);
+    else throw new Error("usage: nodes.js <nodes.json> add|list|rename|revoke|rotate ...");
     process.stdout.write(JSON.stringify(out) + "\n");
   } catch (e) {
     process.stderr.write(`${e.message}\n`);

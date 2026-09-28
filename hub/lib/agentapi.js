@@ -149,7 +149,11 @@ function createAgentApi({ nodes, log, onSnapshot, maxBody = 256 * 1024, now = Da
     if (Number(h["content-length"] || 0) > maxBody) { req.resume(); return tooLarge(); }
     const body = await readLimited(req, maxBody);
     if (body === null) return tooLarge();
-    if (!verifyRequest(node.secret, req.method, pathname, tsRaw, body, h["x-servitals-sig"])) {
+    // after a rotation the old secret works for 24 hours; the reply is signed with the one that matched
+    const candidates = [node.secret];
+    if (node.oldSecret && Number(node.oldUntil) > hubMs) candidates.push(node.oldSecret);
+    const secret = candidates.find((s) => verifyRequest(s, req.method, pathname, tsRaw, body, h["x-servitals-sig"]));
+    if (!secret) {
       failed(who);
       log.warn("api.refused", { node: id, error: "bad_signature" });
       return fail(res, 401, "bad_signature");
@@ -168,13 +172,13 @@ function createAgentApi({ nodes, log, onSnapshot, maxBody = 256 * 1024, now = Da
       lastPush.set(id, hubMs);
       if (!seen.has(id)) { seen.add(id); log.info("api.first_push", { node: id }); }
       onSnapshot(id, checked.value);
-      return reply(res, 200, node.secret, tsRaw, { ok: true });
+      return reply(res, 200, secret, tsRaw, { ok: true });
     }
 
     acceptTs(key, ts);
     const prev = waiters.get(id);
     if (prev) finishWait(id, prev, 204);   // a reconnecting agent is never locked out
-    const w = { res, secret: node.secret, ts: tsRaw };
+    const w = { res, secret, ts: tsRaw };
     w.timer = setTimeout(() => finishWait(id, w, 204), clampWait(h["x-servitals-wait"]) * 1000);
     waiters.set(id, w);
     res.on("close", () => { clearTimeout(w.timer); if (waiters.get(id) === w) waiters.delete(id); });

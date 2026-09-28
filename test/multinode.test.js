@@ -202,3 +202,26 @@ test("conf.d review: entries by id and by name merge; saving settings never copi
   } finally { await hub.stop(); fs.rmSync(confd, { recursive: true, force: true }); }
 });
 
+test("after a rotation both secrets work for 24 hours, each answered with its own signature; then only the new one", async () => {
+  const hub = await startHub();
+  try {
+    const c = addNode(hub, "nas");
+    const nodesFile = path.join(hub.dataDir, "nodes.json");
+    const out = JSON.parse(execFileSync(process.execPath, [NODES_JS, nodesFile, "rotate", c.id]).toString());
+    const fresh = { id: c.id, secret: out.secret };
+    const { signReply } = require("../hub/lib/agentsig");
+    let r = await signed(hub, c, { body: snap() });
+    assert.strictEqual(r.status, 200, "the old secret, within 24 hours");
+    assert.strictEqual(r.headers["x-servitals-sig"], signReply(c.secret, r.ts, r.body), "answered with the old secret");
+    await sleep(5100);
+    r = await signed(hub, fresh, { body: snap() });
+    assert.strictEqual(r.status, 200, "the new secret");
+    assert.strictEqual(r.headers["x-servitals-sig"], signReply(fresh.secret, r.ts, r.body));
+    const all = JSON.parse(fs.readFileSync(nodesFile, "utf8"));
+    all[c.id].oldUntil = Date.now() - 1;
+    fs.writeFileSync(nodesFile, JSON.stringify(all));
+    await sleep(5100);
+    r = await signed(hub, c, { body: snap() });
+    assert.deepStrictEqual([r.status, JSON.parse(r.body).error], [401, "bad_signature"], "after 24 hours the old one is refused");
+  } finally { await hub.stop(); }
+});

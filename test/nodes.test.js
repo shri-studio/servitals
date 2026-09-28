@@ -80,3 +80,21 @@ test("a linked agent brings its own secret; add refuses a bad one and never over
   assert.throws(() => createNodeStore(g).add("nas"), /does not parse/);
   assert.strictEqual(fs.readFileSync(g, "utf8"), "{ half written");
 });
+
+test("rotate: a new secret, the old one kept for 24 hours; revoke drops both", () => {
+  const f = tmpfile();
+  const store = createNodeStore(f);
+  const { id, secret: first } = store.add("nas");
+  const before = Date.now();
+  const { secret } = store.rotate(id);
+  assert.match(secret, /^[0-9a-f]{64}$/);
+  assert.notStrictEqual(secret, first);
+  const n = store.get(id);
+  assert.deepStrictEqual([n.secret, n.oldSecret], [secret, first]);
+  assert.ok(n.oldUntil >= before + 24 * 3600e3 && n.oldUntil <= Date.now() + 24 * 3600e3);
+  assert.ok(!JSON.stringify(store.list()).includes(first), "never listed");
+  store.revoke(id);
+  const raw = JSON.parse(fs.readFileSync(f, "utf8"))[id];
+  assert.deepStrictEqual([raw.secret, raw.oldSecret], ["", undefined]);
+  assert.throws(() => store.rotate("aaaaaaaaaaaa"), /no node/);
+});
