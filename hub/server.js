@@ -30,6 +30,7 @@ const { createAgentApi } = require("./lib/agentapi");
 const { view: snapshotView } = require("./lib/snapshot");
 const fleet = require("./lib/fleet");
 const { createAdminStore, USER_RE } = require("./lib/admin");
+const { createLinks } = require("./lib/link");
 
 const UP        = process.env.UPSTREAM     || "";   // unset: serve WWW_DIR directly (native install)
 const WWW_DIR   = path.resolve(process.env.WWW_DIR || path.join(__dirname, "..", "www"));
@@ -271,7 +272,7 @@ async function checkPass(u, p) {
 }
 
 /* ---------- pages ---------- */
-const SHELL = (title, inner) => `<!DOCTYPE html><html><head><meta charset="utf-8">
+const SHELL = (title, inner, wide = false) => `<!DOCTYPE html><html><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${title}</title><style>
 :root{color-scheme:dark}
@@ -279,7 +280,7 @@ const SHELL = (title, inner) => `<!DOCTYPE html><html><head><meta charset="utf-8
 body{background:#090c11;color:#c3cddb;font-family:ui-monospace,'JetBrains Mono',Menlo,Consolas,monospace;
   font-size:13.5px;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px;
   -webkit-font-smoothing:antialiased}
-.box{border:1px solid #2b3440;background:#0e131b;max-width:380px;width:100%}
+.box{border:1px solid #2b3440;background:#0e131b;max-width:${wide ? 520 : 380}px;width:100%}
 .box h1{font-size:11.5px;letter-spacing:.14em;text-transform:uppercase;color:#8f9bad;
   padding:12px 16px;border-bottom:1px solid #2b3440}
 .box .body{padding:18px 16px}
@@ -293,6 +294,12 @@ button:hover{border-color:#7db2ff}
 .msg{margin-top:12px;font-size:12.5px}
 .err{color:#f57b72}.warn{color:#ecc05a}.ok{color:#74dd92}
 .foot{color:#8f9bad;font-size:11.5px;padding:10px 16px;border-top:1px solid #2b3440}
+code{color:#f2f5f9;word-break:break-all}
+a{color:#7db2ff}
+.kv{display:grid;grid-template-columns:90px 1fr;gap:6px 12px;margin:14px 0 4px}
+.kv dt{color:#8f9bad}.kv dd{color:#f2f5f9;word-break:break-all}
+.row2{display:flex;gap:10px}.row2 button{flex:1}
+button.deny{border-color:#7a3b37;color:#f57b72}button.deny:hover{border-color:#f57b72}
 </style></head><body><div class="box">${inner}</div></body></html>`;
 
 // a wall screen opened at /?kiosk keeps kiosk through the login (spec 10.3);
@@ -302,10 +309,13 @@ const kioskFromUrl = (url) => {
   const m = /[?&]kiosk(?:=([^&#]*))?(?:[&#]|$)/.exec(url || "");
   return m ? kioskValue(m[1] || "") : "";
 };
-const loginPage = (msg, kiosk = "") => SHELL(SITE + " · login", `
+// the login page can lead back to /link (and only there)
+const nextValue = (v) => (v === "link" ? "link" : "");
+const loginPage = (msg, kiosk = "", next = "") => SHELL(SITE + " · login", `
   <h1>${SITE} · authentication required</h1>
   <form class="body" method="POST" action="/__auth/login">
     ${kiosk ? `<input type="hidden" name="kiosk" value="${kiosk}">` : ""}
+    ${next ? `<input type="hidden" name="next" value="${next}">` : ""}
     <label>username</label><input name="username" autocomplete="username" autofocus>
     <label>password</label><input name="password" type="password" autocomplete="current-password">
     <button type="submit">login</button>
@@ -323,6 +333,137 @@ const bannedPage = (ip, b) => SHELL(SITE + " · blocked", `
     </div>
   </div>
   <div class="foot">admin: <code>servitals-ctl unban ${escHtml(ip)}</code></div>`);
+
+/* ---------- code-based linking (spec 6.1.1, protocol 5.3) ---------- */
+const links = createLinks();
+const LOOPBACK = new Set(["127.0.0.1", "::1", "::ffff:127.0.0.1"]);
+const lastValue = (v) => String(v || "").split(",").pop().trim().toLowerCase();
+// Stricter than requestIsHttps: the node secret crosses the network here, so this
+// connection itself must be TLS, or come from a trusted proxy that says https,
+// or come straight from this host. An https PUBLIC_URL alone is not enough.
+function linkTransportOk(req, client) {
+  if (req.socket && req.socket.encrypted) return true;
+  if (client.peerTrusted && req.headers["x-forwarded-proto"]) return lastValue(req.headers["x-forwarded-proto"]) === "https";
+  return LOOPBACK.has(req.socket && req.socket.remoteAddress) && !req.headers["x-forwarded-for"] && !req.headers[PROXY_HEADER];
+}
+// the address people type into a browser to reach this hub
+function publicBase(req, client) {
+  if (PUBLIC_URL) return PUBLIC_URL.replace(/\/+$/, "");
+  const host = String(req.headers.host || "").toLowerCase();
+  const https = (req.socket && req.socket.encrypted) || (client.peerTrusted && lastValue(req.headers["x-forwarded-proto"]) === "https");
+  return /^[a-z0-9.:[\]-]{1,255}$/.test(host) ? `${https ? "https" : "http"}://${host}` : "";
+}
+// what the agent prints after linking: "a***n on hub.example"
+function accountLabel(req, client) {
+  const u = creds().user;
+  const masked = u.length <= 2 ? u[0] + "***" : u[0] + "***" + u.slice(-1);
+  let host = "";
+  try { host = new URL(publicBase(req, client)).host; } catch (_) { /* no usable address */ }
+  return host ? `${masked} on ${host}` : masked;
+}
+
+async function handleLinkApi(req, res, client) {
+  const send = (code, o, extra = {}) => {
+    res.writeHead(code, { "content-type": "application/json", "cache-control": "no-store", ...extra });
+    res.end(JSON.stringify(o));
+  };
+  const pathname = (req.url || "").split("?")[0];
+  if (pathname !== "/api/v1/link/start" && pathname !== "/api/v1/link/poll") return send(404, { error: "not_found" });
+  if (req.method !== "POST") return send(405, { error: "method_not_allowed" }, { allow: "POST" });
+  if (!linkTransportOk(req, client)) return send(403, { error: "https_required" });
+  let body = null;
+  try { body = JSON.parse(await readBodyN(req, 2048)); } catch (_) { /* answered below */ }
+  if (!body || typeof body !== "object" || Array.isArray(body)) return send(400, { error: "invalid_request" });
+  if (pathname === "/api/v1/link/start") {
+    const r = links.start({ secret: body.secret, host: body.host, os: body.os, agent: body.agent, ip: client.ip });
+    if (r.status === 200) {
+      r.body.verify_url = publicBase(req, client) + "/link";
+      log.audit("link.started", { ip: client.ip, host: body.host });
+    }
+    return send(r.status, r.body, r.retryAfter ? { "retry-after": String(r.retryAfter) } : {});
+  }
+  const r = links.poll(body.device_code);
+  return send(r.status, r.body);
+}
+
+const linkPage = (inner) => SHELL(SITE + " · link a server", `<h1>${SITE} · link a server</h1>${inner}`, true);
+const linkCodeForm = (base, msg = "") => linkPage(`
+  <form class="body" method="POST" action="/link">
+    <input type="hidden" name="step" value="lookup">
+    <div class="msg">On the server, run <code>sudo servitals-agent link ${escHtml(base || "https://this-hub")}</code>
+      and type the code it shows.</div>
+    <label>code</label><input name="code" autocomplete="off" autofocus placeholder="XXXX-XXXX" maxlength="16">
+    <button type="submit">continue</button>
+    ${msg ? `<div class="msg err">${escHtml(msg)}</div>` : ""}
+  </form>
+  <div class="foot">only enter a code you started yourself, on your own server</div>`);
+const minutes = (ms) => Math.max(0, Math.round(ms / 60000));
+const linkAskForm = (q, msg = "") => linkPage(`
+  <form class="body" method="POST" action="/link">
+    <input type="hidden" name="step" value="decide">
+    <input type="hidden" name="code" value="${escHtml(q.code)}">
+    <div class="msg warn">A server asks to join this hub. Approve only if you ran
+      <code>servitals-agent link</code> on it just now.</div>
+    <dl class="kv">
+      <dt>host</dt><dd>${escHtml(q.host)}</dd>
+      <dt>system</dt><dd>${escHtml(q.os)} · agent ${escHtml(q.agent)}</dd>
+      <dt>from</dt><dd>${escHtml(q.ip || "unknown address")}</dd>
+      <dt>asked</dt><dd>${minutes(Date.now() - q.started)} min ago · expires in ${minutes(q.expires - Date.now())} min</dd>
+      <dt>code</dt><dd>${escHtml(q.code)}</dd>
+    </dl>
+    <label>name</label><input name="name" value="${escHtml(q.host)}" maxlength="64">
+    <label>tags (optional, comma separated)</label><input name="tags" placeholder="home, nas" maxlength="200">
+    <div class="row2">
+      <button type="submit" name="action" value="approve">approve</button>
+      <button type="submit" name="action" value="deny" class="deny">deny</button>
+    </div>
+    ${msg ? `<div class="msg err">${escHtml(msg)}</div>` : ""}
+  </form>`);
+const LINK_ERRORS = { unknown: "unknown or expired code", too_many: "too many codes tried: wait 10 minutes" };
+
+async function linkRoute(req, res, client) {
+  // never inside another site's frame: approving is one click
+  const html = (body) => {
+    res.writeHead(200, { "content-type": "text/html; charset=utf-8", "cache-control": "no-store",
+                         "x-frame-options": "DENY", "content-security-policy": "frame-ancestors 'none'" });
+    res.end(body);
+  };
+  const base = publicBase(req, client);
+  if (req.method !== "POST") return html(linkCodeForm(base));
+  const f = new URLSearchParams(await readBody(req));
+  const who = { ip: client.ip, account: creds().user };
+  const code = f.get("code") || "";
+  if (f.get("step") !== "decide") {
+    const q = links.lookup(code, who);
+    return html(q.ok ? linkAskForm(q.request) : linkCodeForm(base, LINK_ERRORS[q.error]));
+  }
+  if (f.get("action") === "deny") {
+    const d = links.decide(code, false, who);
+    if (!d.ok) return html(linkCodeForm(base, LINK_ERRORS[d.error]));
+    log.audit("link.denied", { ip: client.ip, host: d.host, from: d.from });
+    return html(linkPage(`<div class="body"><div class="msg">Denied. The server was told, and nothing was saved.</div>
+      <div class="msg"><a href="/">back to the dashboard</a></div></div>`));
+  }
+  const tags = (f.get("tags") || "").split(/[\s,]+/).filter(Boolean);
+  let name;
+  try { name = nodes.check(f.get("name") || "", tags); }
+  catch (e) {
+    const q = links.lookup(code, who);
+    return html(q.ok ? linkAskForm(q.request, e.message) : linkCodeForm(base, LINK_ERRORS[q.error]));
+  }
+  let d;
+  try {
+    d = links.decide(code, true, who, ({ secret }) => ({ node_id: nodes.add(name, tags, secret).id, account: accountLabel(req, client), name }));
+  } catch (e) {
+    log.error("link.save_failed", { error: e.message });
+    return html(linkCodeForm(base, "could not save the node: " + e.message));
+  }
+  if (!d.ok) return html(linkCodeForm(base, LINK_ERRORS[d.error]));
+  log.audit("link.approved", { ip: client.ip, node: d.result.node_id, name, from: d.from });
+  return html(linkPage(`<div class="body"><div class="msg ok">Linked "${escHtml(name)}".</div>
+    <div class="msg">The server shows up in the fleet within a few seconds.</div>
+    <div class="msg"><a href="/#fleet">open the fleet</a></div></div>`));
+}
 
 /* ---------- proxy ---------- */
 function proxy(req, res) {
@@ -404,6 +545,7 @@ const server = http.createServer((req, res) => {
 
 async function handle(req, res) {
   // agents authenticate with signatures, never cookies; browser bans do not apply
+  if ((req.url || "").startsWith("/api/v1/link/")) return handleLinkApi(req, res, resolveClient(req));
   if ((req.url || "").startsWith("/api/v1/")) return agentApi.handle(req, res);
 
   const client = resolveClient(req);
@@ -420,7 +562,8 @@ async function handle(req, res) {
 
   // CSRF: state-changing browser requests must come from our own origin
   const stateChange = req.method === "POST" && req.url && (
-    req.url === "/__auth/login" || req.url === "/__auth/logout" || req.url.startsWith("/__ctl/"));
+    req.url === "/__auth/login" || req.url === "/__auth/logout" || req.url.startsWith("/__ctl/") ||
+    req.url.split("?")[0] === "/link");
   if (stateChange && !originAllowed(req, { publicUrl: PUBLIC_URL, peerTrusted: client.peerTrusted })) {
     log.warn("auth.origin_refused", { ip, url: req.url, origin: req.headers.origin || "" });
     res.writeHead(403, { "content-type": "text/plain" });
@@ -434,12 +577,13 @@ async function handle(req, res) {
     const user = params.get("username") || "";
     const ok = await checkPass(user, params.get("password") || "");
     const kiosk = kioskValue(params.get("kiosk"));
+    const next = nextValue(params.get("next"));
     if (ok) {
       clearFails(ip);
       log.audit("auth.login_ok", { ip, user });
       res.writeHead(302, {
         "set-cookie": `sv_session=${makeCookie()}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${SESSION_HOURS * 3600}${secure}`,
-        location: kiosk ? `/?kiosk=${kiosk}` : "/",
+        location: next ? "/link" : kiosk ? `/?kiosk=${kiosk}` : "/",
       });
       return res.end();
     }
@@ -458,7 +602,7 @@ async function handle(req, res) {
       log.audit("auth.login_fail", { ip, user, whitelisted: true });
     }
     res.writeHead(401, { "content-type": "text/html" });
-    return res.end(loginPage(msg, kiosk));
+    return res.end(loginPage(msg, kiosk, next));
   }
 
   if (req.url === "/__auth/logout") {
@@ -470,6 +614,14 @@ async function handle(req, res) {
 
   const authed = validCookie(getCookie(req, "sv_session"));
   const pathname = (req.url || "/").split("?")[0];
+
+  // a person approves a linking server here (spec 6.1.1)
+  if (pathname === "/link") {
+    if (authed) return linkRoute(req, res, client);
+    if (req.method === "POST") { res.writeHead(401, { "content-type": "text/plain" }); return res.end("login required"); }
+    res.writeHead(200, { "content-type": "text/html" });
+    return res.end(loginPage(null, "", "link"));
+  }
 
   // dashboard settings: from the state dir, not www/ (the page falls back to its defaults)
   if (authed && req.method === "GET" && pathname === "/config.json") {
