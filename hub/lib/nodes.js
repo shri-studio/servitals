@@ -67,14 +67,22 @@ function createNodeStore(file) {
     return n;
   }
 
-  // a remote node: returns its id and secret (the secret is shown once, in the join string)
-  function add(name, tags = []) {
+  // throws with a message for the person when a name or tag is not allowed
+  function check(name, tags = []) {
     const clean = checkName(name);
     for (const t of tags) if (!TAG.test(t)) throw new Error(`tag "${t}": lowercase letters, digits, dot, dash, underscore`);
+    return clean;
+  }
+
+  // a remote node: returns its id and secret (the secret is shown once, in the join string).
+  // A linked agent brings its own secret (spec 6.1.1).
+  function add(name, tags = [], secret = crypto.randomBytes(32).toString("hex")) {
+    const clean = check(name, tags);
+    if (!/^[0-9a-f]{64}$/.test(secret)) throw new Error("secret: 64 hex characters");
     load();
+    if (unreadable) throw new Error(`${file} exists but does not parse; fix or remove it`);
     let id;
     do { id = newNodeId(); } while (nodes[id]);
-    const secret = crypto.randomBytes(32).toString("hex");
     nodes[id] = { name: clean, secret, local: false, created: Date.now(), tags };
     save();
     return { id, secret };
@@ -101,7 +109,7 @@ function createNodeStore(file) {
     }));
   }
 
-  return { get, localId, ensureLocal, add, rename, revoke, list, all: load };
+  return { get, localId, ensureLocal, check, add, rename, revoke, list, all: load };
 }
 
 const localAgentEnv = (hubUrl, id, secret) => `HUB_URL=${hubUrl}\nNODE_ID=${id}\nNODE_SECRET=${secret}\n`;

@@ -64,3 +64,19 @@ test("a nodes.json that does not parse is never overwritten", () => {
   assert.throws(() => createNodeStore(f).ensureLocal("h"), /does not parse/);
   assert.strictEqual(fs.readFileSync(f, "utf8"), before);
 });
+
+test("a linked agent brings its own secret; add refuses a bad one and never overwrites an unreadable file", () => {
+  const f = tmpfile();
+  const store = createNodeStore(f);
+  const secret = "ef".repeat(32);
+  const { id, secret: got } = store.add("nas", ["home"], secret);
+  assert.strictEqual(got, secret);
+  assert.strictEqual(store.get(id).secret, secret);
+  assert.throws(() => store.add("x", [], "short"), /secret: 64 hex characters/);
+  assert.throws(() => store.check("x", ["Bad Tag"]), /tag "Bad Tag"/);
+  assert.strictEqual(store.check("  nas  "), "nas");
+  const g = tmpfile();
+  fs.writeFileSync(g, "{ half written");
+  assert.throws(() => createNodeStore(g).add("nas"), /does not parse/);
+  assert.strictEqual(fs.readFileSync(g, "utf8"), "{ half written");
+});
