@@ -116,3 +116,16 @@ test("the package and install-local.sh create /etc/servitals/conf.d with a READM
   const example = /```json\n([\s\S]*?)\n```/.exec(readme)[1];
   assert.doesNotThrow(() => require("../hub/lib/confd").parseFile(example));
 });
+
+test("daily backups: a hardened oneshot service and a daily timer, shipped off", () => {
+  const svc = lines(read("debian/servitals.servitals-backup.service"));
+  for (const want of ["Type=oneshot", "ExecStart=/usr/bin/servitals-ctl backup --auto", "UMask=0077", "ProtectSystem=strict",
+                      "ReadWritePaths=-/var/lib/servitals/backups", "PrivateTmp=yes", "NoNewPrivileges=yes", "ProtectHome=yes"]) {
+    assert.ok(svc.includes(want), want);
+  }
+  assert.ok(svc.includes("SystemCallFilter=@system-service"));
+  const timer = lines(read("debian/servitals.servitals-backup.timer"));
+  for (const want of ["OnCalendar=daily", "Persistent=true", "WantedBy=timers.target"]) assert.ok(timer.includes(want), want);
+  assert.match(read("debian/rules"), /dh_installsystemd -pservitals --name=servitals-backup --no-enable --no-start/);
+  assert.match(read("packaging/install-local.sh"), /debian\/servitals\.servitals-backup\.service" "\$UNITS\/servitals-backup\.service"/);
+});

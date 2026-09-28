@@ -32,9 +32,9 @@ case "${1:-}" in
 esac
 
 if [ "${1:-}" = --uninstall ]; then
-  systemctl disable --now servitals-agent.service servitals.service 2>/dev/null || true
+  systemctl disable --now servitals-agent.service servitals.service servitals-backup.timer 2>/dev/null || true
   rm -rf "$SHARE" "$AGENT_LIB" "$UNITS/servitals.service.d" "$UNITS/servitals-agent.service.d"
-  rm -f "$UNITS/servitals.service" "$UNITS/servitals-agent.service" \
+  rm -f "$UNITS/servitals.service" "$UNITS/servitals-agent.service" "$UNITS/servitals-backup.service" "$UNITS/servitals-backup.timer" \
         /usr/bin/servitals-ctl /usr/bin/servitals-agent \
         /usr/lib/sysusers.d/servitals.conf /usr/lib/sysusers.d/servitals-agent.conf
   systemctl daemon-reload
@@ -117,6 +117,9 @@ fi
 # 6. units
 # the same units the package ships (debian/ is their only copy)
 install -m 644 "$SRC/debian/servitals.service" "$SRC/debian/servitals-agent.service" "$UNITS/"
+# daily backups: off until servitals-ctl backup enable
+install -m 644 "$SRC/debian/servitals.servitals-backup.service" "$UNITS/servitals-backup.service"
+install -m 644 "$SRC/debian/servitals.servitals-backup.timer" "$UNITS/servitals-backup.timer"
 systemctl daemon-reload
 systemctl enable servitals.service servitals-agent.service
 systemctl restart servitals.service

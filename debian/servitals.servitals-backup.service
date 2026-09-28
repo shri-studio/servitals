@@ -1,0 +1,31 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Daily backup of the hub's state (servitals-ctl backup enable turns on the timer).
+[Unit]
+Description=servitals daily backup of the hub's state
+Documentation=man:servitals-ctl(1)
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/servitals-ctl backup --auto
+UMask=0077
+ProtectSystem=strict
+ReadWritePaths=-/var/lib/servitals/backups
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+PrivateNetwork=yes
+NoNewPrivileges=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictSUIDSGID=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+RestrictAddressFamilies=AF_UNIX
+SystemCallArchitectures=native
+SystemCallFilter=@system-service

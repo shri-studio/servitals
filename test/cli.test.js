@@ -504,3 +504,106 @@ test("servitals-ctl rotate session-key: a new key, same owner and mode, the hub 
   } finally { await again.stop(); fs.rmSync(dataDir, { recursive: true, force: true }); }
   assert.notStrictEqual(run("servitals-ctl", ["rotate", "vapid"], { STATE_DIR: dataDir }).status, 0);
 });
+
+// a hub's state and /etc/servitals, as tests make them
+function hubFiles() {
+  const state = tmp(), etc = tmp();
+  fs.writeFileSync(path.join(state, "nodes.json"), '{"a":1}\n', { mode: 0o600 });
+  fs.writeFileSync(path.join(state, "admin.json"), '{"user":"admin"}\n', { mode: 0o600 });
+  fs.writeFileSync(path.join(state, "secret"), "ab".repeat(32), { mode: 0o600 });
+  fs.mkdirSync(path.join(state, "snapshots"));
+  fs.writeFileSync(path.join(state, "snapshots", "a.json"), "{}");
+  fs.mkdirSync(path.join(state, "backups"));
+  fs.writeFileSync(path.join(state, "backups", "old.tar.gz"), "x");
+  fs.writeFileSync(path.join(etc, "hub.env"), "PORT=20002\n");
+  fs.mkdirSync(path.join(etc, "conf.d"));
+  fs.writeFileSync(path.join(etc, "conf.d", "10-site.json"), '{"settings":{"title":"lab"}}');
+  const calls = path.join(tmp(), "calls");
+  const stub = path.join(path.dirname(calls), "systemctl");
+  fs.writeFileSync(stub, `#!/bin/sh\necho "$@" >> ${calls}\n`, { mode: 0o755 });
+  return { state, etc, calls, env: { STATE_DIR: state, ETC_DIR: etc, SYSTEMCTL: stub } };
+}
+const list = (file) => spawnSync("tar", ["-tzf", file], { encoding: "utf8" });
+
+test("backup: one private tar of the hub's state and /etc/servitals, never over an existing file", () => {
+  const h = hubFiles();
+  const out = path.join(tmp(), "hub.tar.gz");
+  const r = run("servitals-ctl", ["backup", out], h.env);
+  assert.strictEqual(r.status, 0, r.stderr);
+  assert.match(r.stdout, /^backup written: .*hub\.tar\.gz/m);
+  assert.strictEqual(fs.statSync(out).mode & 0o777, 0o600, "it holds the admin hash and node secrets");
+  const names = list(out).stdout.split("\n").map((n) => n.replace(/^\.\//, "")).filter(Boolean);
+  for (const n of ["manifest.json", "state/nodes.json", "state/admin.json", "state/secret", "state/snapshots/a.json", "etc/hub.env", "etc/conf.d/10-site.json"]) {
+    assert.ok(names.includes(n), n);
+  }
+  assert.ok(!names.some((n) => n.startsWith("state/backups")), "not the backups themselves");
+  const manifest = JSON.parse(spawnSync("tar", ["-xzOf", out, "./manifest.json"], { encoding: "utf8" }).stdout);
+  assert.strictEqual(manifest.format, 1);
+  assert.strictEqual(manifest.version, fs.readFileSync(path.join(__dirname, "..", "VERSION"), "utf8").trim());
+  assert.notStrictEqual(run("servitals-ctl", ["backup", out], h.env).status, 0, "an existing file is never replaced");
+});
+
+test("restore: stops the hub, keeps a copy of the current state, puts the backup back, starts the hub", () => {
+  const h = hubFiles();
+  const out = path.join(tmp(), "hub.tar.gz");
+  assert.strictEqual(run("servitals-ctl", ["backup", out], h.env).status, 0);
+  fs.writeFileSync(path.join(h.state, "nodes.json"), '{"changed":true}\n');
+  fs.writeFileSync(path.join(h.etc, "conf.d", "10-site.json"), '{"changed":true}');
+  let r = run("servitals-ctl", ["restore", out], h.env);
+  assert.strictEqual(r.status, 0, r.stderr);
+  assert.strictEqual(fs.readFileSync(path.join(h.state, "nodes.json"), "utf8"), '{"a":1}\n');
+  assert.strictEqual(fs.statSync(path.join(h.state, "nodes.json")).mode & 0o777, 0o600);
+  assert.ok(fs.existsSync(path.join(h.state, "backups", "old.tar.gz")), "earlier backups stay");
+  const kept = /the state before the restore is in (\S+)/.exec(r.stdout)[1];
+  assert.strictEqual(fs.readFileSync(path.join(kept, "nodes.json"), "utf8"), '{"changed":true}\n');
+  assert.strictEqual(fs.readFileSync(path.join(h.etc, "conf.d", "10-site.json"), "utf8"), '{"changed":true}', "/etc only with --etc");
+  assert.deepStrictEqual(fs.readFileSync(h.calls, "utf8").trim().split("\n"), ["stop servitals.service", "start servitals.service"]);
+  r = run("servitals-ctl", ["restore", "--etc", out], h.env);
+  assert.strictEqual(r.status, 0, r.stderr);
+  assert.strictEqual(fs.readFileSync(path.join(h.etc, "conf.d", "10-site.json"), "utf8"), '{"settings":{"title":"lab"}}');
+});
+
+test("an encrypted backup needs its passphrase; a wrong one or a newer version changes nothing", () => {
+  const h = hubFiles();
+  const out = path.join(tmp(), "hub.tar.gz.enc");
+  let r = run("servitals-ctl", ["backup", "--encrypt", out], { ...h.env, SERVITALS_BACKUP_PASSPHRASE: "correct horse" });
+  assert.strictEqual(r.status, 0, r.stderr);
+  assert.strictEqual(fs.readFileSync(out).subarray(0, 8).toString(), "Salted__");
+  assert.notStrictEqual(list(out).status, 0, "not readable without the passphrase");
+  fs.writeFileSync(path.join(h.state, "nodes.json"), '{"changed":true}\n');
+  r = run("servitals-ctl", ["restore", out], { ...h.env, SERVITALS_BACKUP_PASSPHRASE: "wrong" });
+  assert.strictEqual(r.status, 1);
+  assert.match(r.stderr, /wrong passphrase or a damaged file/);
+  assert.strictEqual(fs.readFileSync(path.join(h.state, "nodes.json"), "utf8"), '{"changed":true}\n');
+  assert.ok(!fs.existsSync(h.calls), "the hub was not stopped");
+  r = run("servitals-ctl", ["restore", out], { ...h.env, SERVITALS_BACKUP_PASSPHRASE: "correct horse" });
+  assert.strictEqual(r.status, 0, r.stderr);
+  assert.strictEqual(fs.readFileSync(path.join(h.state, "nodes.json"), "utf8"), '{"a":1}\n');
+
+  // a backup from a newer servitals
+  const staged = tmp();
+  fs.writeFileSync(path.join(staged, "manifest.json"), JSON.stringify({ format: 1, version: "99.0.0" }));
+  fs.mkdirSync(path.join(staged, "state"));
+  const newer = path.join(tmp(), "newer.tar.gz");
+  spawnSync("tar", ["-C", staged, "-czf", newer, "."]);
+  r = run("servitals-ctl", ["restore", newer], h.env);
+  assert.strictEqual(r.status, 1);
+  assert.match(r.stderr, /made by servitals 99\.0\.0, newer than this one/);
+});
+
+test("backup --auto keeps the 7 newest in the state dir; backup enable and disable switch the daily timer", () => {
+  const h = hubFiles();
+  fs.rmSync(path.join(h.state, "backups"), { recursive: true });
+  for (let i = 0; i < 9; i++) assert.strictEqual(run("servitals-ctl", ["backup", "--auto"], h.env).status, 0);
+  const kept = fs.readdirSync(path.join(h.state, "backups"));
+  assert.strictEqual(kept.length, 7);
+  assert.ok(kept.every((n) => /^servitals-\d{8}-\d{6}-\d+\.tar\.gz$/.test(n)), kept.join(" "));
+  assert.strictEqual(fs.statSync(path.join(h.state, "backups")).mode & 0o777, 0o700);
+  let r = run("servitals-ctl", ["backup", "enable"], h.env);
+  assert.strictEqual(r.status, 0, r.stderr);
+  assert.match(r.stdout, /daily backups on: 7 kept in .*backups/);
+  r = run("servitals-ctl", ["backup", "disable"], h.env);
+  assert.strictEqual(r.status, 0, r.stderr);
+  assert.deepStrictEqual(fs.readFileSync(h.calls, "utf8").trim().split("\n"),
+    ["enable --now servitals-backup.timer", "disable --now servitals-backup.timer"]);
+});
