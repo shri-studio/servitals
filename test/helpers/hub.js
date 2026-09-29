@@ -50,7 +50,8 @@ async function waitForHealth(port, logs) {
   for (let i = 0; i < 100; i++) {
     try {
       const r = await request(port, { path: "/__auth/health" });
-      if (r.status === 200) return;
+      // the gateway's own answer: a fake upstream on this port would answer 200 too
+      if (r.status === 200 && r.body === "ok") return;
     } catch (_) { /* not listening yet */ }
     await new Promise((r) => setTimeout(r, 100));
   }
@@ -71,9 +72,10 @@ function baseEnv(port, dataDir, upstreamPort) {
 }
 
 async function startHub(env = {}, { dataDir: keepDir, port: fixedPort } = {}) {
+  // the upstream first: a port freePort() just released can go to the next listen(0)
+  const upstream = await startUpstream();
   const port = fixedPort || await freePort();
   const dataDir = keepDir || fs.mkdtempSync(path.join(os.tmpdir(), "sv-hub-"));
-  const upstream = await startUpstream();
   const child = spawn(process.execPath, [SERVER], {
     env: { ...baseEnv(port, dataDir, upstream.address().port), ...env },
     stdio: ["ignore", "pipe", "pipe"],
