@@ -65,6 +65,12 @@ All notable changes to this project are documented here. The format follows
   headline. `servitals-agent` suggests `lm-sensors`.
 
 ### Security
+- The dashboard runs under a strict Content-Security-Policy (spec 10.5): no
+  inline script, no inline styles, only the hub itself and the weather service
+  (`api.open-meteo.com`, `geocoding-api.open-meteo.com`). The page is now
+  `index.html` (markup), `app.css`, `boot.js` and `js/app.js`; the settings
+  panel (`js/settings.js`) loads when first opened. Login, ban and `/link`
+  pages run no script at all. Docker's nginx sends the same policy.
 - An address that keeps failing agent authentication gets `429` for a
   minute. The last accepted request time per node survives a hub restart,
   so captured requests cannot be replayed after it.

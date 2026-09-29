@@ -23,8 +23,10 @@ while IFS= read -r f; do
 done < <(git ls-files '*package.json')
 check "runtime dependencies" "$deps" 0 "packages"
 
-# 2. first page load, gzipped, fonts excluded
-page=$(gzip -9 -c www/index.html | wc -c)
+# 2. first page load, gzipped, fonts excluded: the markup, the stylesheet and the
+#    scripts that load with it (js/settings.js and the styles load later)
+page=$(( $(gzip -9 -c www/index.html | wc -c) + $(gzip -9 -c www/app.css | wc -c) \
+       + $(gzip -9 -c www/boot.js | wc -c) + $(gzip -9 -c www/js/app.js | wc -c) ))
 check "first page load (gzip, no fonts)" "$page" 61440 "bytes"
 
 # 2b. every optional style, gzipped (spec 18: at most 3 KB each)

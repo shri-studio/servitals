@@ -48,6 +48,16 @@ These hold in every version. A change that breaks one needs its own review.
 | release pipeline | supply chain | malicious package | GPG signing key only in CI secrets; signed `SHA256SUMS`; GitHub Actions pinned by commit; zero dependencies |
 | user privacy (hosted) | operator, breach | exposure of infrastructure details | latest snapshot plus capped history only; no analytics; IPs kept 30 days; inactive accounts deleted |
 
+## Browser hardening
+
+The dashboard is served with a strict Content-Security-Policy: scripts,
+styles, fonts and images only from the hub (plus `data:` images for the
+favicon), network requests only to the hub and the weather service, no inline
+script or style, no framing, no `<base>`, forms only to the hub. Anything a
+server reports reaches the page as text; even a markup injection could not run
+script or load anything from elsewhere. The login, ban and `/link` pages run no
+script at all (`default-src 'none'`).
+
 ## Known and accepted risks
 
 - Metrics sent over plain HTTP on a LAN can be read by anyone on that LAN.
