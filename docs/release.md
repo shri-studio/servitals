@@ -4,6 +4,8 @@
    `CHANGELOG.md` under `## [0.2.0] - <date>`, and add a `debian/changelog`
    entry `servitals (0.2.0-1) resolute; urgency=medium` (`dch -v 0.2.0-1`).
    `test/version.test.js` checks that `VERSION` and `debian/changelog` agree.
+   Set the same version in `www/sw.js` (`const VERSION`), so installed apps
+   replace their offline copy; `test/pwa.test.js` checks it.
 2. `packaging/build-deb.sh && packaging/autopkgtest.sh`: both series build,
    lintian is clean, the autopkgtests pass.
 3. Commit, tag `v0.2.0`, push the branch and the tag.

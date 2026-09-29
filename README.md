@@ -152,6 +152,15 @@ them as "managed by file". A file with a mistake is skipped whole and logged.
 within a few seconds. `/etc/servitals/conf.d/README` has an example and every
 allowed value. Docker installs: mount a directory and set `CONFD_DIR`.
 
+## On your phone
+
+Over HTTPS (a tunnel, a reverse proxy with TLS, or Tailscale with a
+certificate; browsers allow it on nothing else but the machine itself), open the dashboard in the phone's browser and choose "Install"
+or "Add to Home Screen": servitals opens full screen like an app. When the hub
+cannot be reached it still opens, from its last copy, and shows that it is
+offline. Settings and data always come live from the hub; logging out removes
+the copy.
+
 ## Backups and rotation
 
 ```bash

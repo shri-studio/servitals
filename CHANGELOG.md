@@ -7,6 +7,10 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- Install servitals on a phone or desktop (spec 10.3): a web app manifest,
+  icons and a service worker that keeps an offline copy of the page (network
+  first; data and API answers are never cached). Over HTTPS (or on the hub
+  itself) only; logging out removes the copy.
 - Backups and rotation (spec 17): `servitals-ctl backup [--encrypt]`,
   `restore [--etc]` (stops and starts the hub, keeps the state it replaces),
   daily backups on a timer (`backup enable`, 7 kept), `node rotate <id|--all>`

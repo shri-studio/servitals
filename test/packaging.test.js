@@ -151,3 +151,12 @@ test("Docker's nginx sends the same policy as the hub", () => {
   const { PAGE_CSP } = require("../hub/lib/static");
   assert.ok(read("nginx.conf").includes(`add_header Content-Security-Policy "${PAGE_CSP}" always;`));
 });
+
+test("the installable app's files ship (package and install-local)", () => {
+  const inst = read("debian/servitals.install");
+  assert.match(inst, /^www\/manifest\.webmanifest www\/sw\.js usr\/share\/servitals\/www\/$/m);
+  assert.match(inst, /^www\/icons\/\*\.png usr\/share\/servitals\/www\/icons\/$/m);
+  assert.match(read("packaging/install-local.sh"), /"\$SRC\/www\/manifest\.webmanifest" "\$SRC\/www\/sw\.js"/);
+  assert.match(read("packaging/install-local.sh"), /cp -r "\$SRC\/www\/icons" "\$SHARE\/www\/icons"/);
+  assert.match(read("docs/release.md"), /www\/sw\.js/);
+});
