@@ -6,7 +6,8 @@ const fs = require("node:fs");
 const path = require("node:path");
 
 const ROOT = path.join(__dirname, "..");
-const FILES = ["hub/server.js", "agent/collect.sh", "www/index.html", "docker-compose.example.yml", ".env.example", "README.md"];
+const FILES = ["hub/server.js", "agent/collect.sh", "www/index.html", "www/boot.js", "www/js/app.js", "www/js/settings.js",
+               "docker-compose.example.yml", ".env.example", "README.md"];
 
 test("old names only remain on lines marked legacy-name", () => {
   for (const f of FILES) {

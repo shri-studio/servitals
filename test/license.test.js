@@ -16,9 +16,9 @@ test("LICENSE is the AGPL v3 and font licenses are present", () => {
 });
 
 test("every tracked source file carries an SPDX identifier", () => {
-  const files = execFileSync("git", ["ls-files", "hub", "agent", "bin", "test", "www/index.html",
+  const files = execFileSync("git", ["ls-files", "hub", "agent", "bin", "test", "www/index.html", "www/app.css", "www/boot.js", "www/js",
     "docker-compose.example.yml", "nginx.conf"], { cwd: ROOT }).toString().split("\n").filter(Boolean);
-  const missing = files.filter((f) => /\.(js|sh|html|yml|conf)$|Dockerfile$|^bin\//.test(f))
+  const missing = files.filter((f) => /\.(js|css|sh|html|yml|conf)$|Dockerfile$|^bin\//.test(f))
     .filter((f) => !fs.readFileSync(path.join(ROOT, f), "utf8").split("\n").slice(0, 5)
       .some((l) => l.includes("SPDX-License-Identifier: AGPL-3.0-or-later")));
   assert.deepStrictEqual(missing, []);

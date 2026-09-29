@@ -2,6 +2,8 @@ hub/server.js usr/share/servitals/hub/
 hub/lib/*.js usr/share/servitals/hub/lib/
 VERSION usr/share/servitals/
 www/index.html usr/share/servitals/www/
+www/app.css www/boot.js usr/share/servitals/www/
+www/js/*.js usr/share/servitals/www/js/
 www/config.example.json usr/share/servitals/www/
 www/fonts/*.woff2 usr/share/servitals/www/fonts/
 www/styles/*.css usr/share/servitals/www/styles/

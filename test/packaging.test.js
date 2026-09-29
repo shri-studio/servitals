@@ -138,3 +138,11 @@ test("review: the backup unit has the hub's hardening and makes its directory", 
   }
   assert.match(read("debian/tests/smoke"), /for u in servitals servitals-agent servitals-backup; do/);
 });
+
+test("the page's files ship: app.css, boot.js and js/*.js (package and install-local)", () => {
+  const inst = read("debian/servitals.install");
+  assert.match(inst, /^www\/app\.css www\/boot\.js usr\/share\/servitals\/www\/$/m);
+  assert.match(inst, /^www\/js\/\*\.js usr\/share\/servitals\/www\/js\/$/m);
+  assert.match(read("packaging/install-local.sh"), /"\$SRC\/www\/app\.css" "\$SRC\/www\/boot\.js"/);
+  assert.match(read("packaging/install-local.sh"), /cp -r "\$SRC\/www\/js" "\$SHARE\/www\/js"/);
+});

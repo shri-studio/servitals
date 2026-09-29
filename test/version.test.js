@@ -53,7 +53,7 @@ test("version is shown after login only", async () => {
 });
 
 test("dashboard has the branding footer and the update notice", () => {
-  const html = fs.readFileSync(path.join(ROOT, "www", "index.html"), "utf8");
+  const html = require("./helpers/page").PAGE;   // markup, stylesheet and scripts
   for (const id of ["brandfoot", "sv-version", "updnote", "updver", "upddismiss"]) {
     assert.ok(html.includes(`id="${id}"`), `missing #${id}`);
   }

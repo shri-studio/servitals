@@ -5,12 +5,13 @@ const assert = require("node:assert");
 const fs = require("node:fs");
 const path = require("node:path");
 
-const HTML = fs.readFileSync(path.join(__dirname, "..", "www", "index.html"), "utf8");
+// the page's markup, stylesheet, boot script and scripts, in load order
+const { PAGE: HTML, BOOT, JS } = require("./helpers/page");
 
 // pull one top-level function out of the page's script and run it here
 function pageFunction(name) {
   const m = new RegExp(`^function ${name}\\([^)]*\\) \\{[\\s\\S]*?^\\}`, "m").exec(HTML);
-  assert.ok(m, `function ${name} not found in www/index.html`);
+  assert.ok(m, `function ${name} not found in the page`);
   return new Function(`${m[0]}; return ${name};`)();
 }
 
@@ -84,7 +85,7 @@ test("the node tabs sit at the top, above the header", () => {
 });
 
 test("style, mode, density and kiosk are applied before the first paint", () => {
-  const head = HTML.slice(0, HTML.indexOf("<style>"));
+  const head = BOOT;   // runs in <head>, before the stylesheet and the scripts
   assert.match(head, /localStorage\.getItem\("servitals\." \+ k\)/);
   assert.match(head, /\/\^\[a-z0-9-\]\{1,32\}\$\/\.test\(style\)/, "only a plain style name reaches the link");
   assert.match(head, /d\.setAttribute\("data-kiosk", ""\)/);
@@ -107,7 +108,7 @@ test("the settings panel sets style, mode, density and kiosk", () => {
 
 // runs the early <head> script against a fake document, as a browser would
 function early({ search = "", stored = {} } = {}) {
-  const src = HTML.slice(HTML.indexOf("<script>") + 8, HTML.indexOf("</script>"));
+  const src = BOOT;
   const attrs = {}; const written = [];
   const document = {
     documentElement: { setAttribute: (k, v) => { attrs[k] = v; } },
@@ -236,7 +237,7 @@ test("units: temperature, sizes, network rates and the clock follow the settings
 });
 
 test("every temperature and time on the page goes through the unit helpers", () => {
-  const script = HTML.slice(HTML.indexOf('<script>\n"use strict"')).replace(/function (tempUnit|fmtTemp)\([\s\S]*?\n}\n/g, "");
+  const script = JS.replace(/function (tempUnit|fmtTemp)\([\s\S]*?\n}\n/g, "");
   assert.doesNotMatch(script, /\+ "°"|\}°|°C"/, "no hand-made degree signs");
   assert.doesNotMatch(script.replace(/function fmtTime[\s\S]*?\n}\n/, ""), /toLocaleTimeString\(/, "times through fmtTime");
   for (const id of ["cfg-u-temp", "cfg-u-size", "cfg-u-rate", "cfg-u-clock"]) assert.ok(HTML.includes(`id="${id}"`), id);
@@ -359,7 +360,7 @@ test("review: revoking the shown server moves the page on; settings rows keep wh
   const state = pageFn("readServersForm", { $, $$ })();
   assert.deepStrictEqual(state, { sort: "cpu", group: true, card: ["disk"], pinned: ["aaaaaaaaaaaa"], hidden: ["bbbbbbbbbbbb"],
     names: { aaaaaaaaaaaa: { name: "nas2", tags: "x" }, bbbbbbbbbbbb: { name: "b", tags: "" } } });
-  assert.match(fn("openSettings"), /loadNodes\(\)\.then\(\(\) => renderServers\(\{ keep: true \}\)\)/);
+  assert.match(fn("showSettings"), /loadNodes\(\)\.then\(\(\) => renderServers\(\{ keep: true \}\)\)/);
 });
 
 test("review: a cancelled import changes nothing; zone clocks stay 24 hour unless asked", () => {
@@ -393,7 +394,7 @@ test("conf.d values win over a copy saved in this browser, and their fields are 
   assert.match(HTML, /cfg = saved \? deepMerge\(structuredClone\(DEFAULTS\), saved\) : structuredClone\(DEFAULTS\);\n  applyManaged\(\);/);
   const fn = (name) => HTML.slice(HTML.indexOf(`function ${name}(`), HTML.indexOf("\n}\n", HTML.indexOf(`function ${name}(`)));
   assert.match(fn("renderServers"), /\(n\.managed \|\| \[\]\)\.includes\("tags"\) \? " disabled/, "file-managed tags cannot be edited");
-  assert.match(fn("openSettings"), /markManaged\(\);/);
+  assert.match(fn("showSettings"), /markManaged\(\);/);
 });
 
 test("conf.d review: a file with a few panels keeps the built-in panel list and sizes (fresh hub)", async () => {
@@ -428,4 +429,3 @@ test("conf.d review: the page never sends a managed field, never drags a managed
   markManaged();
   assert.deepStrictEqual(disabled, ["title"], "a server's own panel set is not what files set");
 });
-

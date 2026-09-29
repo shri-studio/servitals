@@ -13,7 +13,8 @@ const path = require("node:path");
 const zlib = require("node:zlib");
 
 const WWW = path.join(__dirname, "..", "www");
-const HTML = fs.readFileSync(path.join(WWW, "index.html"), "utf8");
+// classic's tokens are in app.css, the registry in js/app.js
+const { PAGE: HTML } = require("./helpers/page");
 const TOKENS = ["bg", "bg-panel", "border", "dim", "fg", "fg-bright", "green", "cyan", "amber", "red",
                 "magenta", "blue", "track", "spark", "shadow", "glow"];
 const STATUS = ["green", "amber", "red", "blue", "cyan", "magenta"];
