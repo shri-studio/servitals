@@ -398,7 +398,8 @@ test("conf.d values win over a copy saved in this browser, and their fields are 
   assert.strictEqual(sel("nonsense"), null);
   assert.match(HTML, /cfg = saved \? deepMerge\(structuredClone\(DEFAULTS\), saved\) : structuredClone\(DEFAULTS\);\n  applyManaged\(\);/);
   const fn = (name) => HTML.slice(HTML.indexOf(`function ${name}(`), HTML.indexOf("\n}\n", HTML.indexOf(`function ${name}(`)));
-  assert.match(fn("renderServers"), /\(n\.managed \|\| \[\]\)\.includes\("tags"\) \? " disabled/, "file-managed tags cannot be edited");
+  assert.match(fn("renderServers"), /const byFile = ` disabled title=/);
+  assert.match(fn("renderServers"), /\(n\.managed \|\| \[\]\)\.includes\("tags"\) \? byFile/, "file-managed tags cannot be edited");
   assert.match(fn("showSettings"), /markManaged\(\);/);
 });
 

@@ -191,7 +191,11 @@ function markManaged() {
       el.disabled = true;
       el.title = note;
       const box = el.closest(".field, .check, .pcf");
-      if (box) box.classList.add("managed");
+      if (!box) continue;
+      box.classList.add("managed");
+      // shown after the caption by the stylesheet (content: attr(data-managed))
+      const caption = box.matches(".field") ? box.querySelector("span") : box;
+      if (caption) caption.dataset.managed = tr("set.managedShort");
     }
   }
 }
@@ -264,6 +268,7 @@ const STYLES = [
   { id: "nord", group: "palette" }, { id: "gruvbox", group: "palette" }, { id: "dracula", group: "palette" },
   { id: "catppuccin", group: "palette" }, { id: "solarized", group: "palette" },
 ];
+const STYLE_GROUPS = ["v1", "access", "palette"];   // named styles.<group> in the dictionary
 const MODES = ["system", "light", "dark"];
 const DENSITIES = ["compact", "comfortable", "large"];
 
@@ -491,7 +496,7 @@ function fleetCard(n) {
     : n.status === "waiting" ? esc(tr("fleet.waiting")) : `${esc(tr("fleet.state." + n.status))} · ${esc(ago)}`;
   const cont = s.containers ? esc(tr("svc.up", { running: s.running, total: s.containers })) : "";
   return `<div class="panel ncard ${esc(n.status)}" data-node="${esc(n.id)}">`
-    + `<div class="nhead"><span class="lamp ${esc(n.status)}"></span>${esc(n.name)}</div>`
+    + `<div class="nhead" data-state="${esc(tr("fleet.state." + n.status))}"><span class="lamp ${esc(n.status)}"></span>${esc(n.name)}</div>`
     + `<div class="kv">${cardNumbers().map(k => `<span><small>${esc(tr("card." + k))}</small>${cardValue(k, s)}</span>`).join("")}</div>`
     + `<div class="sparkmini">${sparkSvg(s.trend || [])}</div>`
     + (disk ? meter(disk.pct, dcls) : "")

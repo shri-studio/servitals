@@ -172,3 +172,21 @@ test("the check above catches words written straight into the page", () => {
   ];
   for (const g of good) assert.deepStrictEqual(wordsOutsideTr(g), [], g);
 });
+
+test("settings.js puts no words on the page except through tr()", () => {
+  assert.deepStrictEqual(wordsOutsideTr(read("js/settings.js")), []);
+});
+
+test("what the stylesheets add after a caption or a card name is set from the dictionary", () => {
+  assert.match(JS, /if \(caption\) caption\.dataset\.managed = tr\("set\.managedShort"\);/);
+  assert.match(JS, /<div class="nhead" data-state="\$\{esc\(tr\("fleet\.state\." \+ n\.status\)\)\}">/);
+});
+
+test("the stylesheets show no words of their own: what they add comes from the page (attr())", () => {
+  const files = ["app.css", ...fs.readdirSync(path.join(WWW, "styles")).map((f) => "styles/" + f)];
+  for (const f of files) {
+    for (const [, v] of read(f).matchAll(/(?<![\w-])content:\s*([^;}]+)/g)) {
+      assert.ok(!/[A-Za-z]{2}/.test(v.replace(/attr\([\w-]+\)/g, "")), `${f}: content: ${v}`);
+    }
+  }
+});

@@ -184,7 +184,7 @@ a:hover { text-decoration: underline; }
 .srv input[type=text] { flex: 1 1 140px; min-width: 0; }
 .srv .local { color: var(--dim); font-size: 11px; }
 .modal .managed { opacity: .8; }
-.modal .field.managed > span::after, .modal .check.managed::after { content: " · managed by file"; color: var(--dim); }
+.modal .field.managed > span::after, .modal .check.managed::after { content: " · " attr(data-managed); color: var(--dim); }
 .ncard .kv small { display: block; color: var(--dim); font-size: 10px; letter-spacing: .1em; text-transform: uppercase; }
 .ncard .foot { display: flex; justify-content: space-between; gap: 6px; color: var(--dim); font-size: 12px; }
 .ncard.stale, .ncard.offline, .ncard.waiting { opacity: .62; }

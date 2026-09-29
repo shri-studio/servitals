@@ -13,10 +13,10 @@ const COMMON_TZ = ["UTC",
 
 // settings import: an exported file back in, known settings only, each of the right kind
 function importSettings(text) {
-  if (typeof text !== "string" || text.length > 512 * 1024) return { ok: false, error: "the file is empty or larger than 512 KB" };
+  if (typeof text !== "string" || text.length > 512 * 1024) return { ok: false, error: tr("set.importBig") };
   let obj;
-  try { obj = JSON.parse(text); } catch (e) { return { ok: false, error: "that is not a JSON file" }; }
-  if (!obj || typeof obj !== "object" || Array.isArray(obj)) return { ok: false, error: "that is not a servitals settings file" };
+  try { obj = JSON.parse(text); } catch (e) { return { ok: false, error: tr("set.importNotJson") }; }
+  if (!obj || typeof obj !== "object" || Array.isArray(obj)) return { ok: false, error: tr("set.importNotSettings") };
   const kinds = { title: "string", favicon: "string", portainerUrl: "string", style: "string", mode: "string",
                   density: "string", refreshSec: "number", kioskSec: "number", kiosk: "boolean", portainerEndpoint: "number",
                   weather: "array", clocks: "array", panelOrder: "array",
@@ -36,7 +36,7 @@ function importSettings(text) {
   const out = {}, skipped = [];
   for (const [k, v] of Object.entries(obj)) {
     if (!Object.prototype.hasOwnProperty.call(kinds, k)) { skipped.push(k); continue; }
-    if (kindOf(v) !== kinds[k]) return { ok: false, error: `"${k}" should be ${kinds[k] === "array" ? "a list" : "a " + kinds[k]}` };
+    if (kindOf(v) !== kinds[k]) return { ok: false, error: tr("set.importKind", { key: k, kind: tr("set.kind." + kinds[k]) }) };
     out[k] = clean[k] ? clean[k](v) : kinds[k] === "object" ? plain(v) : v;
   }
   return { ok: true, cfg: out, skipped };
@@ -61,19 +61,20 @@ function renderServers({ keep = false } = {}) {
   const list = v => (Array.isArray(v) ? v : []);
   $("#cfg-f-sort").value = f.sort || "name";
   $("#cfg-f-group").checked = !!f.group;
-  const cards = list(f.card), names = { mem: "memory", temp: "temperature", disk: "fullest disk" };
-  $("#cfg-f-card").innerHTML = Object.keys(CARD_LABEL).map(k => `<label class="check"><input type="checkbox" value="${k}"`
-    + `${cards.includes(k) ? " checked" : ""}> ${names[k] || k}</label>`).join("");
+  const cards = list(f.card);
+  $("#cfg-f-card").innerHTML = CARD_KEYS.map(k => `<label class="check"><input type="checkbox" value="${k}"`
+    + `${cards.includes(k) ? " checked" : ""}> <span>${esc(tr("set.card." + k))}</span></label>`).join("");
   const pinned = new Set(list(f.pinned)), hidden = new Set(list(f.hidden));
   const typed = (n, k, saved) => (f.names[n.id] ? f.names[n.id][k] : saved);
+  const byFile = ` disabled title="${esc(tr("set.managedName"))}"`;
   $("#cfg-servers").innerHTML = fleetNodes.map(n => `<div class="srv" data-id="${esc(n.id)}" data-managed="${esc((n.managed || []).join(" "))}">`
-    + `<input type="text" class="srv-name" value="${esc(typed(n, "name", n.name))}" maxlength="64" aria-label="name of ${esc(n.name)}"`
-    + `${(n.managed || []).includes("name") ? " disabled title=\"managed by a file in conf.d\"" : ""}>`
-    + `<input type="text" class="srv-tags" value="${esc(typed(n, "tags", (n.tags || []).join(", ")))}" placeholder="tags" aria-label="tags of ${esc(n.name)}"`
-    + `${(n.managed || []).includes("tags") ? " disabled title=\"managed by a file in conf.d\"" : ""}>`
-    + `<label class="check"><input type="checkbox" class="srv-pin"${pinned.has(n.id) ? " checked" : ""}> pin</label>`
-    + `<label class="check"><input type="checkbox" class="srv-hide"${hidden.has(n.id) ? " checked" : ""}> hide</label>`
-    + (n.local ? `<span class="local">this hub</span>` : `<button class="srv-revoke">revoke</button>`)
+    + `<input type="text" class="srv-name" value="${esc(typed(n, "name", n.name))}" maxlength="64" aria-label="${esc(tr("set.srvName", { name: n.name }))}"`
+    + `${(n.managed || []).includes("name") ? byFile : ""}>`
+    + `<input type="text" class="srv-tags" value="${esc(typed(n, "tags", (n.tags || []).join(", ")))}" placeholder="${esc(tr("set.srvTagsPh"))}" aria-label="${esc(tr("set.srvTags", { name: n.name }))}"`
+    + `${(n.managed || []).includes("tags") ? byFile : ""}>`
+    + `<label class="check"><input type="checkbox" class="srv-pin"${pinned.has(n.id) ? " checked" : ""}> <span>${esc(tr("set.srvPin"))}</span></label>`
+    + `<label class="check"><input type="checkbox" class="srv-hide"${hidden.has(n.id) ? " checked" : ""}> <span>${esc(tr("set.srvHide"))}</span></label>`
+    + (n.local ? `<span class="local">${esc(tr("set.srvThisHub"))}</span>` : `<button class="srv-revoke">${esc(tr("set.srvRevoke"))}</button>`)
     + `</div>`).join("");
   markManaged();
 }
@@ -86,19 +87,19 @@ async function saveServer(row) {
   const r = await fetch(`/__ctl/node/${row.dataset.id}`, { method: "POST",
     headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
   const j = await r.json().catch(() => ({}));
-  if (!r.ok) return toast(j.error || "could not save that server", true);
-  toast("saved");
+  if (!r.ok) return toast(j.error || tr("set.srvNotSaved"), true);
+  toast(tr("set.srvSaved"));
   await loadNodes();
 }
 async function revokeServer(row) {
   const name = $(".srv-name", row).value;
-  const ok = await confirmDialog(`revoke "${name}"?`, { title: "revoke a server", yes: "revoke", danger: true,
-    note: "Its agent is refused from now on and it leaves the fleet. Pair it again to bring it back." });
+  const ok = await confirmDialog(tr("set.revokeQ", { name }), { title: tr("set.revokeTitle"), yes: tr("set.srvRevoke"), danger: true,
+    note: tr("set.revokeNote") });
   if (!ok) return;
   const r = await fetch(`/__ctl/node/${row.dataset.id}/revoke`, { method: "POST" });
   const j = await r.json().catch(() => ({}));
-  if (!r.ok) return toast(j.error || "could not revoke that server", true);
-  toast(`revoked ${name}`);
+  if (!r.ok) return toast(j.error || tr("set.revokeFailed"), true);
+  toast(tr("set.revoked", { name }));
   await loadNodes();
   route();   // the page may have been showing that server
   if (view === "fleet") renderFleet();
@@ -117,12 +118,11 @@ function showSettings() {
   $("#cfg-refresh").value = cfg.refreshSec;
   $("#export-wrap").classList.add("hidden");
   $("#acct-user").value = whoUser;
-  const groups = { v1: "styles", access: "accessibility", palette: "palettes" };
-  $("#cfg-style").innerHTML = Object.entries(groups).map(([g, name]) => `<optgroup label="${name}">`
-    + STYLES.filter(x => x.group === g).map(x => `<option value="${x.id}">${esc(x.label)}</option>`).join("")
+  $("#cfg-style").innerHTML = STYLE_GROUPS.map(g => `<optgroup label="${esc(tr("styles." + g))}">`
+    + STYLES.filter(x => x.group === g).map(x => `<option value="${x.id}">${esc(tr("style." + x.id))}</option>`).join("")
     + "</optgroup>").join("");
-  $("#cfg-mode").innerHTML = MODES.map(m => `<option value="${m}">${m}</option>`).join("");
-  $("#cfg-density").innerHTML = DENSITIES.map(n => `<option value="${n}">${n}</option>`).join("");
+  $("#cfg-mode").innerHTML = MODES.map(m => `<option value="${m}">${esc(tr("mode." + m))}</option>`).join("");
+  $("#cfg-density").innerHTML = DENSITIES.map(n => `<option value="${n}">${esc(tr("density." + n))}</option>`).join("");
   $("#cfg-style").value = currentStyle();
   $("#cfg-mode").value = currentMode();
   $("#cfg-density").value = currentDensity();
@@ -144,7 +144,7 @@ async function saveAccount() {
   const msg = $("#acct-msg");
   const user = $("#acct-user").value.trim();
   const password = $("#acct-new").value;
-  if (password !== $("#acct-new2").value) { msg.textContent = "the new passwords differ"; return; }
+  if (password !== $("#acct-new2").value) { msg.textContent = tr("set.loginDiffer"); return; }
   let r, d;
   try {
     r = await fetch("/__ctl/account", {
@@ -152,11 +152,11 @@ async function saveAccount() {
       body: JSON.stringify({ current: $("#acct-current").value, user, password }),
     });
     d = await r.json();
-  } catch (e) { msg.textContent = "could not reach the hub"; return; }
-  if (!r.ok) { msg.textContent = d.error || "not saved"; return; }
+  } catch (e) { msg.textContent = tr("set.loginUnreachable"); return; }
+  if (!r.ok) { msg.textContent = d.error || tr("set.loginNotSaved"); return; }
   whoUser = d.user;
   ["#acct-current", "#acct-new", "#acct-new2"].forEach(sel => { $(sel).value = ""; });
-  msg.textContent = `saved: log in as ${d.user} from now on; other sessions were logged out`;
+  msg.textContent = tr("set.loginSaved", { user: d.user });
 }
 
 /* panels: order (drag, or the up and down buttons) is shared; which panels show
@@ -175,8 +175,8 @@ function ownSet() {
 }
 function drawPanelFor() {
   const sel = $("#cfg-p-for");
-  sel.innerHTML = `<option value="all">every server</option>` + fleetNodes.map(n =>
-    `<option value="${esc(n.id)}">${esc(n.name)}${cfg.nodePanels && cfg.nodePanels[n.id] ? " (own set)" : ""}</option>`).join("");
+  sel.innerHTML = `<option value="all">${esc(tr("set.panelsAll"))}</option>` + fleetNodes.map(n =>
+    `<option value="${esc(n.id)}">${esc(cfg.nodePanels && cfg.nodePanels[n.id] ? tr("set.panelsOwn", { name: n.name }) : n.name)}</option>`).join("");
   if (panelFor !== "all" && !fleetNodes.some(n => n.id === panelFor)) panelFor = "all";
   sel.value = panelFor;
   $("#cfg-p-reset").classList.toggle("hidden", !(panelFor !== "all" && cfg.nodePanels && cfg.nodePanels[panelFor]));
@@ -189,13 +189,13 @@ function drawPanelCfg() {
   host.innerHTML = cfg.panelOrder.map(p => {
     const on = set.panels[p] !== false;
     const sz = (set.panelSize && set.panelSize[p]) || "normal";
-    const opt = s => `<option value="${s}" ${sz === s ? "selected" : ""}>${s}</option>`;
+    const opt = s => `<option value="${s}" ${sz === s ? "selected" : ""}>${esc(tr("size." + s))}</option>`;
     return `<div class="pcf ${on ? "" : "off"}" draggable="${orderManaged ? "false" : "true"}" data-p="${p}">
       <span class="grip">⠿</span>
-      <span class="pn">${p}</span>
-      <button data-up aria-label="move ${p} up">&uarr;</button><button data-down aria-label="move ${p} down">&darr;</button>
-      <select data-sz aria-label="size of ${p}">${opt("normal")}${opt("wide")}${opt("full")}</select>
-      <label><input type="checkbox" data-vis ${on ? "checked" : ""}> show</label>
+      <span class="pn">${esc(tr("panel." + p))}</span>
+      <button data-up aria-label="${esc(tr("set.panelUp", { panel: tr("panel." + p) }))}">&uarr;</button><button data-down aria-label="${esc(tr("set.panelDown", { panel: tr("panel." + p) }))}">&darr;</button>
+      <select data-sz aria-label="${esc(tr("set.panelSize", { panel: tr("panel." + p) }))}">${opt("normal")}${opt("wide")}${opt("full")}</select>
+      <label><input type="checkbox" data-vis ${on ? "checked" : ""}> <span>${esc(tr("set.panelShow"))}</span></label>
     </div>`;
   }).join("");
   const move = (p, by) => {
@@ -238,20 +238,20 @@ function drawPanelCfg() {
 function drawWeatherCfg() {
   $("#cfg-weather").innerHTML = (cfg.weather || []).map((l, i) =>
     `<div class="item"><span class="txt">${esc(l.name)} <span class="muted">(${(+l.latitude).toFixed(2)}, ${(+l.longitude).toFixed(2)})</span></span>
-     <span class="rm" data-wxrm="${i}">x</span></div>`).join("") || '<span class="muted">none</span>';
+     <span class="rm" data-wxrm="${i}">x</span></div>`).join("") || `<span class="muted">${esc(tr("set.none"))}</span>`;
   $$("[data-wxrm]").forEach(b => b.onclick = () => { cfg.weather.splice(+b.dataset.wxrm, 1); drawWeatherCfg(); });
 }
 function drawClockCfg() {
   $("#cfg-clocks").innerHTML = (cfg.clocks || []).map((c, i) =>
     `<div class="item"><span class="txt">${esc(c.label)} <span class="muted">${esc(c.tz)}</span></span>
-     <span class="rm" data-clkrm="${i}">x</span></div>`).join("") || '<span class="muted">none</span>';
+     <span class="rm" data-clkrm="${i}">x</span></div>`).join("") || `<span class="muted">${esc(tr("set.none"))}</span>`;
   $$("[data-clkrm]").forEach(b => b.onclick = () => { cfg.clocks.splice(+b.dataset.clkrm, 1); drawClockCfg(); });
 }
 
 async function wxSearch() {
   const q = $("#wx-search").value.trim();
   if (!q) return;
-  $("#wx-results").textContent = "searching…";
+  $("#wx-results").textContent = tr("set.wxSearching");
   try {
     const r = await (await fetch(
       `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(q)}&count=6`)).json();
@@ -263,14 +263,14 @@ async function wxSearch() {
       }));
     $("#wx-results").innerHTML = res.length
       ? res.map((x, i) => `<div data-i="${i}">${esc(x.name)} <span class="muted">· ${esc(x.country)}</span></div>`).join("")
-      : '<span class="muted">no matches</span>';
+      : `<span class="muted">${esc(tr("set.wxNoMatch"))}</span>`;
     $$("#wx-results div[data-i]").forEach(el => el.onclick = () => {
       const { name, latitude, longitude } = res[+el.dataset.i];
       cfg.weather.push({ name, latitude, longitude });
       $("#wx-results").innerHTML = ""; $("#wx-search").value = "";
       drawWeatherCfg();
     });
-  } catch (e) { $("#wx-results").textContent = "search failed"; }
+  } catch (e) { $("#wx-results").textContent = tr("set.wxFailed"); }
 }
 
 async function saveSettings() {
@@ -313,11 +313,11 @@ async function saveSettings() {
       method: "POST", headers: { "content-type": "application/json" },
       body: JSON.stringify(payload),
     });
-    if (r.ok) { lsDel("cfg"); toast("settings saved"); return; }
+    if (r.ok) { lsDel("cfg"); toast(tr("set.saved")); return; }
     const j = await r.json().catch(() => ({}));
-    saveConfig(); toast(j.error ? "saved locally — " + j.error : "saved to this browser only");
+    saveConfig(); toast(j.error ? tr("set.savedLocalWhy", { error: j.error }) : tr("set.savedLocal"));
   } catch (e) {
-    saveConfig(); toast("saved to this browser only");
+    saveConfig(); toast(tr("set.savedLocal"));
   }
 }
 
@@ -340,7 +340,7 @@ function initSettings() {
   $("#clk-add").onclick = () => {
     const label = $("#clk-label").value.trim(), tz = $("#clk-tz").value.trim();
     if (!label || !tz) return;
-    try { new Date().toLocaleString("en-GB", { timeZone: tz }); } catch (e) { alert("invalid timezone"); return; }
+    try { new Date().toLocaleString("en-GB", { timeZone: tz }); } catch (e) { alert(tr("set.clockBadTz")); return; }
     cfg.clocks.push({ label, tz });
     $("#clk-label").value = ""; $("#clk-tz").value = "";
     drawClockCfg();
@@ -353,7 +353,7 @@ function initSettings() {
   };
   $("#cfg-export").onclick = () => {
     $("#export-wrap").classList.remove("hidden");
-    $("#export-lbl").textContent = "config.json in the hub's state directory — saving the settings writes it for you";
+    $("#export-lbl").textContent = tr("set.exportNote");
     $("#export-text").value = JSON.stringify(cfg, null, 2);
     $("#export-text").select();
   };
@@ -369,14 +369,14 @@ function initSettings() {
     cfg = deepMerge(structuredClone(DEFAULTS), r.cfg);
     fixPanelOrder();
     openSettings();
-    toast(`imported${r.skipped.length ? " (skipped " + r.skipped.join(", ") + ")" : ""}: check, then save`);
+    toast(r.skipped.length ? tr("set.importedSkipped", { keys: r.skipped.join(", ") }) : tr("set.imported"));
   };
 
   // favicon / name widgets
   $("#fav-upload").onclick = () => $("#fav-file").click();
   $("#fav-file").onchange = e => {
     const f = e.target.files[0]; if (!f) return;
-    if (f.size > 200 * 1024) { toast("icon must be under 200 KB", true); return; }
+    if (f.size > 200 * 1024) { toast(tr("set.iconTooBig"), true); return; }
     const rd = new FileReader();
     rd.onload = () => { cfg.favicon = rd.result; $("#fav-preview").src = rd.result; };
     rd.readAsDataURL(f);

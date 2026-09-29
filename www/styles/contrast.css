@@ -9,6 +9,6 @@
 :root[data-style="contrast"] .lamp.stale { border-radius: 0; clip-path: polygon(50% 0, 100% 100%, 0 100%); }
 :root[data-style="contrast"] .lamp.offline { border-radius: 0; }
 :root[data-style="contrast"] .lamp.waiting { background: transparent; box-shadow: inset 0 0 0 2px var(--fg); }
-:root[data-style="contrast"] .ncard.stale .nhead::after { content: " stale"; font-weight: 700; }
-:root[data-style="contrast"] .ncard.offline .nhead::after { content: " offline"; font-weight: 700; }
+:root[data-style="contrast"] .ncard.stale .nhead::after,
+:root[data-style="contrast"] .ncard.offline .nhead::after { content: " " attr(data-state); font-weight: 700; }
 :root[data-style="contrast"] :focus-visible { outline: 3px solid var(--fg); outline-offset: 2px; }
