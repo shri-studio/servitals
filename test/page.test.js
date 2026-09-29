@@ -429,3 +429,17 @@ test("conf.d review: the page never sends a managed field, never drags a managed
   markManaged();
   assert.deepStrictEqual(disabled, ["title"], "a server's own panel set is not what files set");
 });
+
+
+test("strict CSP (spec 10.5): no inline script, no event-handler attributes, no style attributes", () => {
+  const { MARKUP } = require("./helpers/page");
+  for (const tag of MARKUP.match(/<script\b[^>]*>/g)) assert.match(tag, /\ssrc="[^"]+"/, `inline script: ${tag}`);
+  assert.doesNotMatch(MARKUP, /<style\b/, "no inline stylesheet");
+  assert.doesNotMatch(MARKUP, /\son[a-z]+="/, "no event-handler attributes");
+  assert.doesNotMatch(MARKUP, /\sstyle="/, "no style attributes in the markup");
+  assert.doesNotMatch(JS, /\sstyle="|\sstyle=\\"/, "none in generated markup either: sizes go through data-w / data-h");
+  assert.doesNotMatch(JS + BOOT, /\beval\(|new Function\(|setTimeout\("/, "no string evaluation");
+  // the settings panel and the login form load when opened, not with the page
+  assert.doesNotMatch(MARKUP, /js\/settings\.js/);
+  assert.match(JS, /s\.src = "js\/settings\.js";/);
+});

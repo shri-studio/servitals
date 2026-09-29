@@ -41,7 +41,7 @@
       <div class="big"><span id="mem-used">--</span> <span class="unit">/ <span id="mem-total">--</span></span></div>
       <div id="mem-bar"></div>
       <div class="sparkmini" id="mem-spark"></div>
-      <div class="row" style="margin-top:8px"><span class="k">used</span><span class="v" id="mem-used2">--</span></div>
+      <div class="row mt8"><span class="k">used</span><span class="v" id="mem-used2">--</span></div>
       <div class="row"><span class="k">cache/buffers</span><span class="v" id="mem-cache">--</span></div>
       <div class="row"><span class="k">available</span><span class="v" id="mem-avail">--</span></div>
       <div class="row"><span class="k">swap</span><span class="v" id="mem-swap">--</span></div>
@@ -52,7 +52,7 @@
       <div class="big"><span id="cpu-pct">--</span><span class="unit">%</span></div>
       <div id="cpu-bar"></div>
       <div class="sparkmini" id="cpu-spark"></div>
-      <div class="row" style="margin-top:8px"><span class="k">load 1m / 5m / 15m</span><span class="v" id="cpu-load">-- / -- / --</span></div>
+      <div class="row mt8"><span class="k">load 1m / 5m / 15m</span><span class="v" id="cpu-load">-- / -- / --</span></div>
       <div class="row"><span class="k">load / core</span><span class="v" id="cpu-loadn">--</span></div>
       <div id="cpu-cores-wrap">
         <div class="cores" id="cpu-cores"></div>
@@ -65,8 +65,8 @@
       <div class="big"><span id="temp-pkg">--</span><span class="unit" id="temp-unit">&deg;C package</span></div>
       <div id="temp-bar"></div>
       <div class="sparkmini" id="temp-spark"></div>
-      <div class="row" style="margin-top:10px"><span class="k">range (session)</span><span class="v" id="temp-range">--</span></div>
-      <div class="row"><span class="k">sensors</span><span class="v" id="temp-cores" style="white-space:normal;text-align:right">--</span></div>
+      <div class="row mt10"><span class="k">range (session)</span><span class="v" id="temp-range">--</span></div>
+      <div class="row"><span class="k">sensors</span><span class="v" id="temp-cores">--</span></div>
     </div>
 
     <div class="panel" data-panel="storage">
@@ -152,7 +152,7 @@
           <img id="fav-preview" alt="">
           <button id="fav-upload">upload image</button>
           <input type="file" id="fav-file" accept="image/png,image/jpeg,image/svg+xml,image/webp,image/gif" hidden>
-          <input type="text" id="fav-emoji" placeholder="or an emoji" maxlength="4" style="max-width:110px">
+          <input type="text" id="fav-emoji" placeholder="or an emoji" maxlength="4" class="w110">
           <button id="fav-clear">clear</button>
         </div>
       </section>
@@ -196,7 +196,7 @@
         <label>world clocks</label>
         <div id="cfg-clocks"></div>
         <div class="addrow">
-          <input type="text" id="clk-label" placeholder="label" style="max-width:130px">
+          <input type="text" id="clk-label" placeholder="label" class="w130">
           <input type="text" id="clk-tz" list="tzlist" placeholder="Area/City timezone">
           <button id="clk-add">add</button>
         </div>
@@ -251,7 +251,7 @@
       <input type="file" id="cfg-import-file" accept="application/json,.json" hidden>
     </div>
     <div class="body hidden" id="export-wrap">
-      <label id="export-lbl" style="color:var(--dim);font-size:12px"></label>
+      <label id="export-lbl" class="dimnote"></label>
       <textarea id="export-text" readonly></textarea>
     </div>
   </div>
@@ -259,7 +259,7 @@
 
 <!-- container logs -->
 <div class="overlay" id="logs-overlay">
-  <div class="modal" style="max-width:860px">
+  <div class="modal m860">
     <h3><span id="logs-title">logs</span> <span class="x" id="logs-close">[esc]</span></h3>
     <pre id="logs-body">loading&hellip;</pre>
   </div>
@@ -267,7 +267,7 @@
 
 <!-- confirm -->
 <div class="overlay mid" id="confirm-overlay">
-  <div class="modal" style="max-width:400px">
+  <div class="modal m400">
     <h3><span id="confirm-title">confirm</span> <span class="x" id="confirm-x">[esc]</span></h3>
     <div id="confirm-msg"></div>
     <div class="cbtns">

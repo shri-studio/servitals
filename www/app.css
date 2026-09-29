@@ -498,6 +498,17 @@ a:hover { text-decoration: underline; }
   color: var(--fg); font-family: inherit; font-size: 12px; padding: 8px; margin-top: 8px;
 }
 .hidden { display: none !important; }
+/* what used to be style attributes (a strict CSP allows none) */
+.row.mt8 { margin-top: 8px; }
+.row.mt10 { margin-top: 10px; }
+.modal input.w110 { max-width: 110px; }
+.modal input.w130 { max-width: 130px; }
+.dimnote { color: var(--dim); font-size: 12px; }
+.modal.m860 { max-width: 860px; }
+.modal.m400 { max-width: 400px; }
+.s-green { stop-color: var(--green); }
+.s-amber { stop-color: var(--amber); }
+.s-red { stop-color: var(--red); }
 
 .meter .track i, .cores .cbar i, .stat-bar-fill { transition: width .5s ease, height .5s ease; }
 

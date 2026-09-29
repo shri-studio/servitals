@@ -28,6 +28,20 @@ function fmtTime(date, timeZone) {
   const locale = timeZone && c === "auto" ? "en-GB" : undefined;
   return date.toLocaleTimeString(locale, { timeZone, hour12: c === "12h" ? true : c === "24h" ? false : undefined });
 }
+/* CSP (spec 10.5): generated markup carries no style attributes. Sizes arrive as
+   data-w / data-h (percent) and are set through the CSSOM, which the policy allows,
+   before the next paint. */
+function applySizes(root) {
+  const els = root.matches && root.matches("[data-w],[data-h]") ? [root] : [];
+  for (const el of [...els, ...(root.querySelectorAll ? root.querySelectorAll("[data-w],[data-h]") : [])]) {
+    if (el.dataset.w !== undefined) el.style.width = el.dataset.w + "%";
+    if (el.dataset.h !== undefined) el.style.height = el.dataset.h + "%";
+  }
+}
+new MutationObserver(list => {
+  for (const m of list) for (const n of m.addedNodes) if (n.nodeType === 1) applySizes(n);
+}).observe(document.documentElement, { childList: true, subtree: true });
+
 function fmtBytes(n) {
   n = Number(n) || 0;
   const base = units().size === "decimal" ? 1000 : 1024;
@@ -61,7 +75,7 @@ const HL   = { ok: "",        warn: "hl-amber", crit: "hl-red" };  // inline val
 function meter(pct, forceCls) {
   pct = clamp(pct, 0, 100);
   const cls = forceCls || HCLS[health(pct, 70, 90)];
-  return `<div class="meter ${cls}"><div class="track"><i style="width:${pct.toFixed(1)}%"></i></div>`
+  return `<div class="meter ${cls}"><div class="track"><i data-w="${pct.toFixed(1)}"></i></div>`
     + `<span class="pct">${Math.round(pct)}%</span></div>`;
 }
 
@@ -78,10 +92,10 @@ function sparkSvg(pcts) {
   const pts = vals.map((v, i) => `${(i * step).toFixed(1)},${y(v).toFixed(1)}`).join(" ");
   return `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">`
     + `<defs><linearGradient id="${id}" x1="0" y1="${H}" x2="0" y2="0" gradientUnits="userSpaceOnUse">`
-    + `<stop offset="0" style="stop-color:var(--green)"/>`
-    + `<stop offset="0.62" style="stop-color:var(--green)"/>`
-    + `<stop offset="0.78" style="stop-color:var(--amber)"/>`
-    + `<stop offset="0.92" style="stop-color:var(--red)"/></linearGradient></defs>`
+    + `<stop offset="0" class="s-green"/>`
+    + `<stop offset="0.62" class="s-green"/>`
+    + `<stop offset="0.78" class="s-amber"/>`
+    + `<stop offset="0.92" class="s-red"/></linearGradient></defs>`
     + `<polyline points="${pts}" fill="none" stroke="url(#${id})" stroke-width="1.5" `
     + `stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke"/></svg>`;
 }
@@ -553,7 +567,7 @@ function renderMetrics(d) {
     const per = c.per || [];
     $("#cpu-cores").innerHTML = per.map(v => {
       const cls = v >= 85 ? "max" : v >= 55 ? "hot" : "";
-      return `<span class="cbar ${cls}" title="${v}%"><i style="height:${clamp(v, 2, 100)}%"></i></span>`;
+      return `<span class="cbar ${cls}" title="${v}%"><i data-h="${clamp(v, 2, 100)}"></i></span>`;
     }).join("");
     $("#cpu-cores-wrap").classList.toggle("hidden", !per.length);
   }
@@ -662,8 +676,8 @@ function renderNetBars() {
   const peak = Math.max(...rows.map(x => x.rx + x.tx), 1);
   $("#net-bars").innerHTML = rows.map(x =>
     `<span class="d" data-t="${esc(x.title)}" data-rx="${x.rx}" data-tx="${x.tx}">`
-    + `<span class="up" style="height:${(x.tx / peak) * 100}%"></span>`
-    + `<span class="dn" style="height:${(x.rx / peak) * 100}%"></span></span>`).join("");
+    + `<span class="up" data-h="${((x.tx / peak) * 100).toFixed(2)}"></span>`
+    + `<span class="dn" data-h="${((x.rx / peak) * 100).toFixed(2)}"></span></span>`).join("");
   if (!rows.length) { $("#net-days-range").textContent = ""; return; }
   const busy = rows.reduce((a, x) => (x.rx + x.tx) > (a.rx + a.tx) ? x : a);
   const sep = ' <span class="muted">|</span> ';
@@ -745,7 +759,7 @@ function renderDocker() {
     const open = openNames.has(c.name) ? " open" : "";
     const main = stats
       ? name
-        + `<span class="scpubar${(c.cpu || 0) > 0.5 ? "" : " flat"}"><i style="width:${(c.cpu || 0) > 0.5 ? clamp(c.cpu, 1, 100) : 0}%"></i></span>`
+        + `<span class="scpubar${(c.cpu || 0) > 0.5 ? "" : " flat"}"><i data-w="${(c.cpu || 0) > 0.5 ? clamp(c.cpu, 1, 100) : 0}"></i></span>`
         + `<span class="scpu ${cpuHl}">${c.cpu == null ? "–" : c.cpu.toFixed(c.cpu < 10 ? 1 : 0) + "%"}</span>`
         + `<span class="smem ${memCls}" title="resident memory · ${memRel.toFixed(0)}% of the largest">${fmtBytes(c.mem)}</span>`
       : name + `<span class="sstate">${esc(c.state)}</span>`;
