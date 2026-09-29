@@ -175,6 +175,7 @@ function pageScope(names, stubs) {
     }
     return JS.slice(i, j);
   }).join("\n");
+  stubs = { tr: require("../hub/lib/i18n").tr, ...stubs };
   return new Function(...Object.keys(stubs), `let hubState = "ok"; ${src}; return { ${names.join(", ")}, state: () => hubState };`)(...Object.values(stubs));
 }
 

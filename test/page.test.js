@@ -8,11 +8,13 @@ const path = require("node:path");
 // the page's markup, stylesheet, boot script and scripts, in load order
 const { PAGE: HTML, BOOT, JS } = require("./helpers/page");
 
-// pull one top-level function out of the page's script and run it here
+const { tr } = require("../hub/lib/i18n");
+
+// pull one top-level function out of the page's script and run it here (with the dictionary)
 function pageFunction(name) {
   const m = new RegExp(`^function ${name}\\([^)]*\\) \\{[\\s\\S]*?^\\}`, "m").exec(HTML);
   assert.ok(m, `function ${name} not found in the page`);
-  return new Function(`${m[0]}; return ${name};`)();
+  return new Function("tr", `${m[0]}; return ${name};`)(tr);
 }
 
 test("disks without a configured label get a readable default", () => {
@@ -45,7 +47,7 @@ test("the fleet grid and node tabs are wired up", () => {
   assert.match(HTML, /if \(!ctlAllowed \|\| !isLocalView\(\)\) return "";/);
   assert.match(HTML, /\/logs\$\{nodeQuery\(\)\}/);
   // node names, statuses and mounts come from remote machines: always escaped
-  for (const expr of ["esc(n.name)", "esc(n.status)", "esc(disk.mount)", "esc(n.id)"]) {
+  for (const expr of ["esc(n.name)", "esc(n.status)", "esc(tr(\"fleet.disk\", { mount: disk.mount }))", "esc(n.id)"]) {
     assert.ok(HTML.includes("${" + expr + "}"), `renderFleet must use \${${expr}}`);
   }
 });
@@ -163,6 +165,7 @@ function pageFn(name, stubs) {
     if (HTML[k] === "}" && --depth === 0) { j = k + 1; break; }
   }
   const src = HTML.slice(i, j);
+  stubs = { tr, ...stubs };
   return new Function(...Object.keys(stubs), `${src}; return ${name};`)(...Object.values(stubs));
 }
 
@@ -273,9 +276,11 @@ test("names and tags from servers are escaped in the servers section and the fle
 });
 
 test("fleet cards show the numbers chosen in settings", () => {
-  const cardNumbers = pageFn("cardNumbers", { cfg: { fleet: { card: ["disk", "containers", "bogus"] } } });
+  const CARD_KEYS = ["cpu", "mem", "temp", "disk", "containers"];
+  assert.match(HTML, new RegExp(`const CARD_KEYS = ${JSON.stringify(CARD_KEYS).replace(/[[\]]/g, "\\$&").replace(/,/g, ", ")};`));
+  const cardNumbers = pageFn("cardNumbers", { CARD_KEYS, cfg: { fleet: { card: ["disk", "containers", "bogus"] } } });
   assert.deepStrictEqual(cardNumbers(), ["disk", "containers"]);
-  assert.deepStrictEqual(pageFn("cardNumbers", { cfg: {} })(), ["cpu", "mem", "temp"]);
+  assert.deepStrictEqual(pageFn("cardNumbers", { CARD_KEYS, cfg: {} })(), ["cpu", "mem", "temp"]);
   for (const id of ["cfg-f-sort", "cfg-f-group", "cfg-servers"]) assert.ok(HTML.includes(`id="${id}"`), id);
   assert.match(HTML, /for \(const g of arrangeFleet\(fleetNodes, cfg\.fleet \|\| \{\}\)\)/, "renderFleet uses it");
 });

@@ -7,7 +7,10 @@ const test = require("node:test");
 const assert = require("node:assert");
 const { STRINGS, tr } = require("../hub/lib/i18n");
 const { startHub, request, login, cookieFrom } = require("./helpers/hub");
-const { MARKUP, JS } = require("./helpers/page");
+const fs = require("node:fs");
+const path = require("node:path");
+const { WWW, MARKUP, JS } = require("./helpers/page");
+const read = (f) => fs.readFileSync(path.join(WWW, f), "utf8");
 
 const ENTITIES = { hellip: "…", nbsp: " ", darr: "↓", uarr: "↑", mdash: "—", deg: "°", amp: "&", lt: "<", gt: ">", quot: '"' };
 const decode = (s) => s.replace(/&(#\d+|\w+);/g, (m, e) => (e[0] === "#" ? String.fromCodePoint(+e.slice(1)) : ENTITIES[e] ?? m));
@@ -102,4 +105,70 @@ test("applyStrings() sets each tagged element's text and attributes from the dic
   assert.strictEqual(text.textContent, "<set.save>", "textContent: never parsed as HTML");
   assert.strictEqual(input.attrs.placeholder, "<set.wxPh>");
   assert.match(JS, /\(async function \(\) \{\n  applyStrings\(document\);/, "first thing at boot");
+});
+
+/* the scripts: text reaches the page only through tr(). This finds words written straight
+   into what a person reads: toast(), confirmDialog(), alert(), textContent, innerHTML,
+   title and placeholder, and the text between tags in generated HTML. */
+function wordsOutsideTr(src) {
+  const code = src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "").replace(/ \/\/ .*$/gm, "")
+    .replace(/\btr\((["'`])[^"'`]*\1/g, "tr(KEY");            // a key is not a word on the page
+  const found = [];
+  const lit = /(["'])((?:\\.|(?!\1)[^\\\n])*)\1|`((?:\\.|\$\{(?:[^{}]|\{[^{}]*\})*\}|[^`\\])*)`/g;
+  const letters = (s) => /[A-Za-z]{2}/.test(s);
+  // 1. arguments of the calls that show text, and assignments to text properties
+  const sinks = /\b(toast|confirmDialog|alert)\(|\.(textContent|innerHTML|title|placeholder)\s*=(?!=)/g;
+  for (let m; (m = sinks.exec(code));) {
+    // the literals of the call's own arguments or the assigned value; those inside another
+    // call (a selector, a date format, a map() callback) are not what the sink shows
+    let depth = 0, parens = 0, end = m.index + m[0].length;
+    for (; end < code.length; end++) {
+      const c = code[end];
+      if ("([{".includes(c)) { depth++; if (c === "(") parens++; }
+      else if (")]}".includes(c)) { if (c === ")") parens--; if (--depth < 0) break; }
+      else if (c === ";" && depth === 0) break;
+      else if (c === '"' || c === "'" || c === "`") {
+        lit.lastIndex = end;
+        const l = lit.exec(code);
+        if (!l || l.index !== end) continue;
+        end = lit.lastIndex - 1;
+        if (parens > 0) continue;
+        const s = l[2] !== undefined ? l[2] : l[3].replace(/\$\{(?:[^{}]|\{[^{}]*\})*\}/g, "");
+        // HTML is checked below, tag by tag; a selector, the brand or an empty title is not a word
+        if (letters(s) && !/<\/?[a-z]/.test(s) && !/^[#.[][\w\s#.[\]="-]*$/.test(s) && s !== "servitals") found.push(`${m[1] || m[2]}: ${l[0].slice(0, 60)}`);
+      }
+    }
+  }
+  // 2. generated HTML: words between tags, and in title / aria-label / placeholder / label attributes
+  lit.lastIndex = 0;
+  for (const l of code.matchAll(lit)) {
+    const s = l[2] !== undefined ? l[2] : l[3];
+    if (!/<\/?[a-z]/.test(s)) continue;
+    const plain = s.replace(/\$\{(?:[^{}]|\{(?:[^{}]|\{[^{}]*\})*\})*\}/g, "").replace(/&#?\w+;/g, " ");
+    for (const [, between] of plain.matchAll(/>([^<]*)</g)) if (letters(between)) found.push(`between tags: ${between.trim().slice(0, 60)}`);
+    // text before the first tag, unless it is the end of a tag split over two literals
+    for (const [, between] of plain.matchAll(/^([^<]+)</g)) if (letters(between) && !/="/.test(between)) found.push(`before a tag: ${between.trim().slice(0, 60)}`);
+    for (const [, between] of plain.matchAll(/>([^<>]+)$/g)) if (letters(between)) found.push(`after a tag: ${between.trim().slice(0, 60)}`);
+    for (const [, a, v] of plain.matchAll(/ (title|aria-label|placeholder|label)="([^"]*)"/g)) if (letters(v)) found.push(`${a}="${v}"`);
+  }
+  return found;
+}
+
+test("app.js puts no words on the page except through tr()", () => {
+  assert.deepStrictEqual(wordsOutsideTr(read("js/app.js")), []);
+});
+
+test("the check above catches words written straight into the page", () => {
+  const bad = [
+    'toast("saved");', 'toast(j.error || `${a} failed`, true);', 'el.textContent = x ? "off" : "on";',
+    'h.innerHTML = `<span class="muted">none</span>`;', 'h.innerHTML = `<b title="drag me">x</b>`;',
+    'confirmDialog("sure?", { title: "stop", yes: tr("dlg.confirm") });', "s.innerHTML = `peak${sep}`;",
+  ];
+  for (const b of bad) assert.notDeepStrictEqual(wordsOutsideTr(b), [], b);
+  const good = [
+    'toast(tr("set.saved"));', 'toast(j.error || tr("svc.failed", { action }), true);', '$("#x").textContent = n + "%";',
+    'h.innerHTML = `<span class="muted">${esc(tr("set.none"))}</span>`;', 'el.closest(".big").className = "big";',
+    '$("#x").textContent = tr("mode." + m);', 'b.title = "";',
+  ];
+  for (const g of good) assert.deepStrictEqual(wordsOutsideTr(g), [], g);
 });

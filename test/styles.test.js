@@ -99,7 +99,9 @@ test("every font a style file asks for is shipped", () => {
 });
 
 test("the registry in the page lists exactly the style files, plus classic", () => {
-  const listed = [...HTML.matchAll(/\{ id: "([a-z0-9-]+)", label: "[^"]+", group: "[a-z0-9]+" \}/g)].map((m) => m[1]).sort();
+  const listed = [...HTML.matchAll(/\{ id: "([a-z0-9-]+)", group: "[a-z0-9]+" \}/g)].map((m) => m[1]).sort();
+  const { STRINGS } = require("../hub/lib/i18n");
+  for (const id of listed) assert.ok(STRINGS["style." + id], `the dictionary names style ${id}`);
   const files = fs.readdirSync(path.join(WWW, "styles")).filter((x) => x.endsWith(".css")).map((x) => x.replace(/\.css$/, ""));
   assert.deepStrictEqual(listed, ["classic", ...files].sort());
   assert.deepStrictEqual(listed.sort(), ["8bit", "catppuccin", "classic", "contrast", "dracula", "eink", "gruvbox", "nord", "phosphor", "solarized"]);

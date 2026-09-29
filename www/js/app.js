@@ -181,7 +181,7 @@ function managedSelector(p) {
   return `#cfg-panels [data-p="${m[2]}"] [data-${m[1] === "panels" ? "vis" : "sz"}]`;
 }
 function markManaged() {
-  const note = "managed by a file in /etc/servitals/conf.d";
+  const note = tr("set.managed");
   for (const p of managedPaths()) {
     // files set the shared panel set; a server's own set stays its own
     if (panelFor !== "all" && /^panel(s|Size)\./.test(p)) continue;
@@ -257,17 +257,12 @@ function applyVersion(v) {
    Style and mode are independent (spec 10.2). A choice made in this browser
    wins; otherwise the hub's default from config.json applies. Each style but
    classic is a file in styles/, loaded only when chosen. */
+// names are in the dictionary as style.<id>
 const STYLES = [
-  { id: "classic", label: "classic", group: "v1" },
-  { id: "8bit", label: "8bit", group: "v1" },
-  { id: "phosphor", label: "phosphor", group: "v1" },
-  { id: "eink", label: "e-ink", group: "v1" },
-  { id: "contrast", label: "high contrast", group: "access" },
-  { id: "nord", label: "nord", group: "palette" },
-  { id: "gruvbox", label: "gruvbox", group: "palette" },
-  { id: "dracula", label: "dracula", group: "palette" },
-  { id: "catppuccin", label: "catppuccin", group: "palette" },
-  { id: "solarized", label: "solarized", group: "palette" },
+  { id: "classic", group: "v1" }, { id: "8bit", group: "v1" }, { id: "phosphor", group: "v1" }, { id: "eink", group: "v1" },
+  { id: "contrast", group: "access" },
+  { id: "nord", group: "palette" }, { id: "gruvbox", group: "palette" }, { id: "dracula", group: "palette" },
+  { id: "catppuccin", group: "palette" }, { id: "solarized", group: "palette" },
 ];
 const MODES = ["system", "light", "dark"];
 const DENSITIES = ["compact", "comfortable", "large"];
@@ -292,12 +287,12 @@ function applyStyle(id) {
     link.href = `styles/${id}.css`;
     d.setAttribute("data-style", id);
   }
-  $("#btn-style").textContent = `[y] ${(STYLES.find(s => s.id === id) || STYLES[0]).label}`;
+  $("#btn-style").textContent = tr("key.styleNow", { style: tr("style." + id) });
 }
 function applyMode(m) {
   if (m === "light" || m === "dark") document.documentElement.setAttribute("data-theme", m);
   else document.documentElement.removeAttribute("data-theme");
-  $("#btn-theme").textContent = `[t] ${currentMode()}`;
+  $("#btn-theme").textContent = tr("key.themeNow", { mode: tr("mode." + currentMode()) });
 }
 function applyDensity(n) {
   if (n === "compact" || n === "large") document.documentElement.setAttribute("data-density", n);
@@ -385,8 +380,8 @@ function hubStateOf(r) {
   return r.ok ? "login" : "down";
 }
 function hubText() {
-  return hubState === "login" ? "logged out: reload the page to log in"
-    : "hub unreachable" + (navigator.onLine === false ? " (this device is offline)" : "");
+  return hubState === "login" ? tr("status.loggedOut")
+    : tr("status.hubDown") + (navigator.onLine === false ? " " + tr("status.deviceOffline") : "");
 }
 async function loadNodes() {
   try {
@@ -421,7 +416,7 @@ function renderTabs() {
   tabs.classList.toggle("hidden", fleetNodes.length < 2);
   if (fleetNodes.length < 2) return;
   const shown = view === "fleet" ? "fleet" : (currentNode || localNode);
-  tabs.innerHTML = `<button data-go="fleet" class="${shown === "fleet" ? "on" : ""}">fleet</button>`
+  tabs.innerHTML = `<button data-go="fleet" class="${shown === "fleet" ? "on" : ""}">${esc(tr("tabs.fleet"))}</button>`
     + fleetNodes.map(n => `<button data-go="${esc(n.id)}" class="${shown === n.id ? "on" : ""}">`
       + `<span class="lamp ${esc(n.status)}"></span>${esc(n.name)}</button>`).join("");
 }
@@ -453,9 +448,9 @@ function arrangeFleet(nodes, f) {
     if (!groups.has(t)) groups.set(t, []);
     groups.get(t).push(n);
   }
-  const out = pins.length ? [{ title: "pinned", nodes: pins }] : [];
+  const out = pins.length ? [{ title: tr("fleet.pinned"), nodes: pins }] : [];
   for (const t of [...groups.keys()].filter(Boolean).sort()) out.push({ title: t, nodes: groups.get(t) });
-  if (groups.has("")) out.push({ title: "untagged", nodes: groups.get("") });
+  if (groups.has("")) out.push({ title: tr("fleet.untagged"), nodes: groups.get("") });
   return out;
 }
 // the servers hidden from the fleet (also from its status and kiosk rotation)
@@ -465,11 +460,11 @@ function hiddenIds() {
 }
 // which numbers a fleet card shows
 function cardNumbers() {
-  const all = ["cpu", "mem", "temp", "disk", "containers"];
-  const want = (cfg.fleet && Array.isArray(cfg.fleet.card) ? cfg.fleet.card : []).filter(k => all.includes(k));
+  const want = (cfg.fleet && Array.isArray(cfg.fleet.card) ? cfg.fleet.card : []).filter(k => CARD_KEYS.includes(k));
   return want.length ? want.slice(0, 4) : ["cpu", "mem", "temp"];
 }
-const CARD_LABEL = { cpu: "cpu", mem: "mem", temp: "temp", disk: "disk", containers: "up" };
+// the numbers a fleet card can show; their labels are card.<key> in the dictionary
+const CARD_KEYS = ["cpu", "mem", "temp", "disk", "containers"];
 function cardValue(k, s) {
   if (k === "cpu" || k === "mem") return fmtVal(s[k], "%");
   if (k === "temp") return fmtTemp(s.temp, true);
@@ -490,14 +485,14 @@ function fleetCard(n) {
   const s = n.summary || {};
   const disk = s.disk;
   const dcls = disk ? HCLS[health(disk.pct, 78, 90)] : "";
-  const ago = n.lastSeen ? fmtDur((Date.now() - n.lastSeen) / 1000) + " ago" : "";
+  const ago = n.lastSeen ? tr("fleet.ago", { age: fmtDur((Date.now() - n.lastSeen) / 1000) }) : "";
   const foot = n.status === "online"
-    ? (disk ? `disk ${esc(disk.mount)} <span class="${dcls}">${disk.pct}%</span>` : esc(s.host && s.host.distro || ""))
-    : n.status === "waiting" ? "waiting for the first push" : `${esc(n.status)} · ${ago}`;
-  const cont = s.containers ? `${s.running}/${s.containers} up` : "";
+    ? (disk ? `${esc(tr("fleet.disk", { mount: disk.mount }))} <span class="${dcls}">${disk.pct}%</span>` : esc(s.host && s.host.distro || ""))
+    : n.status === "waiting" ? esc(tr("fleet.waiting")) : `${esc(tr("fleet.state." + n.status))} · ${esc(ago)}`;
+  const cont = s.containers ? esc(tr("svc.up", { running: s.running, total: s.containers })) : "";
   return `<div class="panel ncard ${esc(n.status)}" data-node="${esc(n.id)}">`
     + `<div class="nhead"><span class="lamp ${esc(n.status)}"></span>${esc(n.name)}</div>`
-    + `<div class="kv">${cardNumbers().map(k => `<span><small>${CARD_LABEL[k]}</small>${cardValue(k, s)}</span>`).join("")}</div>`
+    + `<div class="kv">${cardNumbers().map(k => `<span><small>${esc(tr("card." + k))}</small>${cardValue(k, s)}</span>`).join("")}</div>`
     + `<div class="sparkmini">${sparkSvg(s.trend || [])}</div>`
     + (disk ? meter(disk.pct, dcls) : "")
     + `<div class="foot"><span>${foot}</span><span>${cont}</span></div></div>`;
@@ -510,14 +505,14 @@ function fleetStatus() {
   dot.classList.remove("down", "stale");
   if (online < shown.length) dot.classList.add(shown.some(n => n.status === "offline") ? "down" : "stale");
   $("#hostname").textContent = cfg.title || "servitals";
-  $("#hostmeta").textContent = `${shown.length} nodes · ${online} online`;
+  $("#hostmeta").textContent = tr("head.nodes", { n: shown.length, online });
   // the installable app opens from its copy when the hub cannot be reached: say so
   if (hubState !== "ok") {
     dot.classList.add("down");
     $("#hostmeta").textContent = hubText()
-      + (hubState === "down" && shown.length ? " · showing the last known servers" : "");
+      + (hubState === "down" && shown.length ? " · " + tr("status.lastKnown") : "");
   }
-  $("#lastupdate").textContent = `fleet · ${fmtTime(new Date())}`;
+  $("#lastupdate").textContent = tr("status.fleetAt", { time: fmtTime(new Date()) });
 }
 
 async function tick() {
@@ -545,9 +540,9 @@ function setStatus(ts, hardFail) {
   let label;
   dot.classList.remove("down", "stale");
   if (hardFail && hubState !== "ok") { dot.classList.add("down"); label = hubText(); }
-  else if (hardFail && !ts) { dot.classList.add("down"); label = "agent unreachable"; }
-  else if (age > budget) { dot.classList.add("stale"); label = "stale " + fmtDur(age) + " old"; }
-  else { label = "online"; }
+  else if (hardFail && !ts) { dot.classList.add("down"); label = tr("status.agentDown"); }
+  else if (age > budget) { dot.classList.add("stale"); label = tr("status.stale", { age: fmtDur(age) }); }
+  else { label = tr("status.online"); }
   $("#lastupdate").textContent = label + " · " +
     fmtTime(new Date(ts || 0));
 }
@@ -557,10 +552,10 @@ function renderMetrics(d) {
 
   // header
   if (d.host) {
-    $("#hostname").textContent = d.host.name || "host";
-    $("#ps1").textContent = "visitor@" + (d.host.name || "host");
+    $("#hostname").textContent = d.host.name || tr("head.host");
+    $("#ps1").textContent = tr("prompt.user", { host: d.host.name || tr("head.host") });
     $("#hostmeta").textContent =
-      [d.host.distro, "kernel " + d.host.kernel, "up " + fmtDur(d.host.uptime)]
+      [d.host.distro, tr("head.kernel", { version: d.host.kernel }), tr("head.uptime", { time: fmtDur(d.host.uptime) })]
         .filter(Boolean).join("  ·  ");
   }
 
@@ -579,9 +574,9 @@ function renderMetrics(d) {
     $("#mem-cache").textContent = fmtBytes(m.cache);
     $("#mem-avail").textContent = fmtBytes(m.available);
     const sw = $("#mem-swap");
-    sw.textContent = m.swapTotal ? fmtBytes(m.swapUsed) + " / " + fmtBytes(m.swapTotal) : "off";
+    sw.textContent = m.swapTotal ? fmtBytes(m.swapUsed) + " / " + fmtBytes(m.swapTotal) : tr("mem.swapOff");
     sw.className = "v " + (swapPct >= 25 ? "hl-red" : swapPct > 1 ? "hl-amber" : "");
-    $("#mem-note").textContent = Math.round(pct) + "% in use";
+    $("#mem-note").textContent = tr("mem.inUse", { pct: Math.round(pct) });
   }
 
   // cpu
@@ -596,7 +591,7 @@ function renderMetrics(d) {
     const lh = HL[health(ratio, 1, 2)];
     $("#cpu-load").innerHTML = `<span class="${lh}">${c.load.map(x => x.toFixed(2)).join(" / ")}</span>`;
     $("#cpu-loadn").textContent = c.cores ? ratio.toFixed(2) + " × " + c.cores : "—";
-    $("#cpu-note").textContent = c.cores + " threads";
+    $("#cpu-note").textContent = tr("cpu.threads", { n: c.cores });
     const per = c.per || [];
     $("#cpu-cores").innerHTML = per.map(v => {
       const cls = v >= 85 ? "max" : v >= 55 ? "hot" : "";
@@ -611,7 +606,7 @@ function renderMetrics(d) {
     if (pkg != null) pushHist("temp", pkg);
     const hc = HCLS[pkg == null ? "ok" : health(pkg, 70, 85)];
     $("#temp-pkg").textContent = pkg != null ? fmtTemp(pkg).replace("°", "") : "—";
-    $("#temp-unit").textContent = tempUnit() + " package";
+    $("#temp-unit").textContent = tr("temp.package", { unit: tempUnit() });
     $("#temp-pkg").closest(".big").className = "big " + hc;
     const tp = pkg != null ? tempPct(pkg) : 0;
     $("#temp-bar").innerHTML = meter(tp, hc).replace(/<span class="pct">.*?<\/span>/,
@@ -620,7 +615,7 @@ function renderMetrics(d) {
     if (hist.temp.length) {
       const lo = Math.min(...hist.temp), hi = Math.max(...hist.temp);
       const av = hist.temp.reduce((a, b) => a + b, 0) / hist.temp.length;
-      $("#temp-range").textContent = `${fmtTemp(lo)} – ${fmtTemp(hi)}  ·  avg ${fmtTemp(av)}`;
+      $("#temp-range").textContent = tr("temp.rangeValue", { lo: fmtTemp(lo), hi: fmtTemp(hi), avg: fmtTemp(av) });
     }
     const cores = (t.sensors || []).filter(s => /core/i.test(s.label));
     $("#temp-cores").textContent = cores.length
@@ -634,13 +629,13 @@ function renderMetrics(d) {
       const meta = (cfg.disks && cfg.disks[dk.mount]) || {};
       const name = esc(meta.label || diskLabel(dk.mount));
       const kind = esc(dk.model
-        ? dk.model + (dk.rotational ? " · hdd" : " · ssd")
+        ? dk.model + " · " + tr(dk.rotational ? "disk.hdd" : "disk.ssd")
         : (dk.fstype || dk.source || ""));
       const warn = meta.warn ? ` <span class="dwarn">⚠ ${esc(meta.warn)}</span>` : "";
       if (dk.mounted === false) {
         return `<div class="disk"><div class="dtop">
           <span class="dname">${name} <span class="muted">${esc(dk.mount)}</span></span>
-          <span class="v hl-amber">not mounted</span></div>${warn ? `<div class="dmodel">${warn}</div>` : ""}</div>`;
+          <span class="v hl-amber">${esc(tr("disk.notMounted"))}</span></div>${warn ? `<div class="dmodel">${warn}</div>` : ""}</div>`;
       }
       const cls = HCLS[health(dk.pct, 78, 90)];
       const freePct = dk.size ? (dk.avail / dk.size) * 100 : 100;
@@ -651,7 +646,7 @@ function renderMetrics(d) {
           <span class="v">${fmtBytes(dk.used)} / ${fmtBytes(dk.size)}</span>
         </div>
         ${meter(dk.pct, cls)}
-        <div class="dmodel">${kind} <span class="${freeCls}">· ${fmtBytes(dk.avail)} free</span>${warn}</div>
+        <div class="dmodel">${kind} <span class="${freeCls}">· ${esc(tr("disk.free", { size: fmtBytes(dk.avail) }))}</span>${warn}</div>
       </div>`;
     }).join("");
   }
@@ -664,7 +659,7 @@ function renderMetrics(d) {
     $("#net-tx-rate").textContent = fmtRate(n.rateTx);
 
     const trow = (label, o, withAvg) => `<tr>`
-      + `<td>${label}</td>`
+      + `<td>${esc(label)}</td>`
       + `<td class="rx">${fmtBytes(o.rx)}</td>`
       + `<td class="tx">${fmtBytes(o.tx)}</td>`
       + `<td>${fmtBytes(o.rx + o.tx)}</td>`
@@ -672,14 +667,14 @@ function renderMetrics(d) {
       + `<td class="tx">${withAvg ? fmtRate(o.avgTx) : "—"}</td>`
       + `</tr>`;
     // without vnStat only the live rate is known
-    $("#net-tbody").innerHTML = [["today", n.today, true], ["month", n.month, true], ["all time", n.total, false]]
+    $("#net-tbody").innerHTML = [[tr("net.today"), n.today, true], [tr("net.month"), n.month, true], [tr("net.allTime"), n.total, false]]
       .filter(([, o]) => o).map(([label, o, avg]) => trow(label, o, avg)).join("");
 
     const now = new Date();
     const dim = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
     const frac = (now.getDate() - 1 + now.getHours() / 24) / dim;
-    $("#net-est").textContent = !n.month ? "live rate only · install vnstat for today, month and 30-day history"
-      : frac > 0.02 ? "projected " + fmtBytes((n.month.rx + n.month.tx) / frac) + " this month" : "";
+    $("#net-est").textContent = !n.month ? tr("net.liveOnly")
+      : frac > 0.02 ? tr("net.projected", { size: fmtBytes((n.month.rx + n.month.tx) / frac) }) : "";
 
     netData = n;
     renderNetBars();
@@ -715,7 +710,7 @@ function renderNetBars() {
   const busy = rows.reduce((a, x) => (x.rx + x.tx) > (a.rx + a.tx) ? x : a);
   const sep = ' <span class="muted">|</span> ';
   $("#net-days-range").innerHTML =
-    `peak${sep}${esc(busy.label)}${sep}`
+    `${esc(tr("net.peak"))}${sep}${esc(busy.label)}${sep}`
     + `<span class="rx">&#8595;&nbsp;${fmtBytes(busy.rx)}</span> `
     + `<span class="tx">&#8593;&nbsp;${fmtBytes(busy.tx)}</span> `
     + `<span class="v">${fmtBytes(busy.rx + busy.tx)}</span>`;
@@ -733,7 +728,7 @@ function portainerLink(c) {
   const base = (cfg.portainerUrl || "").replace(/\/$/, "");
   if (!/^https?:\/\//i.test(base) || !c.id) return "";   // only real http(s) URLs
   const ep = +cfg.portainerEndpoint || 1;
-  return `<a class="sb" href="${esc(base)}/#!/${ep}/docker/containers/${esc(c.id)}" target="_blank" rel="noopener">↗ portainer</a>`;
+  return `<a class="sb" href="${esc(base)}/#!/${ep}/docker/containers/${esc(c.id)}" target="_blank" rel="noopener">${esc(tr("svc.portainer"))}</a>`;
 }
 function ctlButtons(c) {
   if (!ctlAllowed || !isLocalView()) return "";
@@ -741,17 +736,17 @@ function ctlButtons(c) {
   const run = c.state === "running";
   return `<div class="svc-ctl">`
     + (run
-        ? `<button class="sb" data-a="restart">⟳ restart</button>`
-          + `<button class="sb stop" data-a="stop">◼ stop</button>`
-        : `<button class="sb start" data-a="start">▶ start</button>`)
+        ? `<button class="sb" data-a="restart">${esc(tr("svc.restart"))}</button>`
+          + `<button class="sb stop" data-a="stop">${esc(tr("svc.stop"))}</button>`
+        : `<button class="sb start" data-a="start">${esc(tr("svc.start"))}</button>`)
     + p
-    + `<button class="sb" data-a="logs">≡ logs</button>`
+    + `<button class="sb" data-a="logs">${esc(tr("svc.logs"))}</button>`
     + `</div>`;
 }
 const CPUCLS = { ok: "cpu-ok", warn: "cpu-hot", crit: "cpu-max" };
 // default disk name when config.json has no label: "/" is "system", else the last path part
 function diskLabel(mount) {
-  if (mount === "/") return "system";
+  if (mount === "/") return tr("disk.system");
   const parts = String(mount).split("/").filter(Boolean);
   return parts.length ? parts[parts.length - 1] : String(mount);
 }
@@ -767,9 +762,9 @@ function renderDocker() {
   const haveStats = up.some(c => c.mem != null);
   const maxMem = Math.max(...up.map(c => c.mem || 0), 1);
 
-  $("#docker-note").textContent = `${up.length}/${list.length} up`
-    + (haveStats ? ` · ${fmtBytes(totMem)} · ${totCpu.toFixed(0)}% cpu` : "")
-    + (!isLocalView() ? " · controls: hub host only" : ctlAllowed ? "" : " · controls: LAN only");
+  $("#docker-note").textContent = tr("svc.up", { running: up.length, total: list.length })
+    + (haveStats ? ` · ${fmtBytes(totMem)} · ${tr("svc.cpu", { pct: totCpu.toFixed(0) })}` : "")
+    + (!isLocalView() ? " · " + tr("svc.hubOnly") : ctlAllowed ? "" : " · " + tr("svc.lanOnly"));
   $$(".svsort").forEach(s => s.classList.toggle("on", s.dataset.s === svcSort));
   $("#docker-list").classList.toggle("ctl", ctlAllowed && isLocalView());
   const openNames = new Set($$(".svc.open", $("#docker-list")).map(el => el.dataset.name));
@@ -794,7 +789,7 @@ function renderDocker() {
       ? name
         + `<span class="scpubar${(c.cpu || 0) > 0.5 ? "" : " flat"}"><i data-w="${(c.cpu || 0) > 0.5 ? clamp(c.cpu, 1, 100) : 0}"></i></span>`
         + `<span class="scpu ${cpuHl}">${c.cpu == null ? "–" : c.cpu.toFixed(c.cpu < 10 ? 1 : 0) + "%"}</span>`
-        + `<span class="smem ${memCls}" title="resident memory · ${memRel.toFixed(0)}% of the largest">${fmtBytes(c.mem)}</span>`
+        + `<span class="smem ${memCls}" title="${esc(tr("svc.memTitle", { pct: memRel.toFixed(0) }))}">${fmtBytes(c.mem)}</span>`
       : name + `<span class="sstate">${esc(c.state)}</span>`;
     return `<div class="svc ${cpuClass(c.cpu)}${open}" data-name="${esc(c.name)}" `
       + `title="${esc(c.name)} — ${esc(c.status || "")}">`
@@ -806,9 +801,9 @@ function renderDocker() {
 
   const more = $("#svc-more");
   if (!svcExpanded && hidden > 0) {
-    more.textContent = `show ${hidden} more ▾`; more.classList.remove("hidden");
+    more.textContent = tr("svc.more", { n: hidden }); more.classList.remove("hidden");
   } else if (svcExpanded && running.length > SVC_LIMIT) {
-    more.textContent = "show less ▴"; more.classList.remove("hidden");
+    more.textContent = tr("svc.less"); more.classList.remove("hidden");
   } else {
     more.classList.add("hidden");
   }
@@ -823,7 +818,7 @@ function toast(msg, isErr) {
   toast._t = setTimeout(() => t.className = "", 2600);
 }
 let confirmResolve = null;
-function confirmDialog(msg, { title = "confirm", note = "", yes = "confirm", danger = false } = {}) {
+function confirmDialog(msg, { title = tr("dlg.confirm"), note = "", yes = tr("dlg.confirm"), danger = false } = {}) {
   $("#confirm-title").textContent = title;
   $("#confirm-msg").innerHTML = esc(msg) + (note ? `<span class="cq">${esc(note)}</span>` : "");
   const y = $("#confirm-yes");
@@ -840,34 +835,33 @@ function closeConfirm(v) {
 }
 
 async function containerAction(name, action, btn) {
-  if (action === "stop" && !await confirmDialog(`Stop “${name}”?`, {
-    title: "stop container", yes: "stop " + name, danger: true,
-    note: "It won't start again until you start it or the host reboots.",
+  if (action === "stop" && !await confirmDialog(tr("svc.stopQ", { name }), {
+    title: tr("svc.stopTitle"), yes: tr("svc.stopYes", { name }), danger: true, note: tr("svc.stopNote"),
   })) return;
   if (btn) { btn.disabled = true; }
   try {
     const r = await fetch(`/__ctl/container/${encodeURIComponent(name)}/${action}${nodeQuery()}`, { method: "POST" });
     const j = await r.json().catch(() => ({}));
-    if (!r.ok) { toast(j.error || `${action} failed (${r.status})`, true); return; }
-    toast(`${name}: ${action} ok`);
+    if (!r.ok) { toast(j.error || tr("svc.failedCode", { action, status: r.status }), true); return; }
+    toast(tr("svc.done", { name, action }));
     refreshNow();                       // pick up the new state
   } catch (e) {
-    toast(`${action} failed`, true);
+    toast(tr("svc.failed", { action }), true);
   } finally {
     if (btn) btn.disabled = false;
   }
 }
 async function showLogs(name) {
-  $("#logs-title").textContent = name + " · logs";
-  $("#logs-body").textContent = "loading…";
+  $("#logs-title").textContent = tr("logs.of", { name });
+  $("#logs-body").textContent = tr("logs.loading");
   $("#logs-overlay").classList.add("open");
   try {
     const r = await fetch(`/__ctl/container/${encodeURIComponent(name)}/logs${nodeQuery()}`);
     const txt = await r.text();
-    $("#logs-body").textContent = r.ok ? (txt || "(no output)") : `error: ${txt}`;
+    $("#logs-body").textContent = r.ok ? (txt || tr("logs.empty")) : tr("logs.error", { text: txt });
     const b = $("#logs-body"); b.scrollTop = b.scrollHeight;
   } catch (e) {
-    $("#logs-body").textContent = "failed to fetch logs";
+    $("#logs-body").textContent = tr("logs.failed");
   }
 }
 
@@ -892,26 +886,24 @@ function tickClocks() {
         fmtTime(now, c.tz);
       el.querySelector(".cdte").textContent =
         now.toLocaleDateString("en-GB", { timeZone: c.tz, weekday: "short", day: "numeric", month: "short" });
-    } catch (e) { el.querySelector(".ct").textContent = "bad tz"; }
+    } catch (e) { el.querySelector(".ct").textContent = tr("clock.badTz"); }
   });
 }
 
 /* ------------------------------------------------------------------ render: weather */
+// weather codes: an icon each; their names are wx.<code> in the dictionary
 const WMO = {
-  0: ["☀️", "clear"], 1: ["\u{1f324}️", "mainly clear"], 2: ["⛅", "partly cloudy"],
-  3: ["☁️", "overcast"], 45: ["\u{1f32b}️", "fog"], 48: ["\u{1f32b}️", "rime fog"],
-  51: ["\u{1f326}️", "light drizzle"], 53: ["\u{1f326}️", "drizzle"], 55: ["\u{1f327}️", "dense drizzle"],
-  61: ["\u{1f327}️", "light rain"], 63: ["\u{1f327}️", "rain"], 65: ["\u{1f327}️", "heavy rain"],
-  71: ["\u{1f328}️", "light snow"], 73: ["\u{1f328}️", "snow"], 75: ["❄️", "heavy snow"],
-  80: ["\u{1f326}️", "showers"], 81: ["\u{1f327}️", "rain showers"], 82: ["⛈️", "violent showers"],
-  95: ["⛈️", "thunderstorm"], 96: ["⛈️", "thunderstorm"], 99: ["⛈️", "hailstorm"]
+  0: "☀️", 1: "\u{1f324}️", 2: "⛅", 3: "☁️", 45: "\u{1f32b}️", 48: "\u{1f32b}️",
+  51: "\u{1f326}️", 53: "\u{1f326}️", 55: "\u{1f327}️", 61: "\u{1f327}️", 63: "\u{1f327}️", 65: "\u{1f327}️",
+  71: "\u{1f328}️", 73: "\u{1f328}️", 75: "❄️", 80: "\u{1f326}️", 81: "\u{1f327}️", 82: "⛈️",
+  95: "⛈️", 96: "⛈️", 99: "⛈️"
 };
 let wxCache = { at: 0, html: "" };
 
 async function renderWeather(force) {
   const host = $("#weather");
   const locs = cfg.weather || [];
-  if (!locs.length) { host.innerHTML = '<span class="muted">no locations — add in settings</span>'; return; }
+  if (!locs.length) { host.innerHTML = `<span class="muted">${esc(tr("wx.none"))}</span>`; return; }
   if (!force && Date.now() - wxCache.at < 10 * 60 * 1000 && wxCache.html) { host.innerHTML = wxCache.html; return; }
   try {
     const parts = await Promise.all(locs.map(async l => {
@@ -919,12 +911,13 @@ async function renderWeather(force) {
         + `&current=temperature_2m,apparent_temperature,weather_code`
         + `&daily=weather_code,temperature_2m_max,temperature_2m_min&timezone=auto&forecast_days=4`;
       const r = await (await fetch(u)).json();
-      const w = WMO[r.current.weather_code] || ["\u{1f321}️", ""];
-      const d = r.daily, dow = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+      const code = r.current.weather_code;
+      const w = code in WMO ? [WMO[code], tr("wx." + code)] : ["\u{1f321}️", ""];
+      const d = r.daily;
       const fc = (d.time || []).slice(1, 4).map((iso, i) => {
-        const n = i + 1, fw = WMO[d.weather_code[n]] || ["", ""];
-        const day = dow[new Date(iso + "T12:00").getDay()];
-        return `<span class="fc"><span class="fcd">${day}</span> ${fw[0]}
+        const n = i + 1, fw = WMO[d.weather_code[n]] || "";
+        const day = tr("day." + new Date(iso + "T12:00").getDay());
+        return `<span class="fc"><span class="fcd">${esc(day)}</span> ${fw}
           <span class="fct">${fmtTemp(d.temperature_2m_max[n])}<span class="fcl">${fmtTemp(d.temperature_2m_min[n])}</span></span></span>`;
       }).join("");
       return `<div class="wc">
@@ -932,8 +925,8 @@ async function renderWeather(force) {
           <span class="wicon">${w[0]}</span>
           <span>
             <span class="wname">${esc(l.name)}</span> <span class="wtemp">${fmtTemp(r.current.temperature_2m)}</span><br>
-            <span class="wsub">${w[1]} · feels ${fmtTemp(r.current.apparent_temperature)}
-            · H ${fmtTemp(d.temperature_2m_max[0])} L ${fmtTemp(d.temperature_2m_min[0])}</span>
+            <span class="wsub">${esc(w[1])} · ${esc(tr("wx.feels", { temp: fmtTemp(r.current.apparent_temperature) }))}
+            · ${esc(tr("wx.hiLo", { hi: fmtTemp(d.temperature_2m_max[0]), lo: fmtTemp(d.temperature_2m_min[0]) }))}</span>
           </span>
         </div>
         <div class="wfc">${fc}</div>
@@ -942,7 +935,7 @@ async function renderWeather(force) {
     wxCache = { at: Date.now(), html: parts.join("") };
     host.innerHTML = wxCache.html;
   } catch (e) {
-    host.innerHTML = '<span class="muted">weather unavailable (no internet?)</span>';
+    host.innerHTML = `<span class="muted">${esc(tr("wx.unavailable"))}</span>`;
   }
 }
 
@@ -1030,14 +1023,14 @@ function openSettings() {
     document.head.appendChild(s);
   });
   return settingsReady.then(() => showSettings(),
-    () => toast("could not open the settings: the session may have ended, reload the page", true));
+    () => toast(tr("set.openFailed"), true));
 }
 
 /* ------------------------------------------------------------------ boot */
 (async function () {
   applyStrings(document);
   await loadConfig();
-  $("#ps1").textContent = "visitor@" + (cfg.title || "host");
+  $("#ps1").textContent = tr("prompt.user", { host: cfg.title || tr("head.host") });
   applyAppearanceDefaults();
   applyBranding();
   renderClocks();
