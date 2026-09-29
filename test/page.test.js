@@ -188,7 +188,7 @@ test("the hub turning kiosk off (or on) takes effect on the same load", () => {
 
 test("turning kiosk on for everyone does not lock the admin's own browser", () => {
   assert.match(HTML, /:root\[data-kiosk\] \.overlay\.open \{ cursor: auto; \}/, "a pointer inside open dialogs");
-  assert.match(HTML, /a screen opts out at <code>\/\?kiosk=0<\/code>/, "the way out is in the settings panel");
+  assert.match(HTML, /a screen opts out at<\/span> <code>\/\?kiosk=0<\/code>/, "the way out is in the settings panel");
   assert.match(HTML, /if \(cfg\.kiosk && !was && lsGet\("kiosk"\) === null\) lsSet\("kiosk", "0"\);/);
 });
 

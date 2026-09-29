@@ -23,6 +23,7 @@ const { createClientResolver, parseCidrList, isWhitelisted } = require("./lib/cl
 const { originAllowed, requestIsHttps } = require("./lib/origin");
 const { VERSION } = require("./lib/version");
 const { createStatic } = require("./lib/static");
+const { tr } = require("./lib/i18n");
 const { writeFileAtomic } = require("./lib/fsutil");
 const os = require("os");
 const { createNodeStore, localAgentEnv } = require("./lib/nodes");
@@ -68,6 +69,8 @@ if (!UP) {
     process.exit(1);
   }
 }
+// the dictionary (hub/lib/i18n.js), served to the page as /js/i18n.js in both modes
+const serveI18n = createStatic(path.join(__dirname, "lib"));
 
 // TRUST_PROXY from an old .env: "0" means trust nobody, anything else maps to
 // the loopback default. TRUSTED_PROXIES wins when both are set.
@@ -852,6 +855,8 @@ async function handle(req, res) {
     return json(404, { error: "unknown control" });
   }
 
+  // the dictionary lives with the hub (it words the login page too); the page loads it from here
+  if (authed && pathname === "/js/i18n.js") { req.url = "/i18n.js"; return serveI18n(req, res); }
   if (authed) return UP ? proxy(req, res) : serveStatic(req, res);
 
   res.writeHead(200, { "content-type": "text/html", "cache-control": "no-store", "content-security-policy": FORM_CSP, "x-content-type-options": "nosniff" });

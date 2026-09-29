@@ -100,6 +100,15 @@ function sparkSvg(pcts) {
     + `stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke"/></svg>`;
 }
 
+/* i18n (spec 10.3): every word comes from the dictionary, js/i18n.js (tr, STRINGS).
+   The markup keeps the English text for the first paint; its keys are in data-i18n. */
+function applyStrings(root) {
+  for (const el of root.querySelectorAll("[data-i18n]")) el.textContent = tr(el.dataset.i18n);
+  for (const a of ["placeholder", "title", "aria-label"]) {
+    for (const el of root.querySelectorAll(`[data-i18n-${a}]`)) el.setAttribute(a, tr(el.getAttribute("data-i18n-" + a)));
+  }
+}
+
 /* ------------------------------------------------------------------ config */
 // per-browser settings; values stored under the pre-rename prefix move over once
 function lsGet(key) {
@@ -1026,6 +1035,7 @@ function openSettings() {
 
 /* ------------------------------------------------------------------ boot */
 (async function () {
+  applyStrings(document);
   await loadConfig();
   $("#ps1").textContent = "visitor@" + (cfg.title || "host");
   applyAppearanceDefaults();
