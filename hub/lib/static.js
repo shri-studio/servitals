@@ -9,6 +9,11 @@
 const fs = require("fs");
 const path = require("path");
 
+// the dashboard's policy (spec 10.5): its own files only, plus the weather service
+const PAGE_CSP = "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; " +
+  "connect-src 'self' https://api.open-meteo.com https://geocoding-api.open-meteo.com; object-src 'none'; " +
+  "base-uri 'none'; form-action 'self'; frame-ancestors 'none'";
+
 const TYPES = {
   ".html": "text/html; charset=utf-8",
   ".js": "text/javascript; charset=utf-8",
@@ -63,10 +68,11 @@ function createStatic(root) {
       // revalidate every time (a 304 is cheap), so an upgrade shows at once
       "cache-control": "no-cache",
       "x-content-type-options": "nosniff",
+      ...(path.extname(real).toLowerCase() === ".html" ? { "content-security-policy": PAGE_CSP } : {}),
     });
     if (req.method === "HEAD") return res.end();
     fs.createReadStream(real).on("error", () => res.destroy()).pipe(res);
   };
 }
 
-module.exports = { createStatic, TYPES };
+module.exports = { createStatic, TYPES, PAGE_CSP };

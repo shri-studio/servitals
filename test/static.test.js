@@ -87,3 +87,18 @@ test("never serves dotfiles, traversal, symlinks out of root or directories", as
 test("a missing root is an error at startup, not at request time", () => {
   assert.throws(() => createStatic(path.join(os.tmpdir(), "sv-no-such-dir-" + process.pid)));
 });
+
+test("pages carry a strict Content-Security-Policy (spec 10.5); other files do not need one", async () => {
+  await withStatic(async (port) => {
+    const r = await request(port, { path: "/" });
+    const csp = r.headers["content-security-policy"];
+    assert.ok(csp, "the page has a policy");
+    for (const want of ["default-src 'self'", "script-src 'self'", "style-src 'self'", "img-src 'self' data:",
+                        "connect-src 'self' https://api.open-meteo.com https://geocoding-api.open-meteo.com",
+                        "object-src 'none'", "base-uri 'none'", "frame-ancestors 'none'", "form-action 'self'"]) {
+      assert.ok(csp.split(/;\s*/).includes(want), want);
+    }
+    assert.doesNotMatch(csp, /unsafe-inline|unsafe-eval/);
+    assert.strictEqual((await request(port, { path: "/fonts/a.woff2" })).headers["content-security-policy"], undefined);
+  });
+});

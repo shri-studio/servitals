@@ -146,3 +146,8 @@ test("the page's files ship: app.css, boot.js and js/*.js (package and install-l
   assert.match(read("packaging/install-local.sh"), /"\$SRC\/www\/app\.css" "\$SRC\/www\/boot\.js"/);
   assert.match(read("packaging/install-local.sh"), /cp -r "\$SRC\/www\/js" "\$SHARE\/www\/js"/);
 });
+
+test("Docker's nginx sends the same policy as the hub", () => {
+  const { PAGE_CSP } = require("../hub/lib/static");
+  assert.ok(read("nginx.conf").includes(`add_header Content-Security-Policy "${PAGE_CSP}" always;`));
+});

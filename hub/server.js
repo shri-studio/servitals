@@ -294,6 +294,9 @@ async function checkPass(u, p) {
 }
 
 /* ---------- pages ---------- */
+// login, ban and /link pages are rendered here: no script at all, only their own inline styles
+const FORM_CSP = "default-src 'none'; style-src 'unsafe-inline'; img-src data:; form-action 'self'; " +
+  "frame-ancestors 'none'; base-uri 'none'";
 const SHELL = (title, inner, wide = false) => `<!DOCTYPE html><html><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${title}</title><style>
@@ -452,7 +455,7 @@ async function linkRoute(req, res, client) {
   // never inside another site's frame: approving is one click
   const html = (body) => {
     res.writeHead(200, { "content-type": "text/html; charset=utf-8", "cache-control": "no-store",
-                         "x-frame-options": "DENY", "content-security-policy": "frame-ancestors 'none'" });
+                         "x-frame-options": "DENY", "content-security-policy": FORM_CSP });
     res.end(body);
   };
   const base = publicBase(req, client);
@@ -581,7 +584,7 @@ async function handle(req, res) {
 
   if (!wl) {
     const b = banInfo(ip);
-    if (b) { res.writeHead(403, { "content-type": "text/html" }); return res.end(bannedPage(ip, b)); }
+    if (b) { res.writeHead(403, { "content-type": "text/html", "content-security-policy": FORM_CSP }); return res.end(bannedPage(ip, b)); }
   }
 
   // health check, no auth
@@ -621,14 +624,14 @@ async function handle(req, res) {
       log.audit("auth.login_fail", { ip, user, remaining: r.remaining });
       if (r.banned) {
         log.audit("auth.banned", { ip, hours: BAN_HOURS });
-        res.writeHead(403, { "content-type": "text/html" });
+        res.writeHead(403, { "content-type": "text/html", "content-security-policy": FORM_CSP });
         return res.end(bannedPage(ip, banInfo(ip) || {}));
       }
       msg = { cls: "warn", text: `invalid credentials — ${r.remaining} attempt${r.remaining === 1 ? "" : "s"} left before this IP is blocked` };
     } else {
       log.audit("auth.login_fail", { ip, user, whitelisted: true });
     }
-    res.writeHead(401, { "content-type": "text/html" });
+    res.writeHead(401, { "content-type": "text/html", "content-security-policy": FORM_CSP });
     return res.end(loginPage(msg, kiosk, next));
   }
 
@@ -646,7 +649,7 @@ async function handle(req, res) {
   if (pathname === "/link") {
     if (authed) return linkRoute(req, res, client);
     if (req.method === "POST") { res.writeHead(401, { "content-type": "text/plain" }); return res.end("login required"); }
-    res.writeHead(200, { "content-type": "text/html" });
+    res.writeHead(200, { "content-type": "text/html", "content-security-policy": FORM_CSP });
     return res.end(loginPage(null, "", "link"));
   }
 
@@ -845,7 +848,7 @@ async function handle(req, res) {
 
   if (authed) return UP ? proxy(req, res) : serveStatic(req, res);
 
-  res.writeHead(200, { "content-type": "text/html" });
+  res.writeHead(200, { "content-type": "text/html", "content-security-policy": FORM_CSP });
   res.end(loginPage(null, kioskFromUrl(req.url)));
 }
 

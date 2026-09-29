@@ -165,3 +165,15 @@ test("/?kiosk survives the login page, with only a fixed value in the redirect",
     assert.match(bad.body, /name="kiosk" value="1"/, "a failed attempt keeps kiosk for the next one");
   });
 });
+
+test("the login page runs no script at all: its policy allows only its own inline styles", async () => {
+  await withHub({}, async (hub) => {
+    const r = await request(hub.port, { path: "/" });
+    assert.match(r.body, /authentication required/);
+    const csp = r.headers["content-security-policy"] || "";
+    assert.match(csp, /default-src 'none'/);
+    assert.match(csp, /style-src 'unsafe-inline'/);
+    assert.match(csp, /frame-ancestors 'none'/);
+    assert.doesNotMatch(csp, /script-src/);
+  });
+});
