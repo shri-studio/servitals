@@ -13,4 +13,9 @@ Thanks for helping. A few rules keep servitals small:
   CPU limits are enforced in CI.
 - **License.** Contributions are accepted under AGPL-3.0-or-later. New source
   files start with `SPDX-License-Identifier: AGPL-3.0-or-later`.
+- **Words on the page** come from the dictionary, `hub/lib/i18n.js`. Add a key
+  there and show it with `tr("key", { name: value })` in the page's scripts,
+  `data-i18n="key"` in `www/index.html` and `trHtml("key")` in the hub's
+  pages; values are plain text and are escaped where they are used.
+  `test/i18n.test.js` fails on a word written straight into the page.
 - **Security issues** go through `SECURITY.md`, not public issues.

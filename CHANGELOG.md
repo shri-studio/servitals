@@ -7,6 +7,11 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- Every word servitals shows comes from one dictionary, `hub/lib/i18n.js`
+  (spec 10.3): the dashboard, its settings and the hub's login, blocked and
+  link pages. English only for now; a translation is a copy with the values
+  changed. The one change on screen: the settings panel lists the panels by
+  their titles (memory, thermal, services, world clocks), not their ids.
 - Install servitals on a phone or desktop (spec 10.3): a web app manifest,
   icons and a service worker that keeps an offline copy of the page (network
   first; data and API answers are never cached). Over HTTPS (or on the hub

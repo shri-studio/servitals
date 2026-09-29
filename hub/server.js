@@ -213,6 +213,12 @@ const escHtml = (s) => String(s == null ? "" : s)
   .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
   .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
 
+// a command on a page, as code
+const codeHtml = (s) => "<code>" + escHtml(s) + "</code>";
+// a dictionary string as page text: the words escaped, each {name} replaced by ready HTML
+const trHtml = (key, html = {}) => tr(key).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+  .replace(/\{(\w+)\}/g, (m, k) => (Object.prototype.hasOwnProperty.call(html, k) ? html[k] : m));
+
 /* ---------- client identity ---------- */
 function whitelisted(client) { return isWhitelisted(client, parseCidrList(readWL())); }
 
@@ -339,28 +345,28 @@ const kioskFromUrl = (url) => {
 };
 // the login page can lead back to /link (and only there)
 const nextValue = (v) => (v === "link" ? "link" : "");
-const loginPage = (msg, kiosk = "", next = "") => SHELL(SITE + " · login", `
-  <h1>${SITE} · authentication required</h1>
+const loginPage = (msg, kiosk = "", next = "") => SHELL(SITE + " · " + trHtml("hub.login"), `
+  <h1>${SITE} · ${trHtml("hub.loginTitle")}</h1>
   <form class="body" method="POST" action="/__auth/login">
     ${kiosk ? `<input type="hidden" name="kiosk" value="${kiosk}">` : ""}
     ${next ? `<input type="hidden" name="next" value="${next}">` : ""}
-    <label>username</label><input name="username" autocomplete="username" autofocus>
-    <label>password</label><input name="password" type="password" autocomplete="current-password">
-    <button type="submit">login</button>
-    ${msg ? `<div class="msg ${msg.cls}">${msg.text}</div>` : ""}
+    <label>${trHtml("hub.username")}</label><input name="username" autocomplete="username" autofocus>
+    <label>${trHtml("hub.password")}</label><input name="password" type="password" autocomplete="current-password">
+    <button type="submit">${trHtml("hub.loginButton")}</button>
+    ${msg ? `<div class="msg ${msg.cls}">${msg.html}</div>` : ""}
   </form>
-  <div class="foot">servitals · failed attempts are rate-limited; ${MAX_FAILS} failures block this IP</div>`);
+  <div class="foot">servitals · ${trHtml("hub.loginFoot", { n: MAX_FAILS })}</div>`);
 
-const bannedPage = (ip, b) => SHELL(SITE + " · blocked", `
-  <h1>${SITE} · access blocked</h1>
+const bannedPage = (ip, b) => SHELL(SITE + " · " + trHtml("hub.blocked"), `
+  <h1>${SITE} · ${trHtml("hub.blockedTitle")}</h1>
   <div class="body">
-    <div class="msg err">This IP address (${escHtml(ip)}) is blocked after repeated failed logins.</div>
+    <div class="msg err">${trHtml("hub.blockedWhy", { ip: escHtml(ip) })}</div>
     <div class="msg" style="color:#5a6675;margin-top:10px">
-      ${b.until ? "Automatically clears " + new Date(b.until).toISOString().replace("T", " ").slice(0, 16) + " UTC."
-                : "Blocked until an administrator removes it."}
+      ${b.until ? trHtml("hub.blockedUntil", { when: new Date(b.until).toISOString().replace("T", " ").slice(0, 16) })
+                : trHtml("hub.blockedForever")}
     </div>
   </div>
-  <div class="foot">admin: <code>servitals-ctl unban ${escHtml(ip)}</code></div>`);
+  <div class="foot">${trHtml("hub.blockedAdmin")} <code>servitals-ctl unban ${escHtml(ip)}</code></div>`);
 
 /* ---------- code-based linking (spec 6.1.1, protocol 5.3) ---------- */
 const links = createLinks();
@@ -419,40 +425,38 @@ async function handleLinkApi(req, res, client) {
   return send(r.status, r.body);
 }
 
-const linkPage = (inner) => SHELL(SITE + " · link a server", `<h1>${SITE} · link a server</h1>${inner}`, true);
+const linkPage = (inner) => SHELL(SITE + " · " + trHtml("link.title"), `<h1>${SITE} · ${trHtml("link.title")}</h1>${inner}`, true);
 const linkCodeForm = (base, msg = "") => linkPage(`
   <form class="body" method="POST" action="/link">
     <input type="hidden" name="step" value="lookup">
-    <div class="msg">On the server, run <code>sudo servitals-agent link ${escHtml(base || "https://this-hub")}</code>
-      and type the code it shows.</div>
-    <label>code</label><input name="code" autocomplete="off" autofocus placeholder="XXXX-XXXX" maxlength="16">
-    <button type="submit">continue</button>
+    <div class="msg">${trHtml("link.run", { command: codeHtml("sudo servitals-agent link " + (base || "https://this-hub")) })}</div>
+    <label>${trHtml("link.code")}</label><input name="code" autocomplete="off" autofocus placeholder="${escHtml(tr("link.codePh"))}" maxlength="16">
+    <button type="submit">${trHtml("link.continue")}</button>
     ${msg ? `<div class="msg err">${escHtml(msg)}</div>` : ""}
   </form>
-  <div class="foot">only enter a code you started yourself, on your own server</div>`);
+  <div class="foot">${trHtml("link.onlyYours")}</div>`);
 const minutes = (ms) => Math.max(0, Math.round(ms / 60000));
 const linkAskForm = (q, msg = "") => linkPage(`
   <form class="body" method="POST" action="/link">
     <input type="hidden" name="step" value="decide">
     <input type="hidden" name="code" value="${escHtml(q.code)}">
-    <div class="msg warn">A server asks to join this hub. Approve only if you ran
-      <code>servitals-agent link</code> on it just now.</div>
+    <div class="msg warn">${trHtml("link.asks", { command: codeHtml("servitals-agent link") })}</div>
     <dl class="kv">
-      <dt>host</dt><dd>${escHtml(q.host)}</dd>
-      <dt>system</dt><dd>${escHtml(q.os)} · agent ${escHtml(q.agent)}</dd>
-      <dt>from</dt><dd>${escHtml(q.ip || "unknown address")}</dd>
-      <dt>asked</dt><dd>${minutes(Date.now() - q.started)} min ago · expires in ${minutes(q.expires - Date.now())} min</dd>
-      <dt>code</dt><dd>${escHtml(q.code)}</dd>
+      <dt>${trHtml("link.host")}</dt><dd>${escHtml(q.host)}</dd>
+      <dt>${trHtml("link.system")}</dt><dd>${trHtml("link.systemValue", { os: escHtml(q.os), agent: escHtml(q.agent) })}</dd>
+      <dt>${trHtml("link.from")}</dt><dd>${q.ip ? escHtml(q.ip) : trHtml("link.unknownAddress")}</dd>
+      <dt>${trHtml("link.asked")}</dt><dd>${trHtml("link.askedValue", { ago: minutes(Date.now() - q.started), left: minutes(q.expires - Date.now()) })}</dd>
+      <dt>${trHtml("link.code")}</dt><dd>${escHtml(q.code)}</dd>
     </dl>
-    <label>name</label><input name="name" value="${escHtml(q.host)}" maxlength="64">
-    <label>tags (optional, comma separated)</label><input name="tags" placeholder="home, nas" maxlength="200">
+    <label>${trHtml("link.name")}</label><input name="name" value="${escHtml(q.host)}" maxlength="64">
+    <label>${trHtml("link.tags")}</label><input name="tags" placeholder="${escHtml(tr("link.tagsPh"))}" maxlength="200">
     <div class="row2">
-      <button type="submit" name="action" value="approve">approve</button>
-      <button type="submit" name="action" value="deny" class="deny">deny</button>
+      <button type="submit" name="action" value="approve">${trHtml("link.approve")}</button>
+      <button type="submit" name="action" value="deny" class="deny">${trHtml("link.deny")}</button>
     </div>
     ${msg ? `<div class="msg err">${escHtml(msg)}</div>` : ""}
   </form>`);
-const LINK_ERRORS = { unknown: "unknown or expired code", too_many: "too many codes tried: wait 10 minutes" };
+const LINK_ERRORS = { unknown: tr("link.unknown"), too_many: tr("link.tooMany") };
 
 async function linkRoute(req, res, client) {
   // never inside another site's frame: approving is one click
@@ -474,8 +478,8 @@ async function linkRoute(req, res, client) {
     const d = links.decide(code, false, who);
     if (!d.ok) return html(linkCodeForm(base, LINK_ERRORS[d.error]));
     log.audit("link.denied", { ip: client.ip, host: d.host, from: d.from });
-    return html(linkPage(`<div class="body"><div class="msg">Denied. The server was told, and nothing was saved.</div>
-      <div class="msg"><a href="/">back to the dashboard</a></div></div>`));
+    return html(linkPage(`<div class="body"><div class="msg">${trHtml("link.denied")}</div>
+      <div class="msg"><a href="/">${trHtml("link.back")}</a></div></div>`));
   }
   const tags = (f.get("tags") || "").split(/[\s,]+/).filter(Boolean);
   let name;
@@ -489,13 +493,13 @@ async function linkRoute(req, res, client) {
     d = links.decide(code, true, who, ({ secret }) => ({ node_id: nodes.add(name, tags, secret).id, account: accountLabel(req, client), name }));
   } catch (e) {
     log.error("link.save_failed", { error: e.message });
-    return html(linkCodeForm(base, "could not save the node: " + e.message));
+    return html(linkCodeForm(base, tr("link.saveFailed", { error: e.message })));
   }
   if (!d.ok) return html(linkCodeForm(base, LINK_ERRORS[d.error]));
   log.audit("link.approved", { ip: client.ip, node: d.result.node_id, name, from: d.from });
-  return html(linkPage(`<div class="body"><div class="msg ok">Linked "${escHtml(name)}".</div>
-    <div class="msg">The server shows up in the fleet within a few seconds.</div>
-    <div class="msg"><a href="/#fleet">open the fleet</a></div></div>`));
+  return html(linkPage(`<div class="body"><div class="msg ok">${trHtml("link.linked", { name: escHtml(name) })}</div>
+    <div class="msg">${trHtml("link.soon")}</div>
+    <div class="msg"><a href="/#fleet">${trHtml("link.openFleet")}</a></div></div>`));
 }
 
 const PUBLIC_FILES = new Set(["/manifest.webmanifest", "/icons/icon-192.png", "/icons/icon-512.png", "/icons/icon-maskable-512.png"]);
@@ -623,7 +627,7 @@ async function handle(req, res) {
       return res.end();
     }
     await new Promise(r => setTimeout(r, 800)); // slow brute force
-    let msg = { cls: "err", text: "invalid credentials" };
+    let msg = { cls: "err", html: trHtml("hub.loginWrong") };
     if (!wl) {
       const r = recordFail(ip);
       log.audit("auth.login_fail", { ip, user, remaining: r.remaining });
@@ -632,7 +636,7 @@ async function handle(req, res) {
         res.writeHead(403, { "content-type": "text/html", "cache-control": "no-store", "content-security-policy": FORM_CSP, "x-content-type-options": "nosniff" });
         return res.end(bannedPage(ip, banInfo(ip) || {}));
       }
-      msg = { cls: "warn", text: `invalid credentials — ${r.remaining} attempt${r.remaining === 1 ? "" : "s"} left before this IP is blocked` };
+      msg = { cls: "warn", html: r.remaining === 1 ? trHtml("hub.loginLeft1") : trHtml("hub.loginLeftN", { n: r.remaining }) };
     } else {
       log.audit("auth.login_fail", { ip, user, whitelisted: true });
     }

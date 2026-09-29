@@ -144,7 +144,8 @@ function wordsOutsideTr(src) {
   for (const l of code.matchAll(lit)) {
     const s = l[2] !== undefined ? l[2] : l[3];
     if (!/<\/?[a-z]/.test(s)) continue;
-    const plain = s.replace(/\$\{(?:[^{}]|\{(?:[^{}]|\{[^{}]*\})*\})*\}/g, "").replace(/&#?\w+;/g, " ");
+    // a command in <code> and the brand are not words to translate
+    const plain = s.replace(/<code>[^<]*<\/code>/g, "<code></code>").replace(/\bservitals\b/g, "").replace(/\$\{(?:[^{}]|\{(?:[^{}]|\{[^{}]*\})*\})*\}/g, "").replace(/&#?\w+;/g, " ");
     for (const [, between] of plain.matchAll(/>([^<]*)</g)) if (letters(between)) found.push(`between tags: ${between.trim().slice(0, 60)}`);
     // text before the first tag, unless it is the end of a tag split over two literals
     for (const [, between] of plain.matchAll(/^([^<]+)</g)) if (letters(between) && !/="/.test(between)) found.push(`before a tag: ${between.trim().slice(0, 60)}`);
@@ -188,5 +189,22 @@ test("the stylesheets show no words of their own: what they add comes from the p
     for (const [, v] of read(f).matchAll(/(?<![\w-])content:\s*([^;}]+)/g)) {
       assert.ok(!/[A-Za-z]{2}/.test(v.replace(/attr\([\w-]+\)/g, "")), `${f}: content: ${v}`);
     }
+  }
+});
+
+test("the hub's login, blocked and link pages take every word from the dictionary", () => {
+  const src = fs.readFileSync(path.join(__dirname, "..", "hub", "server.js"), "utf8");
+  const pages = src.slice(src.indexOf("const loginPage = "), src.indexOf("\n}\n", src.indexOf("async function linkRoute(")));
+  assert.deepStrictEqual(wordsOutsideTr(pages.replace(/\btrHtml\(/g, "tr(")), []);
+});
+
+test("every key the code asks for is in the dictionary, and every key in it is used", () => {
+  const src = [MARKUP, read("js/app.js"), read("js/settings.js"),
+               fs.readFileSync(path.join(__dirname, "..", "hub", "server.js"), "utf8")].join("\n");
+  const asked = new Set([...src.matchAll(/\btr(?:Html)?\("([^"]+)"/g), ...src.matchAll(/data-i18n(?:-[a-z-]+)?="([^"]+)"/g)].map((m) => m[1]));
+  const prefixes = [...asked].filter((k) => k.endsWith("."));
+  for (const k of asked) if (!k.endsWith(".")) assert.ok(Object.prototype.hasOwnProperty.call(STRINGS, k), `missing from the dictionary: ${k}`);
+  for (const k of Object.keys(STRINGS)) {
+    assert.ok(asked.has(k) || prefixes.some((p) => k.startsWith(p)), `never used: ${k}`);
   }
 });

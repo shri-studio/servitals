@@ -634,7 +634,7 @@ function renderMetrics(d) {
       const meta = (cfg.disks && cfg.disks[dk.mount]) || {};
       const name = esc(meta.label || diskLabel(dk.mount));
       const kind = esc(dk.model
-        ? dk.model + " · " + tr(dk.rotational ? "disk.hdd" : "disk.ssd")
+        ? dk.model + " · " + (dk.rotational ? tr("disk.hdd") : tr("disk.ssd"))
         : (dk.fstype || dk.source || ""));
       const warn = meta.warn ? ` <span class="dwarn">⚠ ${esc(meta.warn)}</span>` : "";
       if (dk.mounted === false) {
