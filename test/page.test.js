@@ -443,3 +443,27 @@ test("strict CSP (spec 10.5): no inline script, no event-handler attributes, no 
   assert.doesNotMatch(MARKUP, /js\/settings\.js/);
   assert.match(JS, /s\.src = "js\/settings\.js";/);
 });
+
+test("review: a settings.js that does not load or run tells the person to reload, and is not appended twice", async () => {
+  const appended = [];
+  const toasts = [];
+  const document = { createElement: () => ({}), head: { appendChild: (s) => appended.push(s) } };
+  // settings.js "loaded" but defines nothing: the hub sent its login page instead (session over)
+  const openSettings = pageFn("openSettings", { document, toast: (m) => toasts.push(m), showSettings: () => { throw new Error("never"); },
+    settingsReady: null });
+  const first = openSettings();
+  appended[0].onload();
+  await first;
+  assert.match(toasts[0], /reload the page/);
+  await openSettings();
+  assert.strictEqual(appended.length, 1, "a half-run settings.js is never appended again (its declarations would clash)");
+});
+
+test("review: boot.js runs in <head> before the stylesheet, synchronously; app.js is deferred", () => {
+  const { MARKUP } = require("./helpers/page");
+  const head = MARKUP.slice(0, MARKUP.indexOf("</head>"));
+  const boot = head.indexOf('<script src="boot.js"></script>');
+  assert.ok(boot > 0, "boot.js in <head>, with no defer or async");
+  assert.ok(boot < head.indexOf('<link rel="stylesheet" href="app.css">'), "before the stylesheet: the look is set before the first paint");
+  assert.match(head, /<script src="js\/app\.js" defer><\/script>/);
+});

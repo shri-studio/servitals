@@ -177,3 +177,11 @@ test("the login page runs no script at all: its policy allows only its own inlin
     assert.doesNotMatch(csp, /script-src/);
   });
 });
+
+test("review: the login page is never run as a script (nosniff), e.g. when an expired session asks for js/settings.js", async () => {
+  await withHub({}, async (hub) => {
+    const r = await request(hub.port, { path: "/js/settings.js" });
+    assert.match(r.body, /authentication required/);
+    assert.strictEqual(r.headers["x-content-type-options"], "nosniff");
+  });
+});

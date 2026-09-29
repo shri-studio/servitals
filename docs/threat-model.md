@@ -55,7 +55,8 @@ styles, fonts and images only from the hub (plus `data:` images for the
 favicon), network requests only to the hub and the weather service, no inline
 script or style, no framing, no `<base>`, forms only to the hub. Anything a
 server reports reaches the page as text; even a markup injection could not run
-script or load anything from elsewhere. The login, ban and `/link` pages run no
+script, or fetch or load subresources from elsewhere (a link a person clicks
+still navigates; the policy has no say over navigation). The login, ban and `/link` pages run no
 script at all (`default-src 'none'`).
 
 ## Known and accepted risks

@@ -985,11 +985,19 @@ function openSettings() {
   settingsReady = settingsReady || new Promise((ok, fail) => {
     const s = document.createElement("script");
     s.src = "js/settings.js";
-    s.onload = () => { initSettings(); ok(); };
+    // a file that loads but sets nothing up (the hub sent its login page because the session
+    // ended, or the hub was upgraded under this page) is not appended again: reload
+    s.onload = () => {
+      try {
+        if (typeof initSettings !== "function") throw new Error("settings.js did not load");
+        initSettings(); ok();
+      } catch (e) { fail(e); }
+    };
     s.onerror = () => { settingsReady = null; fail(new Error("settings.js")); };
     document.head.appendChild(s);
   });
-  return settingsReady.then(() => showSettings(), () => toast("could not load the settings; reload the page", true));
+  return settingsReady.then(() => showSettings(),
+    () => toast("could not open the settings: the session may have ended, reload the page", true));
 }
 
 /* ------------------------------------------------------------------ boot */
