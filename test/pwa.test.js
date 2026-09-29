@@ -8,8 +8,8 @@ const test = require("node:test");
 const assert = require("node:assert");
 const fs = require("node:fs");
 const path = require("node:path");
-const { startHub, request } = require("./helpers/hub");
-const { MARKUP } = require("./helpers/page");
+const { startHub, request, login, cookieFrom } = require("./helpers/hub");
+const { MARKUP, JS } = require("./helpers/page");
 
 const WWW = path.join(__dirname, "..", "www");
 const pngSize = (f) => { const b = fs.readFileSync(f); assert.strictEqual(b.subarray(1, 4).toString(), "PNG", f); return [b.readUInt32BE(16), b.readUInt32BE(20)]; };
@@ -46,5 +46,61 @@ test("the manifest and icons are public (browsers fetch them without cookies); n
       assert.match(r.body, /authentication required|not found|Not Found/i, p);
       assert.ok(!/application\/manifest|image\/png|javascript/.test(r.headers["content-type"] || ""), p);
     }
+    const cookie = cookieFrom(await login(hub.port));
+    assert.strictEqual((await request(hub.port, { path: "/sw.js", headers: { cookie } })).headers["content-type"], "text/javascript; charset=utf-8");
   } finally { await hub.stop(); }
+});
+
+// the service worker's code, run with a fake worker scope
+function worker() {
+  const listeners = {};
+  const cached = new Map();
+  const self = { addEventListener: (t, f) => { listeners[t] = f; }, skipWaiting: () => {}, clients: { claim: () => {} },
+                 location: { origin: "https://hub.example" } };
+  const caches = {
+    open: async () => ({ addAll: async (list) => list.forEach((u) => cached.set(u, "shell")), put: async (r, res) => cached.set(r.url || r, res) }),
+    match: async (r) => cached.get(typeof r === "string" ? r : new URL(r.url).pathname),
+    keys: async () => ["servitals-old", "servitals-" + fs.readFileSync(path.join(__dirname, "..", "VERSION"), "utf8").trim()],
+    delete: async (k) => cached.set("deleted:" + k, true),
+  };
+  const src = fs.readFileSync(path.join(WWW, "sw.js"), "utf8");
+  const exports = new Function("self", "caches", "fetch", `${src}; return { route, SHELL };`)(self, caches, async () => { throw new Error("offline"); });
+  return { ...exports, listeners, cached };
+}
+
+test("service worker: data and API answers never go through the cache; the shell does, network first", () => {
+  const { route } = worker();
+  const req = (p, method = "GET", mode = "cors") => ({ url: "https://hub.example" + p, method, mode });
+  for (const p of ["/data.json", "/config.json", "/__ctl/nodes", "/__ctl/node/abcdefghijkm", "/api/v1/agent/push", "/__auth/logout", "/link"]) {
+    assert.strictEqual(route(req(p)), "network", p);
+  }
+  assert.strictEqual(route(req("/", "POST", "navigate")), "network", "never a POST");
+  assert.strictEqual(route({ url: "https://api.open-meteo.com/v1/forecast", method: "GET", mode: "cors" }), "network", "another origin");
+  for (const p of ["/", "/app.css", "/boot.js", "/js/app.js", "/js/settings.js", "/styles/nord.css", "/fonts/jetbrains-mono-400.woff2"]) {
+    assert.strictEqual(route(req(p, "GET", p === "/" ? "navigate" : "cors")), "shell", p);
+  }
+});
+
+test("service worker: install keeps the shell for this version; activate drops older versions", async () => {
+  const w = worker();
+  assert.ok(w.SHELL.includes("/") && w.SHELL.includes("/js/app.js") && w.SHELL.includes("/app.css"));
+  assert.ok(!w.SHELL.some((p) => /data\.json|config\.json|__ctl|\/api\//.test(p)), "no data in the shell");
+  let done;
+  w.listeners.install({ waitUntil: (p) => { done = p; } });
+  await done;
+  assert.strictEqual(w.cached.get("/js/app.js"), "shell");
+  w.listeners.activate({ waitUntil: (p) => { done = p; } });
+  await done;
+  assert.ok(w.cached.get("deleted:servitals-old"));
+  assert.ok(![...w.cached.keys()].some((k) => /deleted:servitals-\d/.test(k)), "the current version stays");
+});
+
+test("the page registers the worker only in a secure context (HTTPS or this machine), and logging out empties its cache", () => {
+  assert.match(JS, /if \("serviceWorker" in navigator && window\.isSecureContext\) navigator\.serviceWorker\.register\("sw\.js"\)/);
+  assert.match(JS, /\$\("\.logout-form"\)\.addEventListener\("submit", \(\) => \{ if \(window\.caches\) caches\.keys\(\)\.then/);
+});
+
+test("the worker's cache name follows the VERSION file", () => {
+  const v = fs.readFileSync(path.join(__dirname, "..", "VERSION"), "utf8").trim();
+  assert.match(fs.readFileSync(path.join(WWW, "sw.js"), "utf8"), new RegExp(`^const VERSION = "${v.replace(/\./g, "\\.")}";`, "m"));
 });

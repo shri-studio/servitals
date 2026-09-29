@@ -121,6 +121,23 @@ const STYLES = ["classic", "8bit", "phosphor", "eink", "contrast", "nord", "gruv
   }
   await page.evaluate(() => localStorage.clear());
 
+  // the installable app: the worker takes over, and the page opens from its copy with the network off
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto(`${base}/?shot=sw#fleet`);
+  const active = await page.evaluate(() => navigator.serviceWorker.ready.then((r) => !!r.active));
+  if (!active) errors.push("the service worker did not activate");
+  const seen = errors.length;
+  await ctx.setOffline(true);
+  await page.goto(`${base}/?shot=offline#fleet`).catch((e) => errors.push(`offline: ${e.message}`));
+  await page.waitForTimeout(800);
+  await page.screenshot({ path: `${out}/offline.png` });
+  const shell = await page.evaluate(() => !!document.querySelector("#fleet") && document.title.length > 0);
+  const says = await page.evaluate(() => document.querySelector("#hostmeta").textContent);
+  errors.splice(seen);   // offline, the data requests fail by design
+  if (!shell) errors.push("offline: the page did not open from the worker's copy");
+  if (!/unreachable/.test(says)) errors.push(`offline: the page does not say the hub is unreachable (${says})`);
+  await ctx.setOffline(false);
+
   const sheet = await ctx.newPage();
   await sheet.setViewportSize({ width: 1600, height: 1000 });
   for (const view of Object.keys(shots)) for (let i = 0; i < shots[view].length; i += 10) {

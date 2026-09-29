@@ -366,12 +366,15 @@ let currentNode = null;       // the node in the node view; null means the local
 const isLocalView = () => !currentNode || currentNode === localNode;
 const nodeQuery = () => (currentNode ? "?node=" + encodeURIComponent(currentNode) : "");
 
+// "ok", "down" (no answer: offline, or the hub is gone) or "login" (the session ended)
+let hubState = "ok";
 async function loadNodes() {
   try {
     const r = await fetch("/__ctl/nodes?t=" + Date.now());
-    if (!r.ok) return;
+    if (!r.ok) { hubState = r.status === 401 ? "login" : "down"; return; }
     fleetNodes = await r.json();
-  } catch (e) { return; }
+    hubState = "ok";
+  } catch (e) { hubState = "down"; return; }
   const local = fleetNodes.find(n => n.local);
   localNode = local ? local.id : null;
   renderTabs();
@@ -488,6 +491,13 @@ function fleetStatus() {
   if (online < shown.length) dot.classList.add(shown.some(n => n.status === "offline") ? "down" : "stale");
   $("#hostname").textContent = cfg.title || "servitals";
   $("#hostmeta").textContent = `${shown.length} nodes · ${online} online`;
+  // the installable app opens from its copy when the hub cannot be reached: say so
+  if (hubState !== "ok") {
+    dot.classList.add("down");
+    $("#hostmeta").textContent = hubState === "login" ? "logged out: reload the page to log in"
+      : "hub unreachable" + (navigator.onLine === false ? " (this device is offline)" : "")
+        + (shown.length ? " · showing the last known servers" : "");
+  }
   $("#lastupdate").textContent = `fleet · ${fmtTime(new Date())}`;
 }
 
@@ -1087,6 +1097,11 @@ function openSettings() {
   });
   $("#net-bars").addEventListener("mouseleave", () => tip.classList.remove("show"));
   $$(".nvtoggle").forEach(s => s.onclick = () => { netView = s.dataset.v; renderNetBars(); });
+
+  // the installable app (spec 10.3): browsers allow a service worker over HTTPS (and on this machine)
+  if ("serviceWorker" in navigator && window.isSecureContext) navigator.serviceWorker.register("sw.js").catch(() => {});
+  // logging out leaves no copy of the page behind
+  $(".logout-form").addEventListener("submit", () => { if (window.caches) caches.keys().then(keys => keys.forEach(k => caches.delete(k))); });
 
   document.addEventListener("keydown", e => {
     if (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA") return;
