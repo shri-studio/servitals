@@ -844,14 +844,15 @@ async function containerAction(name, action, btn) {
     title: tr("svc.stopTitle"), yes: tr("svc.stopYes", { name }), danger: true, note: tr("svc.stopNote"),
   })) return;
   if (btn) { btn.disabled = true; }
+  const verb = tr("svc.act." + action);   // the id is for the API; people read the word
   try {
     const r = await fetch(`/__ctl/container/${encodeURIComponent(name)}/${action}${nodeQuery()}`, { method: "POST" });
     const j = await r.json().catch(() => ({}));
-    if (!r.ok) { toast(j.error || tr("svc.failedCode", { action, status: r.status }), true); return; }
-    toast(tr("svc.done", { name, action }));
+    if (!r.ok) { toast(j.error || tr("svc.failedCode", { action: verb, status: r.status }), true); return; }
+    toast(tr("svc.done", { name, action: verb }));
     refreshNow();                       // pick up the new state
   } catch (e) {
-    toast(tr("svc.failed", { action }), true);
+    toast(tr("svc.failed", { action: verb }), true);
   } finally {
     if (btn) btn.disabled = false;
   }

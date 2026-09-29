@@ -117,25 +117,29 @@ function wordsOutsideTr(src) {
   const lit = /(["'])((?:\\.|(?!\1)[^\\\n])*)\1|`((?:\\.|\$\{(?:[^{}]|\{[^{}]*\})*\}|[^`\\])*)`/g;
   const letters = (s) => /[A-Za-z]{2}/.test(s);
   // 1. arguments of the calls that show text, and assignments to text properties
-  const sinks = /\b(toast|confirmDialog|alert)\(|\.(textContent|innerHTML|title|placeholder)\s*=(?!=)/g;
+  const sinks = /\b(toast|confirmDialog|alert|append|prepend|new Option)\(|\b(setAttribute)\("(?:title|aria-label|placeholder|alt)",|\.(textContent|innerHTML|innerText|title|placeholder|ariaLabel)\s*=(?!=)/g;
   for (let m; (m = sinks.exec(code));) {
     // the literals of the call's own arguments or the assigned value; those inside another
-    // call (a selector, a date format, a map() callback) are not what the sink shows
+    // call (a selector, a date format, a map() callback) are not what the sink shows, but
+    // a ternary's branches are, also inside parentheses
     let depth = 0, parens = 0, end = m.index + m[0].length;
+    const open = [];
     for (; end < code.length; end++) {
       const c = code[end];
-      if ("([{".includes(c)) { depth++; if (c === "(") parens++; }
-      else if (")]}".includes(c)) { if (c === ")") parens--; if (--depth < 0) break; }
+      if ("([{".includes(c)) { depth++; open.push(c); if (c === "(") parens++; }
+      else if (")]}".includes(c)) { open.pop(); if (c === ")") parens--; if (--depth < 0) break; }
       else if (c === ";" && depth === 0) break;
       else if (c === '"' || c === "'" || c === "`") {
         lit.lastIndex = end;
         const l = lit.exec(code);
         if (!l || l.index !== end) continue;
         end = lit.lastIndex - 1;
-        if (parens > 0) continue;
+        const before = code.slice(0, l.index).trimEnd().slice(-1);
+        const branch = (before === "?" || before === ":") && open[open.length - 1] === "(";
+        if (parens > 0 && !branch) continue;
         const s = l[2] !== undefined ? l[2] : l[3].replace(/\$\{(?:[^{}]|\{[^{}]*\})*\}/g, "");
         // HTML is checked below, tag by tag; a selector, the brand or an empty title is not a word
-        if (letters(s) && !/<\/?[a-z]/.test(s) && !/^[#.[][\w\s#.[\]="-]*$/.test(s) && s !== "servitals") found.push(`${m[1] || m[2]}: ${l[0].slice(0, 60)}`);
+        if (letters(s) && !/<\/?[a-z]/.test(s) && !/^[#.[][\w\s#.[\]="-]*$/.test(s) && s !== "servitals") found.push(`${m[1] || m[2] || m[3]}: ${l[0].slice(0, 60)}`);
       }
     }
   }
@@ -164,10 +168,14 @@ test("the check above catches words written straight into the page", () => {
     'toast("saved");', 'toast(j.error || `${a} failed`, true);', 'el.textContent = x ? "off" : "on";',
     'h.innerHTML = `<span class="muted">none</span>`;', 'h.innerHTML = `<b title="drag me">x</b>`;',
     'confirmDialog("sure?", { title: "stop", yes: tr("dlg.confirm") });', "s.innerHTML = `peak${sep}`;",
+    'toast(x + (ok ? " worked" : " failed"));', 'el.textContent = a + (b ? "words here" : "");',
+    'el.setAttribute("title", "drag me");', 'el.append("hello world");', 'el.innerText = "hello";',
+    'el.ariaLabel = "close";', 'sel.add(new Option("every server", "all"));',
   ];
   for (const b of bad) assert.notDeepStrictEqual(wordsOutsideTr(b), [], b);
   const good = [
-    'toast(tr("set.saved"));', 'toast(j.error || tr("svc.failed", { action }), true);', '$("#x").textContent = n + "%";',
+    'toast(tr("set.saved"));', 'toast(j.error || tr("svc.failed", { action: verb }), true);',
+    'x.textContent = new Date().toLocaleDateString(undefined, { weekday: "short" });', 'el.setAttribute("title", tr("set.managed"));', '$("#x").textContent = n + "%";',
     'h.innerHTML = `<span class="muted">${esc(tr("set.none"))}</span>`;', 'el.closest(".big").className = "big";',
     '$("#x").textContent = tr("mode." + m);', 'b.title = "";',
   ];
@@ -196,6 +204,26 @@ test("the hub's login, blocked and link pages take every word from the dictionar
   const src = fs.readFileSync(path.join(__dirname, "..", "hub", "server.js"), "utf8");
   const pages = src.slice(src.indexOf("const loginPage = "), src.indexOf("\n}\n", src.indexOf("async function linkRoute(")));
   assert.deepStrictEqual(wordsOutsideTr(pages.replace(/\btrHtml\(/g, "tr(")), []);
+  // the login message is built where the login is checked
+  const login = src.slice(src.indexOf('if (req.method === "POST" && req.url === "/__auth/login")'), src.indexOf("return res.end(loginPage(msg, kiosk, next));"));
+  assert.ok(login.length > 200, "the login handler was found");
+  assert.deepStrictEqual([...login.matchAll(/\bmsg = \{[^}]*\}/g)].map((m) => m[0]).filter((m) => !/html: (r\.remaining === 1 \? )?trHtml\(/.test(m)), []);
+});
+
+test("a container action is named in the dictionary's words, not by its id", () => {
+  for (const a of ["start", "stop", "restart"]) assert.ok(STRINGS["svc.act." + a], a);
+  const js = read("js/app.js");
+  assert.match(js, /const verb = tr\("svc\.act\." \+ action\);/);
+  assert.doesNotMatch(js, /tr\("svc\.(done|failed|failedCode)", \{[^}]*\baction\b(?!:)/, "never the raw id");
+});
+
+// an element whose text the dictionary sets must hold nothing else: textContent would remove it
+function taggedWithChildren(html) {
+  return [...html.matchAll(/<([a-z0-9]+)[^>]* data-i18n="([^"]+)"[^>]*>([\s\S]*?)<\/\1>/g)].filter((m) => m[3].includes("<")).map((m) => m[2]);
+}
+test("an element tagged data-i18n holds only its text", () => {
+  assert.deepStrictEqual(taggedWithChildren(MARKUP), []);
+  assert.deepStrictEqual(taggedWithChildren('<h2 data-i18n="panel.mem">memory <span id="mem-note"></span></h2>'), ["panel.mem"]);
 });
 
 test("every key the code asks for is in the dictionary, and every key in it is used", () => {
