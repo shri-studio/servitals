@@ -495,6 +495,8 @@ async function linkRoute(req, res, client) {
     <div class="msg"><a href="/#fleet">open the fleet</a></div></div>`));
 }
 
+const PUBLIC_FILES = new Set(["/manifest.webmanifest", "/icons/icon-192.png", "/icons/icon-512.png", "/icons/icon-maskable-512.png"]);
+
 /* ---------- proxy ---------- */
 function proxy(req, res) {
   const u = new URL(req.url, UP);
@@ -644,6 +646,10 @@ async function handle(req, res) {
 
   const authed = validCookie(getCookie(req, "sv_session"));
   const pathname = (req.url || "/").split("?")[0];
+
+  // the app manifest and its icons: browsers fetch them without cookies (spec 10.3), and
+  // nothing in them is private. Exact paths only.
+  if (req.method === "GET" && PUBLIC_FILES.has(pathname)) return UP ? proxy(req, res) : serveStatic(req, res);
 
   // a person approves a linking server here (spec 6.1.1)
   if (pathname === "/link") {
