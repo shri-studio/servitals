@@ -27,13 +27,28 @@ self.addEventListener("activate", (e) => {
     .then(() => self.clients.claim()));
 });
 
+// keep an answer only if it is the file asked for: never one marked no-store (the login
+// page) and never HTML for a script, a style or a font
+function keep(request, res) {
+  if (!res.ok || res.type !== "basic") return false;
+  if (/no-store/.test(res.headers.get("cache-control") || "")) return false;
+  return request.mode === "navigate" || !/text\/html/.test(res.headers.get("content-type") || "");
+}
+
+// the last copy: a page load falls back to the page; a file never cached stays missing
+function lastCopy(request) {
+  return caches.match(request).then((hit) => hit || (request.mode === "navigate" ? caches.match("/") : undefined));
+}
+
 self.addEventListener("fetch", (e) => {
   if (route(e.request) !== "shell") return;
   e.respondWith(fetch(e.request).then((res) => {
-    if (res.ok && res.type === "basic") {
+    // a proxy in front of the hub answers 502/503/504 when the hub is down: as good as offline
+    if (res.status >= 500) return lastCopy(e.request).then((hit) => hit || res);
+    if (keep(e.request, res)) {
       const copy = res.clone();
       caches.open(CACHE).then((c) => c.put(e.request, copy));
     }
     return res;
-  }).catch(() => caches.match(e.request).then((hit) => hit || caches.match("/"))));
+  }, () => lastCopy(e.request).then((hit) => hit || Response.error())));
 });

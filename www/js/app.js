@@ -368,6 +368,17 @@ const nodeQuery = () => (currentNode ? "?node=" + encodeURIComponent(currentNode
 
 // "ok", "down" (no answer: offline, or the hub is gone) or "login" (the session ended)
 let hubState = "ok";
+// what an answer says about the hub: JSON is the hub's own; the login page (200 or 401)
+// means the session ended; any other answer is a proxy saying the hub is down
+function hubStateOf(r) {
+  if (r.status === 401) return "login";
+  if (/json/.test(r.headers.get("content-type") || "")) return "ok";
+  return r.ok ? "login" : "down";
+}
+function hubText() {
+  return hubState === "login" ? "logged out: reload the page to log in"
+    : "hub unreachable" + (navigator.onLine === false ? " (this device is offline)" : "");
+}
 async function loadNodes() {
   try {
     const r = await fetch("/__ctl/nodes?t=" + Date.now());
@@ -494,9 +505,8 @@ function fleetStatus() {
   // the installable app opens from its copy when the hub cannot be reached: say so
   if (hubState !== "ok") {
     dot.classList.add("down");
-    $("#hostmeta").textContent = hubState === "login" ? "logged out: reload the page to log in"
-      : "hub unreachable" + (navigator.onLine === false ? " (this device is offline)" : "")
-        + (shown.length ? " · showing the last known servers" : "");
+    $("#hostmeta").textContent = hubText()
+      + (hubState === "down" && shown.length ? " · showing the last known servers" : "");
   }
   $("#lastupdate").textContent = `fleet · ${fmtTime(new Date())}`;
 }
@@ -504,7 +514,10 @@ function fleetStatus() {
 async function tick() {
   if (view === "fleet") { await loadNodes(); renderFleet(); return; }
   try {
-    const r = await fetch((currentNode ? `/__ctl/node/${currentNode}` : "data.json") + "?t=" + Date.now());
+    let r;
+    try { r = await fetch((currentNode ? `/__ctl/node/${currentNode}` : "data.json") + "?t=" + Date.now()); }
+    catch (e) { hubState = "down"; throw e; }
+    hubState = hubStateOf(r);
     const d = await r.json();
     if (!r.ok) throw new Error(d.error || "no snapshot");
     lastData = d;
@@ -522,7 +535,8 @@ function setStatus(ts, hardFail) {
   const budget = ((lastData && lastData.interval) || cfg.refreshSec || 60) * 2 + 120;
   let label;
   dot.classList.remove("down", "stale");
-  if (hardFail && !ts) { dot.classList.add("down"); label = "agent unreachable"; }
+  if (hardFail && hubState !== "ok") { dot.classList.add("down"); label = hubText(); }
+  else if (hardFail && !ts) { dot.classList.add("down"); label = "agent unreachable"; }
   else if (age > budget) { dot.classList.add("stale"); label = "stale " + fmtDur(age) + " old"; }
   else { label = "online"; }
   $("#lastupdate").textContent = label + " · " +
