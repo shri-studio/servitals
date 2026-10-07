@@ -39,7 +39,7 @@ disks_json() {
   local -A info_of=()
   IFS=',' read -ra words <<< "$list"
   for m in "${words[@]}"; do
-    m="${m#"${m%%[![:space:]]*}"}"; m="${m%"${m##*[![:space:]]}"}"
+    m="${m#"${m%%[![:space:]]*}"}"; m="${m%"${m##*[![:space:]]}"}"; m=${m//$'\t'/ }   # a tab would split the row
     [ -n "$m" ] && MS+=("$m")
   done
   while IFS=$'\t' read -r k v; do info_of[$k]=$v; done < <(mount_infos "$(printf '%s\n' "${MS[@]}")")

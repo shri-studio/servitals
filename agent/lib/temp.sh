@@ -33,7 +33,8 @@ temp_json() {
     for f in "$hw"/temp*_input; do
       [ -r "$f" ] || continue
       base=${f%_input}
-      if [ -r "${base}_label" ]; then line_of "${base}_label"; lbl=$REPLY; else lbl=$nm; fi
+      # a label that is missing, unreadable or empty: the chip's name
+      line_of "${base}_label"; lbl=${REPLY:-$nm}
       deg_of "$f"; val=$REPLY
       in_range "$val" && lines+="$nm"$'\t'"$lbl"$'\t'"$val"$'\n'
     done
@@ -41,7 +42,7 @@ temp_json() {
   if [ -z "$lines" ]; then
     for z in "$HOST"/sys/class/thermal/thermal_zone*; do
       [ -r "$z/temp" ] || continue
-      if [ -r "$z/type" ]; then line_of "$z/type"; lbl=$REPLY; else lbl=zone; fi
+      line_of "$z/type"; lbl=${REPLY:-zone}
       deg_of "$z/temp"; val=$REPLY
       in_range "$val" && lines+="thermal"$'\t'"$lbl"$'\t'"$val"$'\n'
     done

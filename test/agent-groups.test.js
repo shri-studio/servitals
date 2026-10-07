@@ -507,3 +507,15 @@ test("temp_json rounds millidegrees as printf %.0f does (half to even), and keep
   assert.deepStrictEqual(d.sensors.map((s) => [s.label, s.value]),
     [["Package id 0", 46], ["Core 0", 48], ["Core 1", -6], ["coretemp", 51]], "no label: the chip's name");
 });
+
+test("disks_json: a tab inside a DISKS entry is a space, as before, not a lost disks group", () => {
+  const d = json(runGroup(fakeHost(BASE), "disks_json", { DISKS: "/,/a\tb" }));
+  assert.deepStrictEqual(d.map((x) => [x.mount, x.mounted]), [["/", true], ["/a b", false]]);
+});
+
+test("temp_json: a label that cannot be read falls back to the chip's name, as before", () => {
+  const host = fakeHost({ ...BASE, "sys/class/hwmon/hwmon0/temp3_input": "45000\n" });
+  fs.mkdirSync(path.join(host, "sys/class/hwmon/hwmon0/temp3_label"));   // a read fails for everyone, root too
+  const d = json(runGroup(host, "temp_json"));
+  assert.deepStrictEqual(d.sensors.find((s) => s.value === 45), { label: "coretemp", value: 45 });
+});
