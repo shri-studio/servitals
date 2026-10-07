@@ -53,11 +53,14 @@ function variant(base, c, i, round) {
                    io: { some: [0, 41.2, 0.3][i], full: [0, 37.5, 0.1][i] } };
     s.mem.used = Math.round(s.mem.total * [0, 0.34, 0.62][i]);
     s.temp = { package: [0, 39, 58][i], max: [0, 41, 61][i], sensors: [{ label: "cpu", value: [0, 39, 58][i] }] };
-    s.disks = [{ mount: "/", mounted: true, source: "/dev/sda1", fstype: "ext4", size: 500e9,
+    s.disks = [{ mount: "/", mounted: true, source: "/dev/sda1", fstype: "ext4", size: 500e9, device: "sda1",
                  used: [0, 470e9, 20e9][i], avail: [0, 30e9, 480e9][i], pct: [0, 94, 4][i] }];
+    s.io = [{ device: "sda1", readBytes: 0, writeBytes: 0 }];
     s.docker = i === 1 ? (s.docker || []).slice(0, 3) : [];
   }
   if (s.net) { s.net.rxBytes += round * 5e6 * (i + 1); s.net.txBytes += round * 1e6; }
+  // the disks read and write between pushes, so the storage panel has rates to show
+  for (const d of s.io || []) { d.readBytes += round * 4e7 * (i + 1); d.writeBytes += round * 6e6; }
   for (const d of s.docker || []) if (d.cpuUsec != null) d.cpuUsec += round * 2e6;
   return JSON.stringify(s);
 }

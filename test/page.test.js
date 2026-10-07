@@ -293,6 +293,17 @@ test("the cpu panel shows iowait and steal, and pressure, coloured when high; th
   assert.match(HTML, /\$\("#cpu-psi-row"\)\.classList\.toggle\("hidden", !d\.pressure\);/);
 });
 
+test("each disk shows its device's read and write rates, once the hub can compare two samples", () => {
+  const esc = (x) => String(x).replace(/[&<>"']/g, (m) => "&#" + m.charCodeAt(0) + ";");
+  const diskIo = pageFn("diskIo", { esc, fmtRate: (v) => v + " B/s" });
+  const io = [{ device: "sdb1", readRate: 4000, writeRate: 0 }, { device: "sda2", readRate: null, writeRate: null }];
+  assert.strictEqual(diskIo({ device: "sdb1" }, io), ' <span class="dio">· read 4000 B/s · write 0 B/s</span>');
+  assert.strictEqual(diskIo({ device: "sda2" }, io), "", "no rate yet");
+  assert.strictEqual(diskIo({ mount: "/mnt/nas" }, io), "", "a network share has no device");
+  assert.strictEqual(diskIo({ device: "sdb1" }, undefined), "", "an older agent sends no io");
+  assert.match(HTML, /<span class="\$\{freeCls\}">· \$\{esc\(tr\("disk\.free", \{ size: fmtBytes\(dk\.avail\) \}\)\)\}<\/span>\$\{diskIo\(dk, d\.io\)\}\$\{warn\}/);
+});
+
 test("fleet cards show the numbers chosen in settings", () => {
   const CARD_KEYS = ["cpu", "mem", "temp", "disk", "containers", "iowait"];
   assert.match(HTML, new RegExp(`const CARD_KEYS = ${JSON.stringify(CARD_KEYS).replace(/[[\]]/g, "\\$&").replace(/,/g, ", ")};`));

@@ -7,6 +7,9 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- Disk activity (spec 9): each disk in the storage panel shows how fast its
+  device reads and writes, from `/proc/diskstats` (LVM and dm devices too;
+  network shares, btrfs and zfs have no block device and show none).
 - Waiting shows (spec 9): the cpu panel adds iowait and steal (time the cpu
   sat idle waiting on disk, and time a hypervisor took) and the kernel's
   pressure stall information for cpu, memory and io. A server stuck on its
@@ -63,6 +66,8 @@ All notable changes to this project are documented here. The format follows
   resends a too-large snapshot without its lists.
 
 ### Fixed
+- A source the agent cannot read (missing, or denied as `/proc/stat` is on
+  Android) now gives null for its group instead of failing the whole tick.
 - The settings panel is tidier: sections are separated, fields have captions
   and line up, every button and checkbox matches the page (also in dark
   mode), and nothing is squeezed on a phone. CI checks it at 390 and 1280 px.

@@ -85,6 +85,7 @@ const STRINGS = {
   "disk.ssd": "ssd",
   "disk.notMounted": "not mounted",
   "disk.free": "{size} free",
+  "disk.io": "read {read} · write {write}",
 
   // network
   "net.down": "down",

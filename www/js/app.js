@@ -92,6 +92,13 @@ function pressureHtml(p) {
   }).join(" / ");
 }
 
+// a disk's read and write rates (its block device's), once the hub has two samples
+function diskIo(dk, io) {
+  const r = dk.device && (io || []).find(x => x.device === dk.device);
+  if (!r || r.readRate == null || r.writeRate == null) return "";
+  return ` <span class="dio">· ${esc(tr("disk.io", { read: fmtRate(r.readRate), write: fmtRate(r.writeRate) }))}</span>`;
+}
+
 function meter(pct, forceCls) {
   pct = clamp(pct, 0, 100);
   const cls = forceCls || HCLS[health(pct, 70, 90)];
@@ -678,7 +685,7 @@ function renderMetrics(d) {
           <span class="v">${fmtBytes(dk.used)} / ${fmtBytes(dk.size)}</span>
         </div>
         ${meter(dk.pct, cls)}
-        <div class="dmodel">${kind} <span class="${freeCls}">· ${esc(tr("disk.free", { size: fmtBytes(dk.avail) }))}</span>${warn}</div>
+        <div class="dmodel">${kind} <span class="${freeCls}">· ${esc(tr("disk.free", { size: fmtBytes(dk.avail) }))}</span>${diskIo(dk, d.io)}${warn}</div>
       </div>`;
     }).join("");
   }
