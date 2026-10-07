@@ -390,3 +390,29 @@ test("processes_json: more than five, a name with quotes, no /proc/uptime, and a
     assert.deepStrictEqual(json(r).mem.map((p) => p.pid), [8, 7, 6, 5, 4]);
   }
 });
+
+test("processes_json: a name with a newline cannot pose as another pid (comm is the process's own to set)", () => {
+  const host = fakeHost({ ...BASE, "proc/uptime": "100.00 50.00\n",
+    // a process named "x\n1 (systemd": its stat line splits in two after cat
+    "proc/3358320/stat": stat(3358320, "x\n1 (systemd", 0, 0, 77, 9000),
+    "proc/1/stat": stat(1, "systemd", 0, 0, 1, 10) });
+  const d = json(runGroup(host, "processes_json"));
+  assert.deepStrictEqual(d.mem.map((p) => [p.pid, p.name]), [[3358320, "x 1 (systemd"], [1, "systemd"]],
+    "the pid comes from the path; the split name is joined back");
+});
+
+test("processes_json: a comma-decimal locale (de_DE) does not break the cpu shares, also with mawk", () => {
+  assert.match(fs.readFileSync(path.join(LIB, "processes.sh"), "utf8"), /\| LC_ALL=C awk /, "awk prints numbers the C way");
+  const loc = spawnSync("bash", ["-c", "locale -a 2>/dev/null | grep -i -m1 -E '^(de_DE|fr_FR)[.]utf-?8$'"], { encoding: "utf8" }).stdout.trim();
+  const mawk = spawnSync("bash", ["-c", "command -v mawk"], { encoding: "utf8" }).stdout.trim();
+  if (!loc || !mawk) return;   // the source check above still holds
+  const bin = fs.mkdtempSync(path.join(os.tmpdir(), "sv-bin-"));
+  fs.symlinkSync(mawk, path.join(bin, "awk"));
+  const host = fakeHost({ ...BASE, "proc/uptime": "100.00 50.00\n", "proc/10/stat": stat(10, "postgres", 1000, 0, 1, 5) });
+  const state = fs.mkdtempSync(path.join(os.tmpdir(), "sv-state-"));
+  const env = { STATE: state, PATH: `${bin}:${process.env.PATH}`, LC_ALL: loc };
+  json(runGroup(host, "processes_json", env));
+  fs.writeFileSync(path.join(host, "proc/uptime"), "110.00 50.00\n");
+  fs.writeFileSync(path.join(host, "proc/10/stat"), stat(10, "postgres", 1500, 0, 1, 5));
+  assert.strictEqual(json(runGroup(host, "processes_json", env)).cpu[0].cpuPct, 50);
+});
