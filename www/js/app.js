@@ -107,6 +107,20 @@ function procRows(list, value) {
     + `<span class="k pname">${esc(p.name)}</span><span class="v">${value(p)}</span></div>`).join("");
 }
 
+// the system panel's rows: updates, a reboot the system asks for, systemd's failed units;
+// a count the agent could not read is a dash
+function systemHtml(u) {
+  const units = Array.isArray(u.failedUnits) ? u.failedUnits : null;
+  return {
+    updates: typeof u.updates !== "number" ? "–" : u.updates === 0 ? esc(tr("sys.upToDate"))
+      : u.updates + (u.security > 0 ? ` · <span class="hl-amber">${esc(tr("sys.security", { n: u.security }))}</span>` : ""),
+    reboot: u.rebootRequired ? `<span class="hl-amber">${esc(tr("sys.rebootYes"))}</span>` : esc(tr("sys.rebootNo")),
+    rebootTitle: (u.rebootPkgs || []).join(", "),
+    failed: !units ? "–" : units.length ? `<span class="hl-red">${units.length}</span>` : esc(tr("sys.none")),
+    units: esc((units || []).join(", ")),
+  };
+}
+
 function meter(pct, forceCls) {
   pct = clamp(pct, 0, 100);
   const cls = forceCls || HCLS[health(pct, 70, 90)];
@@ -170,10 +184,10 @@ async function loadConfig() {
   const builtin = {
     title: "servitals", favicon: "", refreshSec: 60,
     weather: [], clocks: [], disks: {},
-    panels: { mem: 1, cpu: 1, temp: 1, storage: 1, network: 1, docker: 1, procs: 1, clocks: 1, weather: 1 },
-    panelOrder: ["mem", "cpu", "temp", "storage", "network", "docker", "procs", "clocks", "weather"],
+    panels: { mem: 1, cpu: 1, temp: 1, storage: 1, network: 1, docker: 1, procs: 1, system: 1, clocks: 1, weather: 1 },
+    panelOrder: ["mem", "cpu", "temp", "storage", "network", "docker", "procs", "system", "clocks", "weather"],
     panelSize: { mem: "normal", cpu: "normal", temp: "normal", storage: "wide",
-                 network: "wide", docker: "full", procs: "wide", clocks: "normal", weather: "normal" }
+                 network: "wide", docker: "full", procs: "wide", system: "normal", clocks: "normal", weather: "normal" }
   };
   // a conf.d file may set only a few panels: the others keep their built-in values
   for (const k of ["panels", "panelSize"]) {
@@ -504,11 +518,13 @@ function cardNumbers() {
   return want.length ? want.slice(0, 4) : ["cpu", "mem", "temp"];
 }
 // the numbers a fleet card can show; their labels are card.<key> in the dictionary
-const CARD_KEYS = ["cpu", "mem", "temp", "disk", "containers", "iowait"];
+const CARD_KEYS = ["cpu", "mem", "temp", "disk", "containers", "iowait", "updates"];
 function cardValue(k, s) {
   if (k === "cpu" || k === "mem" || k === "iowait") return fmtVal(s[k], "%");
   if (k === "temp") return fmtTemp(s.temp, true);
   if (k === "disk") return s.disk ? s.disk.pct + "%" : "–";
+  // pending updates, and ↻ when the system asks for a reboot
+  if (k === "updates") return [typeof s.updates === "number" ? s.updates : "", s.reboot ? "↻" : ""].filter(String).join(" ") || "–";
   return s.containers ? `${s.running}/${s.containers}` : "–";
 }
 
@@ -736,11 +752,21 @@ function renderMetrics(d) {
     $("#procs-mem").innerHTML = procRows(d.processes.mem, p => fmtBytes(p.rss));
   }
 
+  // system: updates, reboot, failed units (Debian and Ubuntu hosts, and any with systemd)
+  if (d.ubuntu) {
+    const sys = systemHtml(d.ubuntu);
+    $("#sys-updates").innerHTML = sys.updates;
+    $("#sys-reboot").innerHTML = sys.reboot;
+    $("#sys-reboot").title = sys.rebootTitle;
+    $("#sys-failed").innerHTML = sys.failed;
+    $("#sys-units").innerHTML = sys.units;
+  }
+
   // docker — stash and render (sort / expand handled separately)
   if (d.docker) { dockerData = d.docker; renderDocker(); } else dockerData = null;
 
   // a node without a group: hide its panel, never keep the previous node's
-  for (const [panel, group] of [["mem", "mem"], ["cpu", "cpu"], ["temp", "temp"], ["storage", "disks"], ["docker", "docker"], ["procs", "processes"]]) {
+  for (const [panel, group] of [["mem", "mem"], ["cpu", "cpu"], ["temp", "temp"], ["storage", "disks"], ["docker", "docker"], ["procs", "processes"], ["system", "ubuntu"]]) {
     const el = $(`[data-panel=${panel}]`);
     if (el) el.classList.toggle("hidden", !d[group] || shown[panel] === false);
   }

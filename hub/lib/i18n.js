@@ -53,6 +53,7 @@ const STRINGS = {
   "panel.network": "network",
   "panel.docker": "services",
   "panel.procs": "processes",
+  "panel.system": "system",
   "panel.clocks": "world clocks",
   "panel.weather": "weather",
 
@@ -142,6 +143,16 @@ const STRINGS = {
   "procs.none": "none yet",
   "procs.pid": "pid {pid}",
 
+  // system: updates, reboot, failed units
+  "sys.updates": "updates",
+  "sys.reboot": "reboot",
+  "sys.failed": "failed units",
+  "sys.upToDate": "up to date",
+  "sys.security": "{n} security",
+  "sys.rebootYes": "required",
+  "sys.rebootNo": "not needed",
+  "sys.none": "none",
+
   // dialogs
   "dlg.close": "[esc]",
   "dlg.confirm": "confirm",
@@ -163,6 +174,7 @@ const STRINGS = {
   "card.disk": "disk",
   "card.containers": "up",
   "card.iowait": "iowait",
+  "card.updates": "updates",
 
   // clocks and weather
   "clock.badTz": "bad tz",
@@ -224,6 +236,7 @@ const STRINGS = {
   "set.card.disk": "fullest disk",
   "set.card.containers": "containers",
   "set.card.iowait": "iowait (waiting on disk)",
+  "set.card.updates": "updates (↻ reboot needed)",
   "set.serversHint": "name and tags save at once; pin and hide with the other settings",
   "set.srvName": "name of {name}",
   "set.srvTags": "tags of {name}",

@@ -24,6 +24,8 @@ test("a card's numbers come from the view", () => {
   assert.deepStrictEqual(s.disk, { mount: "/srv", pct: 93 });
   assert.deepStrictEqual([s.cpu, s.iowait, s.mem, s.temp, s.containers, s.running], [12.4, 31, 25, 46, 2, 1]);
   assert.strictEqual(summary({ cpu: { usage: 5 } }).iowait, null, "an older agent sends no iowait");
+  assert.deepStrictEqual([summary({ ubuntu: { updates: 3, rebootRequired: true } }).updates, summary({ ubuntu: { updates: 3, rebootRequired: true } }).reboot], [3, true]);
+  assert.deepStrictEqual([summary({}).updates, summary({}).reboot], [null, false]);
   assert.strictEqual(s.trend.length, 20);
   assert.strictEqual(summary(null), null);
 });

@@ -72,7 +72,7 @@ test("vnStat bar titles from remote nodes are escaped, also in the tooltip", () 
 });
 
 test("a panel whose group the node does not send is hidden, never left from the previous node", () => {
-  assert.match(HTML, /for \(const \[panel, group\] of \[\["mem", "mem"\], \["cpu", "cpu"\], \["temp", "temp"\], \["storage", "disks"\], \["docker", "docker"\], \["procs", "processes"\]\]\)/);
+  assert.match(HTML, /for \(const \[panel, group\] of \[\["mem", "mem"\], \["cpu", "cpu"\], \["temp", "temp"\], \["storage", "disks"\], \["docker", "docker"\], \["procs", "processes"\], \["system", "ubuntu"\]\]\)/);
   assert.match(HTML, /\.classList\.toggle\("hidden", !d\[group\] \|\| shown\[panel\] === false\)/);
 });
 
@@ -325,14 +325,33 @@ test("the processes panel lists the busiest and the largest, names escaped, the 
   assert.match(HTML, /procRows\(d\.processes\.mem, p => fmtBytes\(p\.rss\)\)/);
 });
 
+test("the system panel: updates and security updates, a reboot and its packages, failed units by name", () => {
+  const esc = (x) => String(x).replace(/[&<>"']/g, (m) => "&#" + m.charCodeAt(0) + ";");
+  const systemHtml = pageFn("systemHtml", { esc });
+  assert.deepStrictEqual(systemHtml({ updates: 12, security: 5, rebootRequired: true, rebootPkgs: ["linux-base"],
+    failedUnits: ["a<b>.service", "c.service"] }), {
+    updates: '12 · <span class="hl-amber">5 security</span>',
+    reboot: '<span class="hl-amber">required</span>', rebootTitle: "linux-base",
+    failed: '<span class="hl-red">2</span>', units: "a&#60;b&#62;.service, c.service",
+  });
+  assert.deepStrictEqual(systemHtml({ updates: 0, security: 0, rebootRequired: false, rebootPkgs: [], failedUnits: [] }),
+    { updates: "up to date", reboot: "not needed", rebootTitle: "", failed: "none", units: "" });
+  assert.deepStrictEqual(systemHtml({ rebootRequired: false, rebootPkgs: [] }),
+    { updates: "–", reboot: "not needed", rebootTitle: "", failed: "–", units: "" }, "unknown counts and a container agent: a dash");
+  for (const id of ["sys-updates", "sys-reboot", "sys-failed", "sys-units"]) assert.ok(HTML.includes(`id="${id}"`), id);
+  assert.match(HTML, /data-panel="system"/);
+});
+
 test("fleet cards show the numbers chosen in settings", () => {
-  const CARD_KEYS = ["cpu", "mem", "temp", "disk", "containers", "iowait"];
+  const CARD_KEYS = ["cpu", "mem", "temp", "disk", "containers", "iowait", "updates"];
   assert.match(HTML, new RegExp(`const CARD_KEYS = ${JSON.stringify(CARD_KEYS).replace(/[[\]]/g, "\\$&").replace(/,/g, ", ")};`));
   const cardNumbers = pageFn("cardNumbers", { CARD_KEYS, cfg: { fleet: { card: ["disk", "containers", "bogus"] } } });
   assert.deepStrictEqual(cardNumbers(), ["disk", "containers"]);
   assert.deepStrictEqual(pageFn("cardNumbers", { CARD_KEYS, cfg: {} })(), ["cpu", "mem", "temp"]);
   const cardValue = pageFn("cardValue", { fmtVal: pageFunction("fmtVal"), fmtTemp: () => "" });
   assert.deepStrictEqual([cardValue("iowait", { iowait: 31 }), cardValue("iowait", { iowait: null })], ["31%", "–"]);
+  assert.deepStrictEqual([cardValue("updates", { updates: 12, reboot: true }), cardValue("updates", { updates: 0, reboot: false }),
+    cardValue("updates", { updates: null, reboot: true }), cardValue("updates", {})], ["12 ↻", "0", "↻", "–"]);
   for (const id of ["cfg-f-sort", "cfg-f-group", "cfg-servers"]) assert.ok(HTML.includes(`id="${id}"`), id);
   assert.match(HTML, /for \(const g of arrangeFleet\(fleetNodes, cfg\.fleet \|\| \{\}\)\)/, "renderFleet uses it");
 });
@@ -462,7 +481,7 @@ test("conf.d review: a file with a few panels keeps the built-in panel list and 
   const fromHub = { panels: { weather: false }, panelSize: { docker: "full" }, _managed: ["panelSize.docker", "panels.weather"] };
   const run = new Function("fetch", "lsGet", `let DEFAULTS = {}, cfg = {}; ${helpers}\n${src}\nreturn loadConfig().then(() => ({ DEFAULTS, cfg }));`);
   const { cfg } = await run(async () => ({ json: async () => structuredClone(fromHub) }), () => null);
-  assert.deepStrictEqual(cfg.panelOrder, ["mem", "cpu", "temp", "storage", "network", "docker", "procs", "clocks", "weather"]);
+  assert.deepStrictEqual(cfg.panelOrder, ["mem", "cpu", "temp", "storage", "network", "docker", "procs", "system", "clocks", "weather"]);
   assert.strictEqual(cfg.panels.weather, false);
   assert.strictEqual(cfg.panels.mem, 1, "built-in panels stay");
   assert.deepStrictEqual([cfg.panelSize.storage, cfg.panelSize.docker], ["wide", "full"]);

@@ -64,6 +64,9 @@ function variant(base, c, i, round) {
       mem: [proc(640, "jellyfin", 6.4, 1410), proc(911, "postgres", 0.1, 820), proc(1290, "smbd", 12.1, 96),
             proc(812, "rsync", 38.5, 52), proc(1, "systemd", 0.3, 14)],
     } : undefined;
+    // the nas waits for a reboot and has a failed unit; the pi's older agent sends neither
+    s.ubuntu = i === 1 ? { updates: 12, security: 5, rebootRequired: true, rebootPkgs: ["linux-image-7.0.0-38-generic"],
+                           failedUnits: ["smartd.service"] } : undefined;
     s.docker = i === 1 ? (s.docker || []).slice(0, 3) : [];
   }
   if (s.net) { s.net.rxBytes += round * 5e6 * (i + 1); s.net.txBytes += round * 1e6; }

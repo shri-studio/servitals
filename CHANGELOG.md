@@ -7,6 +7,11 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- System (spec 9): a new panel shows pending and security updates (as
+  update-notifier counted them; the agent never runs apt), whether the system
+  asks for a reboot and which packages ask, and systemd's failed units. Fleet
+  cards can show updates, with ↻ when a reboot is needed.
+  `COLLECT_UBUNTU=0` turns it off.
 - Processes (spec 9): a new panel lists the five busiest processes by cpu
   (share of one core since the last tick, as `top` shows it) and the five
   largest by memory, so a busy server shows what keeps it busy even outside
