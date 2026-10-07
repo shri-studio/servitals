@@ -333,3 +333,60 @@ test("a laptop or VM with only acpitz still reports a temperature", () => {
 });
 
 module.exports = { fakeHost, runGroup, BASE, json };
+
+// /proc/[pid]/stat: pid (comm) state ppid ... utime(14) stime(15) ... starttime(22) vsize rss(24) ...
+const stat = (pid, comm, utime, stime, start, rss) =>
+  `${pid} (${comm}) S 1 1 1 0 -1 0 0 0 0 0 ${utime} ${stime} 0 0 20 0 1 0 ${start} 1000 ${rss} 0 0 0 0\n`;
+
+test("processes_json: the five busiest by cpu (share of one core since the last tick) and the five largest by memory", () => {
+  const procs = {
+    "proc/uptime": "100.00 50.00\n",
+    "proc/10/stat": stat(10, "postgres", 1000, 500, 111, 2000),
+    "proc/20/stat": stat(20, "web (worker) x", 100, 0, 222, 500),   // a name may hold ") "
+    "proc/30/stat": stat(30, "kworker/0:1", 50, 50, 333, 0),
+    "proc/40/stat": stat(40, "gone", 10, 10, 444, 100),
+  };
+  const host = fakeHost({ ...BASE, ...procs });
+  const state = fs.mkdtempSync(path.join(os.tmpdir(), "sv-state-"));
+  const first = json(runGroup(host, "processes_json", { STATE: state }));
+  assert.deepStrictEqual(first.cpu, [], "nothing to compare on the first tick");
+  assert.deepStrictEqual(first.mem.map((p) => [p.pid, p.name, p.rss]),
+    [[10, "postgres", 2000 * 4096], [20, "web (worker) x", 500 * 4096], [40, "gone", 100 * 4096]], "largest first; no kernel threads");
+  // 10 s later: postgres used 5 s of cpu, the kworker 1 s; pid 40 exited and a new process took pid 20
+  fs.writeFileSync(path.join(host, "proc/uptime"), "110.00 50.00\n");
+  fs.writeFileSync(path.join(host, "proc/10/stat"), stat(10, "postgres", 1300, 700, 111, 2100));
+  fs.writeFileSync(path.join(host, "proc/20/stat"), stat(20, "newcomer", 900, 0, 999, 10));
+  fs.writeFileSync(path.join(host, "proc/30/stat"), stat(30, "kworker/0:1", 100, 100, 333, 0));
+  fs.rmSync(path.join(host, "proc/40"), { recursive: true });
+  const second = json(runGroup(host, "processes_json", { STATE: state }));
+  assert.deepStrictEqual(second.cpu, [
+    { pid: 10, name: "postgres", cpuPct: 50, rss: 2100 * 4096 },
+    { pid: 30, name: "kworker/0:1", cpuPct: 10, rss: 0 },
+  ], "a reused pid (new start time) is not compared with the old process");
+  assert.strictEqual(second.mem[0].cpuPct, 50);
+  assert.strictEqual(second.mem.find((p) => p.pid === 20).cpuPct, null);
+});
+
+test("processes_json: more than five, a name with quotes, no /proc/uptime, and a process the agent may not read", () => {
+  const many = { "proc/uptime": "100.00 50.00\n" };
+  for (let i = 1; i <= 8; i++) many[`proc/${i}/stat`] = stat(i, i === 3 ? 'say "hi"\\' : `p${i}`, 0, 0, i, i * 10);
+  const host = fakeHost({ ...BASE, ...many });
+  const d = json(runGroup(host, "processes_json"));
+  assert.deepStrictEqual(d.mem.map((p) => p.pid), [8, 7, 6, 5, 4], "the top five");
+  const quoted = fakeHost({ ...BASE, ...many, "proc/8/stat": stat(8, 'say "hi"\\', 0, 0, 8, 999) });
+  assert.strictEqual(json(runGroup(quoted, "processes_json")).mem[0].name, 'say "hi"\\');
+  const noUptime = fakeHost({ ...BASE, ...many });
+  fs.rmSync(path.join(noUptime, "proc/uptime"));
+  assert.strictEqual(runGroup(noUptime, "processes_json").stdout.trim(), "null");
+  if (process.getuid && process.getuid() !== 0) {
+    // another user's process the agent may not read (Android hides them): skipped, the rest still counts.
+    // mawk (Ubuntu's default awk) stops at a file it cannot open, so the agent must not hand it one.
+    const denied = fakeHost({ ...BASE, ...many });
+    fs.chmodSync(path.join(denied, "proc/1/stat"), 0);
+    const bin = fs.mkdtempSync(path.join(os.tmpdir(), "sv-bin-"));
+    const mawk = spawnSync("bash", ["-c", "command -v mawk"], { encoding: "utf8" }).stdout.trim();
+    if (mawk) fs.symlinkSync(mawk, path.join(bin, "awk"));
+    const r = runGroup(denied, "processes_json", { PATH: `${bin}:${process.env.PATH}` });
+    assert.deepStrictEqual(json(r).mem.map((p) => p.pid), [8, 7, 6, 5, 4]);
+  }
+});

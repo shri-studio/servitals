@@ -239,6 +239,10 @@ Rules that apply to every field:
   device number, so LVM and dm show as `dm-N`); it is absent for network
   shares, btrfs and zfs. `io` holds the counters of those devices, each once,
   in bytes (`/proc/diskstats` sectors × 512); the hub derives the rates.
+- `processes` holds the five busiest processes by cpu and the five largest by
+  memory (`rss` in bytes). `cpuPct` is the share of one core since the
+  agent's last tick (as `top` shows it, so above 100 for a busy multi-threaded
+  process), or null when there is nothing to compare yet.
 - `cpu.usage` is time neither idle nor waiting on I/O; `cpu.iowait` is idle
   time with I/O outstanding. A server stuck on its disk shows a low `usage`
   with a high `iowait` and `pressure.io`.

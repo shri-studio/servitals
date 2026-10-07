@@ -19,6 +19,9 @@ DISKS="${DISKS:-auto}"   # "auto": every real filesystem; or a comma-separated l
 VNSTAT_DB="$HOST/var/lib/vnstat"
 NCPU=$(grep -c '^processor' "$HOST/proc/cpuinfo" 2>/dev/null || echo 1)
 [ "${NCPU:-0}" -gt 0 ] 2>/dev/null || NCPU=1
+# clock ticks per second and the page size, for the processes group
+CLK_TCK=$(getconf CLK_TCK 2>/dev/null || echo 100)
+PAGE_SIZE=$(getconf PAGESIZE 2>/dev/null || echo 4096)
 # cpu delta counters, wake trigger, last push; systemd's StateDirectory= sets STATE_DIRECTORY
 STATE="${STATE_DIR:-${STATE_DIRECTORY:-/var/lib/servitals-agent}}"
 mkdir -p "$STATE"
@@ -47,7 +50,7 @@ group() {
 }
 
 collect() {  # $1 = destination file
-  local host mem=null cpu=null temp=null disks=null io=null net=null docker=null pressure=null
+  local host mem=null cpu=null temp=null disks=null io=null net=null docker=null pressure=null processes=null
   host=$(host_json)
   if on "${COLLECT_MEM:-1}"; then group mem mem_json; fi
   if on "${COLLECT_CPU:-1}"; then group cpu cpu_json; fi
@@ -59,14 +62,15 @@ collect() {  # $1 = destination file
     group net net_json "$IFACE"
   fi
   if on "${COLLECT_DOCKER:-1}"; then group docker docker_json; fi
+  if on "${COLLECT_PROCESSES:-1}"; then group processes processes_json; fi
 
   jq -cn \
     --argjson host "$host" --argjson mem "$mem" --argjson cpu "$cpu" \
     --argjson temp "$temp" --argjson disks "$disks" --argjson io "$io" --argjson net "${net:-null}" \
-    --argjson docker "$docker" --argjson pressure "$pressure" --argjson interval "$INTERVAL" --arg agent "$AGENT_NAME" \
+    --argjson docker "$docker" --argjson processes "$processes" --argjson pressure "$pressure" --argjson interval "$INTERVAL" --arg agent "$AGENT_NAME" \
     '{schema: 1, ts: (now * 1000 | floor), interval: $interval, agent: $agent,
       host: ($host + {os: "linux"}), mem: $mem, cpu: $cpu, pressure: $pressure, temp: $temp,
-      disks: $disks, io: $io, net: $net, docker: $docker}' \
+      disks: $disks, io: $io, net: $net, docker: $docker, processes: $processes}' \
     > "$1.tmp" 2>/dev/null && mv "$1.tmp" "$1"
 }
 
