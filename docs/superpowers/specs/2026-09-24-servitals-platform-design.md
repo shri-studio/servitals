@@ -33,7 +33,10 @@ self-hosted hub that relays chosen nodes to the hosted service.
 - Remote control of containers on nodes other than the hub's own host.
 - A general time-series database or query language. Prometheus users get a
   `/metrics` endpoint later (roadmap).
-- Agents for macOS, Windows or FreeBSD (roadmap: Go agent).
+- Agents for macOS, Windows or FreeBSD. servitals is Linux-first: the agent
+  targets Linux and Linux-like systems (Ubuntu and Debian first; containers,
+  WSL and Android under Termux as they allow). Other operating systems stay
+  possible later through `host.os`, without a promise (decided 2026-10-07).
 - Paid plans or billing.
 
 ## 2. Names, license, packages
@@ -470,8 +473,14 @@ New groups in v1 (all readable without root):
 | battery | `/sys/class/power_supply/BAT*` capacity and status |
 
 - Missing sources give `null` for that group, never an error.
-- The schema is OS-neutral: `host.os` is required, every group is optional,
-  so the future Go agent can fill what its OS offers.
+- Linux-first (decided 2026-10-07): a metric group may read Linux-only
+  sources (`/proc`, `/sys`, PSI, apt, systemd) with no OS abstraction.
+- Every group is optional and must degrade: a source that is missing **or
+  unreadable** (permission denied, as for `/proc/stat` on Android) gives
+  `null` for that part, never a failed tick. A host that can read only a few
+  groups (a container, a phone under Termux) still reports those.
+- `host.os` stays in the schema, so an agent for another system could report
+  into the same hub later.
 
 ## 10. User interface
 
@@ -864,8 +873,12 @@ works on its own.
 
 - v1.1: teletext, 3270 and blueprint styles; theme editor with JSON
   import and export; dark-at-sunset schedule; accent colour per node.
-- Go agent for Linux, macOS, Windows and FreeBSD (gopsutil is in the Ubuntu
-  archive), replacing the bash agent.
+- Android under Termux: run the bash agent without systemd or apt (`link`
+  plus a loop started by `termux-boot`), check every group degrades where
+  Android denies access, battery from `termux-battery-status`, and
+  `host.os` "android" so the fleet can show a phone.
+- An agent for another operating system (macOS, Windows, FreeBSD), only if
+  people ask for it; the protocol already allows it through `host.os`.
 - Uptime checks (HTTP, TCP, ping, certificate expiry) run by the hub.
 - API tokens, read-only REST API, Prometheus `/metrics`.
 - Multi-user roles on self-hosted hubs.

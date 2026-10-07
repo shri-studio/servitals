@@ -1,7 +1,7 @@
 # servitals agent protocol, version 1
 
-This is the contract between an agent and a hub. The bash agent, the future
-Go agent, the self-hosted hub, the hosted service and the relay all implement
+This is the contract between an agent and a hub. The bash agent, any later
+agent, the self-hosted hub, the hosted service and the relay all implement
 it, and the conformance tests in `test/conformance/` check them against the
 vectors at the end of this file.
 
