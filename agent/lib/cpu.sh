@@ -10,9 +10,11 @@ share() { local p=0; [ "$2" -gt 0 ] && p=$(( (100 * $1) / $2 )); [ "$p" -lt 0 ] 
 
 cpu_json() {
   local line idle total wait steal v pct=0 iowait=0 stolen=0 dt pt pi pw ps
-  line=$(grep '^cpu ' "$HOST/proc/stat")
+  # missing or denied (Android forbids /proc/stat to apps): null, like any group without its source
+  line=$(grep '^cpu ' "$HOST/proc/stat" 2>/dev/null)
   # cpu user nice system idle iowait irq softirq steal guest guest_nice
   set -- $line
+  [ "$#" -ge 5 ] || { echo null; return; }
   idle=$(( $5 + $6 )); wait=$6; steal=${9:-0}
   total=0; shift
   for v in "$@"; do total=$((total + v)); done

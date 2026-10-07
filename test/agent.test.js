@@ -43,3 +43,25 @@ test("COLLECT_<GROUP>=0 turns a group off", () => {
   assert.ok(d.mem.total > 0);
   fs.rmSync(dir, { recursive: true, force: true });
 });
+
+test("a host that denies the cpu and memory files still reports what it can (a phone under Termux)", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "sv-root-"));
+  for (const [f, text] of Object.entries({ "etc/hostname": "phone\n", "proc/uptime": "100.0 50.0\n",
+    "proc/1/mountinfo": "25 1 8:2 / / rw - ext4 /dev/root rw\n" })) {
+    fs.mkdirSync(path.join(root, path.dirname(f)), { recursive: true });
+    fs.writeFileSync(path.join(root, f), text);
+  }
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sv-agent-"));
+  const out = path.join(dir, "data.json");
+  const r = spawnSync("bash", [path.join(__dirname, "..", "agent", "collect.sh")], {
+    env: { ...process.env, HOST_ROOT: root, OUT_FILE: out, STATE_DIR: dir, ONCE: "1", DISKS: "/", COLLECT_DOCKER: "0" },
+    timeout: 30000,
+  });
+  assert.strictEqual(r.status, 0, r.stderr.toString());
+  const d = JSON.parse(fs.readFileSync(out, "utf8"));
+  assert.strictEqual(d.host.name, "phone");
+  assert.strictEqual(d.cpu, null);
+  assert.strictEqual(d.mem, null);
+  fs.rmSync(dir, { recursive: true, force: true });
+  fs.rmSync(root, { recursive: true, force: true });
+});

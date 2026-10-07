@@ -37,20 +37,28 @@ for f in "$HERE"/lib/*.sh; do
 done
 
 on() { [ "${1:-1}" != 0 ]; }   # COLLECT_<GROUP>=0 turns a group off; it becomes null
+# group VAR FUNCTION [ARG]: VAR gets FUNCTION's JSON, or null when it failed (no
+# output, or an error message), so one unreadable source never costs the whole
+# tick (spec 9: every group degrades)
+group() {
+  local out
+  out=$("$2" "${@:3}")
+  case $out in "{"*|"["*) printf -v "$1" '%s' "$out" ;; *) printf -v "$1" null ;; esac
+}
 
 collect() {  # $1 = destination file
   local host mem=null cpu=null temp=null disks=null net=null docker=null pressure=null
   host=$(host_json)
-  if on "${COLLECT_MEM:-1}"; then mem=$(mem_json); fi
-  if on "${COLLECT_CPU:-1}"; then cpu=$(cpu_json); fi
-  if on "${COLLECT_PRESSURE:-1}"; then pressure=$(pressure_json); fi
-  if on "${COLLECT_TEMP:-1}"; then temp=$(temp_json); fi
-  if on "${COLLECT_DISKS:-1}"; then disks=$(disks_json); fi
+  if on "${COLLECT_MEM:-1}"; then group mem mem_json; fi
+  if on "${COLLECT_CPU:-1}"; then group cpu cpu_json; fi
+  if on "${COLLECT_PRESSURE:-1}"; then group pressure pressure_json; fi
+  if on "${COLLECT_TEMP:-1}"; then group temp temp_json; fi
+  if on "${COLLECT_DISKS:-1}"; then group disks disks_json; fi
   if on "${COLLECT_NET:-1}"; then
     [ -n "$IFACE" ] || IFACE=$(pick_iface)   # resolve once; retry only if still unknown
-    net=$(net_json "$IFACE")
+    group net net_json "$IFACE"
   fi
-  if on "${COLLECT_DOCKER:-1}"; then docker=$(docker_json); fi
+  if on "${COLLECT_DOCKER:-1}"; then group docker docker_json; fi
 
   jq -cn \
     --argjson host "$host" --argjson mem "$mem" --argjson cpu "$cpu" \

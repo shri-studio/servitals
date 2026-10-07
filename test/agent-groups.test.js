@@ -67,6 +67,29 @@ test("mem_json in bytes", () => {
   });
 });
 
+test("a source that is missing or denied gives null for its group, never an error (Android denies /proc/stat)", () => {
+  const bare = { ...BASE };
+  delete bare["proc/stat"]; delete bare["proc/meminfo"];
+  const host = fakeHost(bare);
+  for (const g of ["cpu_json", "mem_json"]) {
+    const r = runGroup(host, g);
+    assert.strictEqual(r.status, 0, `${g}: ${r.stderr}`);
+    assert.strictEqual(r.stdout.trim(), "null", g);
+  }
+  // a file that exists but cannot be read (permission denied); root reads everything
+  if (process.getuid && process.getuid() !== 0) {
+    const denied = fakeHost(BASE);
+    for (const f of ["proc/stat", "proc/meminfo"]) fs.chmodSync(path.join(denied, f), 0);
+    for (const g of ["cpu_json", "mem_json"]) {
+      const r = runGroup(denied, g);
+      assert.strictEqual(r.status, 0, `${g}: ${r.stderr}`);
+      assert.strictEqual(r.stdout.trim(), "null", g);
+    }
+  }
+  const odd = fakeHost({ ...BASE, "proc/stat": "intr 1\n", "proc/meminfo": "Nothing: 1 kB\n" });
+  for (const g of ["cpu_json", "mem_json"]) assert.strictEqual(runGroup(odd, g).stdout.trim(), "null", `${g}: no usable line`);
+});
+
 test("cpu_json is 0 on the first tick and a delta afterwards", () => {
   const host = fakeHost(BASE);
   const state = fs.mkdtempSync(path.join(os.tmpdir(), "sv-state-"));

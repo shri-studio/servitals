@@ -5,6 +5,8 @@
 # mem: /proc/meminfo in bytes
 
 mem_json() {
+  # missing or denied (Android): null, like any group without its source
+  [ -r "$HOST/proc/meminfo" ] || { echo null; return; }
   # kB values * 1024 overflow busybox awk's 32-bit int printf("%d"); use %.0f
   # (awk math is double precision, exact well past terabytes).
   awk '
@@ -17,6 +19,7 @@ mem_json() {
     /^SwapTotal:/    {st=$2*1024.0}
     /^SwapFree:/     {sf=$2*1024.0}
     END {
+      if (t <= 0) { print "null"; exit }
       cache=c+b+sr; used=t-a; if (used<0) used=0
       printf "{\"total\":%.0f,\"used\":%.0f,\"available\":%.0f,\"free\":%.0f,\"cache\":%.0f,\"swapTotal\":%.0f,\"swapUsed\":%.0f}",
              t, used, a, f, cache, st, st-sf
