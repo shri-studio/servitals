@@ -114,7 +114,8 @@ function systemHtml(u) {
   return {
     updates: typeof u.updates !== "number" ? "–" : u.updates === 0 ? esc(tr("sys.upToDate"))
       : u.updates + (u.security > 0 ? ` · <span class="hl-amber">${esc(tr("sys.security", { n: u.security }))}</span>` : ""),
-    reboot: u.rebootRequired ? `<span class="hl-amber">${esc(tr("sys.rebootYes"))}</span>` : esc(tr("sys.rebootNo")),
+    reboot: typeof u.rebootRequired !== "boolean" ? "–"
+      : u.rebootRequired ? `<span class="hl-amber">${esc(tr("sys.rebootYes"))}</span>` : esc(tr("sys.rebootNo")),
     rebootTitle: (u.rebootPkgs || []).join(", "),
     failed: !units ? "–" : units.length ? `<span class="hl-red">${units.length}</span>` : esc(tr("sys.none")),
     units: esc((units || []).join(", ")),

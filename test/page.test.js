@@ -338,6 +338,8 @@ test("the system panel: updates and security updates, a reboot and its packages,
     { updates: "up to date", reboot: "not needed", rebootTitle: "", failed: "none", units: "" });
   assert.deepStrictEqual(systemHtml({ rebootRequired: false, rebootPkgs: [] }),
     { updates: "–", reboot: "not needed", rebootTitle: "", failed: "–", units: "" }, "unknown counts and a container agent: a dash");
+  assert.deepStrictEqual(systemHtml({ failedUnits: [] }),
+    { updates: "–", reboot: "–", rebootTitle: "", failed: "none", units: "" }, "a host that never writes the reboot flag: a dash");
   for (const id of ["sys-updates", "sys-reboot", "sys-failed", "sys-units"]) assert.ok(HTML.includes(`id="${id}"`), id);
   assert.match(HTML, /data-panel="system"/);
 });

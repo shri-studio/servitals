@@ -244,10 +244,13 @@ Rules that apply to every field:
   agent's last tick (as `top` shows it, so above 100 for a busy multi-threaded
   process), or null when there is nothing to compare yet.
 - `ubuntu` counts updates as update-notifier last wrote them (the agent never
-  runs apt): `updates` and `security` are absent when that file is missing or
-  worded in a way the agent does not know. `failedUnits` comes from the
-  host's own systemd and is absent where the agent cannot ask it (a container
-  agent). The group is null on a host with neither dpkg nor systemd.
+  runs apt): `updates` and `security` (standard and ESM security updates) are
+  absent when that file is missing, or written in a language or wording the
+  agent does not know (it reads English). `rebootRequired` and `rebootPkgs`
+  are present only on a host with dpkg, the one family that writes the flag.
+  `failedUnits` comes from the agent's own host's systemd and is absent where
+  it cannot ask (a container agent, no bus, no answer within 5 s). The group
+  is null on a host with neither dpkg nor the agent's own systemd.
 - `cpu.usage` is time neither idle nor waiting on I/O; `cpu.iowait` is idle
   time with I/O outstanding. A server stuck on its disk shows a low `usage`
   with a high `iowait` and `pressure.io`.

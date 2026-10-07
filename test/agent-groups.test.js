@@ -452,3 +452,39 @@ test("failed_units: the names of systemd's failed units, at most 32", () => {
   assert.strictEqual(names.length, 32);
   assert.deepStrictEqual(names.slice(0, 2), ["unit0.service", "unit1.service"]);
 });
+
+// a fake systemctl, and this host's systemd present (HOST is a fixture, so the agent would not ask)
+function fakeSystemctl(script) {
+  const bin = fs.mkdtempSync(path.join(os.tmpdir(), "sv-bin-"));
+  fs.writeFileSync(path.join(bin, "systemctl"), `#!/bin/sh\n${script}\n`, { mode: 0o755 });
+  return { PATH: `${bin}:${process.env.PATH}` };
+}
+const native = (fn) => `systemd_here() { return 0; }; ${fn}`;
+
+test("ubuntu_json: a systemctl that fails or hangs gives no failedUnits, never an empty list that reads as healthy", () => {
+  const host = fakeHost({ ...BASE, "var/lib/dpkg/status": "" });
+  const ok = json(runGroup(host, native("ubuntu_json"), fakeSystemctl("echo 'a.service loaded failed failed A'")));
+  assert.deepStrictEqual(ok.failedUnits, ["a.service"]);
+  const broken = json(runGroup(host, native("ubuntu_json"), fakeSystemctl("echo 'Failed to connect to bus' >&2; exit 1")));
+  assert.strictEqual(broken.failedUnits, undefined, "no bus: unknown, not none");
+  const t0 = Date.now();
+  const stuck = json(runGroup(host, native("ubuntu_json"), fakeSystemctl("sleep 30")));
+  assert.strictEqual(stuck.failedUnits, undefined);
+  assert.ok(Date.now() - t0 < 9000, "a stuck bus costs at most the timeout");
+});
+
+test("ubuntu_json: a systemd host without dpkg (Fedora, Arch) reports failed units, and no reboot flag it never writes", () => {
+  const d = json(runGroup(fakeHost(BASE), native("ubuntu_json"), fakeSystemctl("true")));
+  assert.deepStrictEqual(d, { failedUnits: [] });
+});
+
+test("ubuntu_json: ESM security updates on an Ubuntu Pro host count as security updates", () => {
+  const host = fakeHost({ ...BASE, "var/lib/dpkg/status": "",
+    [NOTIFIER]: "3 updates can be applied immediately.\n2 of these updates are ESM Infra security updates.\n" +
+      "1 of these updates is a standard security update.\n4 additional security updates can be applied with ESM Apps.\n" });
+  const d = json(runGroup(host, "ubuntu_json"));
+  assert.deepStrictEqual([d.updates, d.security], [3, 3], "ESM Infra plus standard; the \"additional\" ones need a subscription");
+  const one = fakeHost({ ...BASE, "var/lib/dpkg/status": "",
+    [NOTIFIER]: "1 update can be applied immediately.\n1 of these updates is an ESM Apps security update.\n" });
+  assert.strictEqual(json(runGroup(one, "ubuntu_json")).security, 1);
+});
