@@ -47,6 +47,10 @@ function variant(base, c, i, round) {
   if (c.name) {
     s.host.name = c.name;
     s.cpu.usage = [0, 4, 23][i] + round;
+    // the nas waits on its disks: low cpu, high iowait and io pressure
+    Object.assign(s.cpu, { iowait: [0, 34, 1][i], steal: 0 });
+    s.pressure = { cpu: { some: [0, 0.4, 2.1][i], full: 0 }, mem: { some: 0, full: 0 },
+                   io: { some: [0, 41.2, 0.3][i], full: [0, 37.5, 0.1][i] } };
     s.mem.used = Math.round(s.mem.total * [0, 0.34, 0.62][i]);
     s.temp = { package: [0, 39, 58][i], max: [0, 41, 61][i], sensors: [{ label: "cpu", value: [0, 39, 58][i] }] };
     s.disks = [{ mount: "/", mounted: true, source: "/dev/sda1", fstype: "ext4", size: 500e9,

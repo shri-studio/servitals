@@ -7,6 +7,11 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- Waiting shows (spec 9): the cpu panel adds iowait and steal (time the cpu
+  sat idle waiting on disk, and time a hypervisor took) and the kernel's
+  pressure stall information for cpu, memory and io. A server stuck on its
+  disk no longer looks idle at "11% cpu". Fleet cards can show iowait.
+  `COLLECT_PRESSURE=0` in `agent.env` turns pressure off.
 - Every word servitals shows comes from one dictionary, `hub/lib/i18n.js`
   (spec 10.3): the dashboard, its settings and the hub's login, blocked and
   link pages. English only for now; a translation is a copy with the values

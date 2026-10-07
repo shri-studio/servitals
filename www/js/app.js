@@ -72,6 +72,26 @@ function health(v, warn, crit) { return v >= crit ? "crit" : v >= warn ? "warn" 
 const HCLS = { ok: "c-green", warn: "c-amber", crit: "c-red" };   // big numbers / meters
 const HL   = { ok: "",        warn: "hl-amber", crit: "hl-red" };  // inline value highlight
 
+// a share of time: whole percent, one decimal below 10 for the kernel's averages
+function fmtShare(v) {
+  if (v == null || !Number.isFinite(Number(v))) return "–";
+  v = Number(v);
+  return (v < 10 && !Number.isInteger(v) ? v.toFixed(1) : Math.round(v)) + "%";
+}
+// iowait / steal: the cpu idle while the disk works, and time a hypervisor took
+function waitHtml(c) {
+  const steal = c.steal || 0;
+  return `<span class="${HL[health(c.iowait, 10, 30)]}">${fmtShare(c.iowait)}</span>`
+    + ` / <span class="${HL[health(steal, 5, 20)]}">${fmtShare(steal)}</span>`;
+}
+// pressure (PSI "some", last 10 s) for cpu / mem / io; a resource the kernel lacks is a dash
+function pressureHtml(p) {
+  return ["cpu", "mem", "io"].map(k => {
+    const v = p[k] && p[k].some;
+    return v == null ? "–" : `<span class="${HL[health(v, 10, 30)]}">${fmtShare(v)}</span>`;
+  }).join(" / ");
+}
+
 function meter(pct, forceCls) {
   pct = clamp(pct, 0, 100);
   const cls = forceCls || HCLS[health(pct, 70, 90)];
@@ -469,9 +489,9 @@ function cardNumbers() {
   return want.length ? want.slice(0, 4) : ["cpu", "mem", "temp"];
 }
 // the numbers a fleet card can show; their labels are card.<key> in the dictionary
-const CARD_KEYS = ["cpu", "mem", "temp", "disk", "containers"];
+const CARD_KEYS = ["cpu", "mem", "temp", "disk", "containers", "iowait"];
 function cardValue(k, s) {
-  if (k === "cpu" || k === "mem") return fmtVal(s[k], "%");
+  if (k === "cpu" || k === "mem" || k === "iowait") return fmtVal(s[k], "%");
   if (k === "temp") return fmtTemp(s.temp, true);
   if (k === "disk") return s.disk ? s.disk.pct + "%" : "–";
   return s.containers ? `${s.running}/${s.containers}` : "–";
@@ -597,6 +617,9 @@ function renderMetrics(d) {
     $("#cpu-load").innerHTML = `<span class="${lh}">${c.load.map(x => x.toFixed(2)).join(" / ")}</span>`;
     $("#cpu-loadn").textContent = c.cores ? ratio.toFixed(2) + " × " + c.cores : "—";
     $("#cpu-note").textContent = tr("cpu.threads", { n: c.cores });
+    // an agent from before 5a sends no iowait: the row stays hidden
+    $("#cpu-wait-row").classList.toggle("hidden", typeof c.iowait !== "number");
+    if (typeof c.iowait === "number") $("#cpu-wait").innerHTML = waitHtml(c);
     const per = c.per || [];
     $("#cpu-cores").innerHTML = per.map(v => {
       const cls = v >= 85 ? "max" : v >= 55 ? "hot" : "";
@@ -604,6 +627,10 @@ function renderMetrics(d) {
     }).join("");
     $("#cpu-cores-wrap").classList.toggle("hidden", !per.length);
   }
+
+  // pressure: the kernel's own measure of waiting, shown in the cpu panel
+  $("#cpu-psi-row").classList.toggle("hidden", !d.pressure);
+  if (d.pressure) $("#cpu-psi").innerHTML = pressureHtml(d.pressure);
 
   // thermal
   if (d.temp) {

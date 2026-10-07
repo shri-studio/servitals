@@ -275,12 +275,32 @@ test("names and tags from servers are escaped in the servers section and the fle
   assert.doesNotMatch(fn("renderServers") + fn("renderFleet"), /\$\{(n\.name|g\.title|n\.tags)/, "nothing unescaped");
 });
 
+test("the cpu panel shows iowait and steal, and pressure, coloured when high; the rows hide when an agent sends neither", () => {
+  const HL = { ok: "", warn: "hl-amber", crit: "hl-red" };
+  const health = pageFunction("health");
+  const fmtShare = pageFunction("fmtShare");
+  assert.deepStrictEqual([fmtShare(34), fmtShare(0), fmtShare(0.43), fmtShare(14.85), fmtShare(null), fmtShare(NaN)],
+    ["34%", "0%", "0.4%", "15%", "–", "–"]);
+  const waitHtml = pageFn("waitHtml", { HL, health, fmtShare });
+  assert.strictEqual(waitHtml({ iowait: 34, steal: 0 }), '<span class="hl-red">34%</span> / <span class="">0%</span>');
+  assert.strictEqual(waitHtml({ iowait: 12 }), '<span class="hl-amber">12%</span> / <span class="">0%</span>', "no steal: 0");
+  const pressureHtml = pageFn("pressureHtml", { HL, health, fmtShare });
+  assert.strictEqual(pressureHtml({ cpu: { some: 0.43, full: null }, mem: { some: 0, full: 0 }, io: { some: 14.85, full: 13.29 } }),
+    '<span class="">0.4%</span> / <span class="">0%</span> / <span class="hl-amber">15%</span>');
+  assert.strictEqual(pressureHtml({ cpu: null, mem: null, io: { some: 41 } }), '– / – / <span class="hl-red">41%</span>');
+  for (const id of ["cpu-wait-row", "cpu-wait", "cpu-psi-row", "cpu-psi"]) assert.ok(HTML.includes(`id="${id}"`), id);
+  assert.match(HTML, /\$\("#cpu-wait-row"\)\.classList\.toggle\("hidden", typeof c\.iowait !== "number"\);/);
+  assert.match(HTML, /\$\("#cpu-psi-row"\)\.classList\.toggle\("hidden", !d\.pressure\);/);
+});
+
 test("fleet cards show the numbers chosen in settings", () => {
-  const CARD_KEYS = ["cpu", "mem", "temp", "disk", "containers"];
+  const CARD_KEYS = ["cpu", "mem", "temp", "disk", "containers", "iowait"];
   assert.match(HTML, new RegExp(`const CARD_KEYS = ${JSON.stringify(CARD_KEYS).replace(/[[\]]/g, "\\$&").replace(/,/g, ", ")};`));
   const cardNumbers = pageFn("cardNumbers", { CARD_KEYS, cfg: { fleet: { card: ["disk", "containers", "bogus"] } } });
   assert.deepStrictEqual(cardNumbers(), ["disk", "containers"]);
   assert.deepStrictEqual(pageFn("cardNumbers", { CARD_KEYS, cfg: {} })(), ["cpu", "mem", "temp"]);
+  const cardValue = pageFn("cardValue", { fmtVal: pageFunction("fmtVal"), fmtTemp: () => "" });
+  assert.deepStrictEqual([cardValue("iowait", { iowait: 31 }), cardValue("iowait", { iowait: null })], ["31%", "–"]);
   for (const id of ["cfg-f-sort", "cfg-f-group", "cfg-servers"]) assert.ok(HTML.includes(`id="${id}"`), id);
   assert.match(HTML, /for \(const g of arrangeFleet\(fleetNodes, cfg\.fleet \|\| \{\}\)\)/, "renderFleet uses it");
 });

@@ -68,6 +68,10 @@ const STRINGS = {
   "cpu.loadCore": "load / core",
   "cpu.perCore": "per-core utilisation",
   "cpu.threads": "{n} threads",
+  "cpu.wait": "iowait / steal",
+  "cpu.waitTitle": "share of the last tick the CPU sat idle waiting on disk, and the share a hypervisor took",
+  "cpu.pressure": "pressure cpu / mem / io",
+  "cpu.pressureTitle": "share of the last 10 s in which tasks waited for cpu, memory or disk (pressure stall information)",
 
   // thermal
   "temp.package": "{unit} package",
@@ -150,6 +154,7 @@ const STRINGS = {
   "card.temp": "temp",
   "card.disk": "disk",
   "card.containers": "up",
+  "card.iowait": "iowait",
 
   // clocks and weather
   "clock.badTz": "bad tz",
@@ -210,6 +215,7 @@ const STRINGS = {
   "set.card.temp": "temperature",
   "set.card.disk": "fullest disk",
   "set.card.containers": "containers",
+  "set.card.iowait": "iowait (waiting on disk)",
   "set.serversHint": "name and tags save at once; pin and hide with the other settings",
   "set.srvName": "name of {name}",
   "set.srvTags": "tags of {name}",

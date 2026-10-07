@@ -46,7 +46,7 @@ const STYLES = ["classic", "8bit", "phosphor", "eink", "contrast", "nord", "gruv
   // a customized fleet: grouped by tag, °F, bits, other card numbers (spec 10.4)
   await page.evaluate(() => localStorage.setItem("servitals.cfg", JSON.stringify({
     units: { temp: "f", rate: "bits", size: "decimal", clock: "12h" },
-    fleet: { group: true, sort: "disk", card: ["disk", "containers", "temp"] } })));
+    fleet: { group: true, sort: "disk", card: ["disk", "iowait", "temp"] } })));
   await page.goto(`${base}/?shot=custom#fleet`);
   await page.waitForTimeout(1500);
   await page.screenshot({ path: `${out}/fleet-custom.png` });

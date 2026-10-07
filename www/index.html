@@ -58,6 +58,8 @@
       <div class="sparkmini" id="cpu-spark"></div>
       <div class="row mt8"><span class="k" data-i18n="cpu.load">load 1m / 5m / 15m</span><span class="v" id="cpu-load">-- / -- / --</span></div>
       <div class="row"><span class="k" data-i18n="cpu.loadCore">load / core</span><span class="v" id="cpu-loadn">--</span></div>
+      <div class="row long hidden" id="cpu-wait-row"><span class="k" title="share of the last tick the CPU sat idle waiting on disk, and the share a hypervisor took" data-i18n-title="cpu.waitTitle" data-i18n="cpu.wait">iowait / steal</span><span class="v" id="cpu-wait">--</span></div>
+      <div class="row long hidden" id="cpu-psi-row"><span class="k" title="share of the last 10 s in which tasks waited for cpu, memory or disk (pressure stall information)" data-i18n-title="cpu.pressureTitle" data-i18n="cpu.pressure">pressure cpu / mem / io</span><span class="v" id="cpu-psi">--</span></div>
       <div id="cpu-cores-wrap">
         <div class="cores" id="cpu-cores"></div>
         <div class="cores-lbl" data-i18n="cpu.perCore">per-core utilisation</div>

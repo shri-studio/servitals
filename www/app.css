@@ -218,6 +218,8 @@ a:hover { text-decoration: underline; }
 /* a long value wraps instead of spilling out of a narrow panel */
 .row > .v { white-space: normal; text-align: right; min-width: 0; }
 .row + .row { margin-top: 3px; }
+/* a long caption (iowait, pressure) wraps rather than widen a narrow or kiosk panel */
+.row.long > .k { white-space: normal; min-width: 0; }
 .k { color: var(--dim); }
 .v { color: var(--fg-bright); }
 .muted { color: var(--dim); }
