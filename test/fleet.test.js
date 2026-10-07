@@ -17,12 +17,13 @@ test("liveness follows the node's own heartbeat", () => {
 
 test("a card's numbers come from the view", () => {
   const s = summary({
-    host: { name: "nas", distro: "Ubuntu" }, cpu: { usage: 12.4 }, mem: { total: 200, used: 50 }, temp: { package: 46 },
+    host: { name: "nas", distro: "Ubuntu" }, cpu: { usage: 12.4, iowait: 31 }, mem: { total: 200, used: 50 }, temp: { package: 46 },
     disks: [{ mount: "/", pct: 40 }, { mount: "/srv", pct: 93 }, { mount: "/mnt/x", mounted: false }],
     docker: [{ state: "running" }, { state: "exited" }], trend: Array.from({ length: 30 }, (_, i) => ({ cpu: i })),
   });
   assert.deepStrictEqual(s.disk, { mount: "/srv", pct: 93 });
-  assert.deepStrictEqual([s.cpu, s.mem, s.temp, s.containers, s.running], [12.4, 25, 46, 2, 1]);
+  assert.deepStrictEqual([s.cpu, s.iowait, s.mem, s.temp, s.containers, s.running], [12.4, 31, 25, 46, 2, 1]);
+  assert.strictEqual(summary({ cpu: { usage: 5 } }).iowait, null, "an older agent sends no iowait");
   assert.strictEqual(s.trend.length, 20);
   assert.strictEqual(summary(null), null);
 });

@@ -197,8 +197,12 @@ parsing; a value outside its range fails validation.
   },
   "mem":  { "total": 0, "used": 0, "available": 0, "free": 0, "cache": 0,
             "swapTotal": 0, "swapUsed": 0 },                        // bytes, ≥ 0
-  "cpu":  { "usage": 12, "cores": 8, "per": [10, 14],               // % 0..100, per ≤ 1024 entries
+  "cpu":  { "usage": 12, "iowait": 34, "steal": 0,                 // % 0..100 of the tick
+            "cores": 8, "per": [10, 14],                            // per ≤ 1024 entries
             "load": [0.5, 0.4, 0.3] },
+  "pressure": { "cpu": { "some": 0.4, "full": null },               // PSI avg10, % 0..100;
+                "mem": { "some": 0, "full": 0 },                    // a resource or "full" the
+                "io":  { "some": 14.9, "full": 13.3 } },            // kernel lacks is null
   "temp": { "package": 46, "max": 51,                               // °C, -50..150 or null
             "sensors": [ { "label": "Package id 0", "value": 46 } ] }, // ≤ 64
   "fans": [ { "label": "fan1", "rpm": 1200 } ],                     // ≤ 32
@@ -226,7 +230,13 @@ Rules that apply to every field:
 - `vnstat` sub-objects keep the shape the current collector produces; their
   numbers follow the rules above and `days`/`hours` hold at most 31 and 24
   entries with `label`/`title` strings ≤ 32.
-- Rates are never sent. The hub derives them from counters.
+- Rates are never sent. The hub derives them from counters. The cpu shares
+  (`usage`, `iowait`, `steal`, `per`) are the agent's own delta over its tick,
+  and `pressure` is the kernel's 10-second average: both are shares of time,
+  not rates of a counter the hub holds.
+- `cpu.usage` is time neither idle nor waiting on I/O; `cpu.iowait` is idle
+  time with I/O outstanding. A server stuck on its disk shows a low `usage`
+  with a high `iowait` and `pressure.io`.
 
 Schema versioning: the hub accepts the current schema and the one before it.
 A new optional field does not change the schema number; a changed meaning or a

@@ -22,12 +22,26 @@ test("a full snapshot passes and unknown keys are dropped", () => {
   assert.strictEqual(r.value.docker[0].cpuUsec, 5);
 });
 
+test("iowait, steal and pressure pass; a pressure resource the kernel lacks may be null", () => {
+  const pressure = { cpu: { some: 0.43, full: null }, mem: { some: 0, full: 0 }, io: { some: 14.85, full: 13.29 } };
+  const r = validate(base({ cpu: { usage: 11, iowait: 34, steal: 0, cores: 4 }, pressure }));
+  assert.ok(r.ok, JSON.stringify(r));
+  assert.deepStrictEqual([r.value.cpu.iowait, r.value.cpu.steal], [34, 0]);
+  assert.deepStrictEqual(r.value.pressure, pressure);
+  assert.deepStrictEqual(validate(base({ pressure: { cpu: null, mem: null, io: { some: 1, full: 1 } } })).value.pressure,
+    { cpu: null, mem: null, io: { some: 1, full: 1 } });
+  assert.strictEqual(validate(base({ pressure: null })).value.pressure, null, "no PSI: the group is null");
+});
+
 test("the first bad value names its path", () => {
   const cases = [
     [null, "$"], [[1], "$"], [{ ...base(), schema: 2 }, "$.schema"], [{ ...base(), ts: -1 }, "$.ts"],
     [{ ...base(), ts: 1.5 }, "$.ts"], [{ ...base(), interval: 4 }, "$.interval"], [{ ...base(), host: {} }, "$.host.name"],
     [{ ...base(), host: { name: "x", os: "plan9" } }, "$.host.os"],
     [base({ cpu: { usage: 101 } }), "$.cpu.usage"], [base({ cpu: { usage: Infinity } }), "$.cpu.usage"],
+    [base({ cpu: { iowait: 101 } }), "$.cpu.iowait"], [base({ cpu: { steal: -1 } }), "$.cpu.steal"],
+    [base({ pressure: { io: { some: 100.5 } } }), "$.pressure.io.some"], [base({ pressure: { mem: { full: "9" } } }), "$.pressure.mem.full"],
+    [base({ pressure: { cpu: [] } }), "$.pressure.cpu"],
     [base({ mem: { total: "1" } }), "$.mem.total"], [base({ temp: { package: 900 } }), "$.temp.package"],
     [base({ disks: [{ mount: "/", pct: 150 }] }), "$.disks[0].pct"], [base({ disks: "x" }), "$.disks"],
     [base({ docker: [{ name: "a", cpuUsec: -1 }] }), "$.docker[0].cpuUsec"],

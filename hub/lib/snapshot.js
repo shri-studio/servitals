@@ -63,6 +63,10 @@ const bar = (b, p) => obj(b, p, (x) => clean({
   label: str(x.label, 32, `${p}.label`), title: str(x.title, 32, `${p}.title`),
   rx: counter(x.rx, `${p}.rx`), tx: counter(x.tx, `${p}.tx`),
 }), { optional: false });
+// one resource's pressure stall information: % of the last 10 s, "full" is null before kernel 5.13 for cpu
+const stall = (x, p) => obj(x, p, (o) => clean({
+  some: num(o.some, 0, 100, `${p}.some`), full: num(o.full, 0, 100, `${p}.full`),
+}));
 const proc = (x, p) => obj(x, p, (o) => clean({
   pid: num(o.pid, 0, 2 ** 32, `${p}.pid`, { int: true }), name: str(o.name, 64, `${p}.name`),
   cpuPct: num(o.cpuPct, 0, 1e5, `${p}.cpuPct`), rss: counter(o.rss, `${p}.rss`),
@@ -86,8 +90,12 @@ function build(s) {
       ["total", "used", "available", "free", "cache", "swapTotal", "swapUsed"].map((k) => [k, counter(m[k], `${p}.${k}`)])))),
     cpu: obj(s.cpu, "$.cpu", (c, p) => clean({
       usage: num(c.usage, 0, 100, `${p}.usage`), cores: num(c.cores, 1, 4096, `${p}.cores`, { int: true }),
+      iowait: num(c.iowait, 0, 100, `${p}.iowait`), steal: num(c.steal, 0, 100, `${p}.steal`),
       per: list(c.per, 1024, `${p}.per`, (v, q) => num(v, 0, 100, q, { optional: false })),
       load: list(c.load, 3, `${p}.load`, (v, q) => num(v, 0, 1e6, q, { optional: false })),
+    })),
+    pressure: obj(s.pressure, "$.pressure", (x, p) => clean({
+      cpu: stall(x.cpu, `${p}.cpu`), mem: stall(x.mem, `${p}.mem`), io: stall(x.io, `${p}.io`),
     })),
     temp: obj(s.temp, "$.temp", (t, p) => clean({
       package: num(t.package, -50, 150, `${p}.package`, { nullable: true }),

@@ -25,6 +25,7 @@ function summary(v) {
   return {
     host: v.host ? { name: v.host.name, distro: v.host.distro } : null,
     cpu: v.cpu && typeof v.cpu.usage === "number" ? v.cpu.usage : null,
+    iowait: v.cpu && typeof v.cpu.iowait === "number" ? v.cpu.iowait : null,
     mem,
     temp: v.temp && typeof v.temp.package === "number" ? v.temp.package : null,
     disk: fullest ? { mount: fullest.mount, pct: fullest.pct } : null,
