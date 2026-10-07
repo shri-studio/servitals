@@ -301,6 +301,14 @@ test("each disk shows its device's read and write rates, once the hub can compar
   assert.strictEqual(diskIo({ device: "sda2" }, io), "", "no rate yet");
   assert.strictEqual(diskIo({ mount: "/mnt/nas" }, io), "", "a network share has no device");
   assert.strictEqual(diskIo({ device: "sdb1" }, undefined), "", "an older agent sends no io");
+  // the network setting may say bits per second; a disk's throughput is always in bytes
+  const UNIT_CHOICES = { temp: ["c", "f"], size: ["binary", "decimal"], rate: ["bytes", "bits"], clock: ["auto", "24h", "12h"] };
+  const units = pageFn("units", { cfg: { units: { rate: "bits" } }, UNIT_CHOICES });
+  const fmtRate = pageFn("fmtRate", { units });
+  assert.strictEqual(fmtRate(4e6), "32 Mbit/s", "the network keeps its setting");
+  const real = pageFn("diskIo", { esc, fmtRate });
+  assert.strictEqual(real({ device: "sdb1" }, [{ device: "sdb1", readRate: 4194304, writeRate: 0 }]),
+    ' <span class="dio">· read 4.0 MB/s · write 0 B/s</span>');
   assert.match(HTML, /<span class="\$\{freeCls\}">· \$\{esc\(tr\("disk\.free", \{ size: fmtBytes\(dk\.avail\) \}\)\)\}<\/span>\$\{diskIo\(dk, d\.io\)\}\$\{warn\}/);
 });
 

@@ -50,9 +50,10 @@ function fmtBytes(n) {
   while (n >= base && i < u.length - 1) { n /= base; i++; }
   return (n < 10 && i > 0 ? n.toFixed(1) : Math.round(n)) + u[i];
 }
-function fmtRate(Bps) {
+// the network follows the "network" unit setting; a disk passes inBytes, always bytes
+function fmtRate(Bps, inBytes) {
   Bps = Number(Bps) || 0;
-  const bits = units().rate === "bits";
+  const bits = !inBytes && units().rate === "bits";
   const base = bits || units().size === "decimal" ? 1000 : 1024;   // network speeds in bits are always powers of 1000
   const u = bits ? ["bit/s", "kbit/s", "Mbit/s", "Gbit/s"] : ["B/s", "KB/s", "MB/s", "GB/s"];
   let v = bits ? Bps * 8 : Bps, i = 0;
@@ -96,7 +97,7 @@ function pressureHtml(p) {
 function diskIo(dk, io) {
   const r = dk.device && (io || []).find(x => x.device === dk.device);
   if (!r || r.readRate == null || r.writeRate == null) return "";
-  return ` <span class="dio">· ${esc(tr("disk.io", { read: fmtRate(r.readRate), write: fmtRate(r.writeRate) }))}</span>`;
+  return ` <span class="dio">· ${esc(tr("disk.io", { read: fmtRate(r.readRate, true), write: fmtRate(r.writeRate, true) }))}</span>`;
 }
 
 function meter(pct, forceCls) {
