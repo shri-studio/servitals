@@ -115,7 +115,7 @@ function build(s) {
       source: str(d.source, 128, `${q}.source`), model: str(d.model, 128, `${q}.model`),
       fstype: str(d.fstype, 128, `${q}.fstype`), rotational: bool(d.rotational, `${q}.rotational`),
       size: counter(d.size, `${q}.size`), used: counter(d.used, `${q}.used`), avail: counter(d.avail, `${q}.avail`),
-      pct: num(d.pct, 0, 100, `${q}.pct`),
+      pct: num(d.pct, 0, 100, `${q}.pct`), device: str(d.device, 128, `${q}.device`),
     }), { optional: false })),
     io: list(s.io, 32, "$.io", (x, q) => obj(x, q, (d) => clean({
       device: str(d.device, 128, `${q}.device`, { optional: false }),
@@ -183,6 +183,15 @@ function view(cur, prev, trend = []) {
       rateTx: sameIface ? rate(cur.net.txBytes, prev.net.txBytes, dt) : null,
       today: v.today, month: v.month, total: v.total, days: v.days, hours: v.hours,
     };
+  }
+  if (cur.io) {
+    // bytes per second per block device; the disks name their device in disks[].device
+    const before = new Map((prev && prev.io || []).map((d) => [d.device, d]));
+    out.io = cur.io.map((d) => {
+      const p = before.get(d.device);
+      return { device: d.device, readRate: p ? rate(d.readBytes, p.readBytes, dt) : null,
+               writeRate: p ? rate(d.writeBytes, p.writeBytes, dt) : null };
+    });
   }
   if (cur.docker) {
     const before = new Map((prev && prev.docker || []).map((c) => [c.id || c.name, c]));

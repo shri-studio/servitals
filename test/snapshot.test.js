@@ -82,6 +82,23 @@ test("the view derives rates and container CPU from two snapshots", () => {
   assert.deepStrictEqual(v.trend.map((p) => [p.cpu, p.mem]), [[10, 25], [20, 50]]);
 });
 
+test("the view turns each disk device's byte counters into read and write rates", () => {
+  const a = validate(base({ disks: [{ mount: "/srv", device: "sdb1" }],
+    io: [{ device: "sdb1", readBytes: 1000, writeBytes: 0 }, { device: "sda2", readBytes: 5, writeBytes: 5 }] })).value;
+  assert.strictEqual(a.disks[0].device, "sdb1");
+  const b = validate(base({ ts: a.ts + 2000, disks: [{ mount: "/srv", device: "sdb1" }],
+    io: [{ device: "sdb1", readBytes: 9000, writeBytes: 4000 }, { device: "sda2", readBytes: 1, writeBytes: 5 },
+         { device: "sdc1", readBytes: 7, writeBytes: 7 }] })).value;
+  assert.deepStrictEqual(view(a, null, []).io, [{ device: "sdb1", readRate: null, writeRate: null },
+    { device: "sda2", readRate: null, writeRate: null }], "nothing to compare yet");
+  assert.deepStrictEqual(view(b, a, []).io, [
+    { device: "sdb1", readRate: 4000, writeRate: 2000 },
+    { device: "sda2", readRate: null, writeRate: 0 },   // a counter that went back (a reboot)
+    { device: "sdc1", readRate: null, writeRate: null },   // new since the last snapshot
+  ]);
+  assert.deepStrictEqual(validate(base({ disks: [{ mount: "/", device: "x".repeat(200) }] })).value.disks[0].device.length, 128);
+});
+
 test("a counter that went backwards (reboot, new interface) gives no rate", () => {
   const a = validate(base({ net: { iface: "eno1", rxBytes: 5000, txBytes: 0 } })).value;
   const b = validate(base({ ts: a.ts + 1000, net: { iface: "eno1", rxBytes: 10, txBytes: 0 } })).value;

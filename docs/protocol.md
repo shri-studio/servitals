@@ -209,8 +209,9 @@ parsing; a value outside its range fails validation.
   "battery": { "capacity": 87, "status": "Discharging" },           // % 0..100, status ≤ 16
   "disks": [ { "mount": "/srv", "mounted": true, "source": "/dev/sdb1",
                "model": "WD Red", "fstype": "ext4", "rotational": true,
-               "size": 0, "used": 0, "avail": 0, "pct": 94 } ],     // ≤ 32, strings ≤ 128
-  "io":   [ { "device": "sdb", "readBytes": 0, "writeBytes": 0 } ], // counters, ≤ 32
+               "size": 0, "used": 0, "avail": 0, "pct": 94,
+               "device": "sdb1" } ],                                 // ≤ 32, strings ≤ 128
+  "io":   [ { "device": "sdb1", "readBytes": 0, "writeBytes": 0 } ], // counters, ≤ 32
   "net":  { "iface": "eno1", "rxBytes": 0, "txBytes": 0,            // counters
             "vnstat": { "today": {}, "month": {}, "total": {}, "days": [], "hours": [] } },
   "docker": [ { "name": "jellyfin", "id": "…", "state": "running",
@@ -234,6 +235,10 @@ Rules that apply to every field:
   (`usage`, `iowait`, `steal`, `per`) are the agent's own delta over its tick,
   and `pressure` is the kernel's 10-second average: both are shares of time,
   not rates of a counter the hub holds.
+- `disks[].device` is the kernel's block device behind the mount (from its
+  device number, so LVM and dm show as `dm-N`); it is absent for network
+  shares, btrfs and zfs. `io` holds the counters of those devices, each once,
+  in bytes (`/proc/diskstats` sectors × 512); the hub derives the rates.
 - `cpu.usage` is time neither idle nor waiting on I/O; `cpu.iowait` is idle
   time with I/O outstanding. A server stuck on its disk shows a low `usage`
   with a high `iowait` and `pressure.io`.
