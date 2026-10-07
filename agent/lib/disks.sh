@@ -5,11 +5,13 @@
 # disks: usage per DISKS entry, source and model from mountinfo and sysfs; io: bytes
 # read and written by the block devices behind them, from /proc/diskstats
 
-mount_info() {  # $1 = mountpoint -> "fstype source maj:min" of its LAST mountinfo line
-  # A mountpoint can appear several times (cifs stacked on autofs); the last
-  # line is the mount on top, the one a path lookup reaches.
-  awk -v m="$1" '$5 == m { for (i = 7; i <= NF; i++) if ($i == "-") { v = $(i+1) " " $(i+2) " " $3; break } }
-    END { if (v != "") print v }' "$HOST/proc/1/mountinfo" 2>/dev/null
+mount_infos() {  # $1 = mountpoints, one per line -> "mountpoint<TAB>fstype source maj:min" each
+  # One pass for all of them. A mountpoint can appear several times (cifs stacked
+  # on autofs); its LAST line is the mount on top, the one a path lookup reaches.
+  awk -v list="$1" '
+    BEGIN { n = split(list, ms, "\n"); for (i = 1; i <= n; i++) want[ms[i]] = 1 }
+    $5 in want { for (i = 7; i <= NF; i++) if ($i == "-") { v[$5] = $(i+1) " " $(i+2) " " $3; break } }
+    END { for (m in v) print m "\t" v[m] }' "$HOST/proc/1/mountinfo" 2>/dev/null
 }
 
 auto_disks() {  # real filesystems from mountinfo, comma separated: DISKS=auto
@@ -27,17 +29,23 @@ auto_disks() {  # real filesystems from mountinfo, comma separated: DISKS=auto
 }
 
 disks_json() {
-  local lines="" m p info fstype src majmin link dev base parent model rota
+  local lines="" m p info fstype src majmin link dev base parent model rota k v
   local bs blocks bfree bavail size used avail pct t="${STAT_TIMEOUT:-5}"
   [[ $t =~ ^[0-9]+$ ]] && [ "$t" -ge 1 ] || t=5
   local list=$DISKS
   if [ "$list" = auto ]; then list=$(auto_disks); fi
-  IFS=',' read -ra MS <<< "$list"
+  # each entry trimmed in bash (no fork per disk), then one mountinfo pass for all
+  local -a MS=() words=()
+  local -A info_of=()
+  IFS=',' read -ra words <<< "$list"
+  for m in "${words[@]}"; do
+    m="${m#"${m%%[![:space:]]*}"}"; m="${m%"${m##*[![:space:]]}"}"
+    [ -n "$m" ] && MS+=("$m")
+  done
+  while IFS=$'\t' read -r k v; do info_of[$k]=$v; done < <(mount_infos "$(printf '%s\n' "${MS[@]}")")
   for m in "${MS[@]}"; do
-    m=$(echo "$m" | xargs)
-    [ -n "$m" ] || continue
     if [ "$m" = "/" ]; then p="$HOST"; else p="$HOST$m"; fi
-    info=$(mount_info "$m")
+    info=${info_of[$m]-}
     if [ -z "$info" ]; then
       # not a mountpoint: say so instead of reporting the parent filesystem
       lines+="$m"$'\t0\n'
@@ -68,12 +76,13 @@ disks_json() {
     if [ "${src#/dev/}" != "$src" ]; then
       base=${src#/dev/}
       if [ -e "$HOST/sys/class/block/$base/partition" ]; then
-        parent=$(basename "$(readlink -f "$HOST/sys/class/block/$base/.." 2>/dev/null)")
+        link=$(readlink -f "$HOST/sys/class/block/$base/.." 2>/dev/null); parent=${link##*/}
       else
         parent=$base
       fi
-      model=$(cat "$HOST/sys/class/block/$parent/device/model" 2>/dev/null | xargs || true)
-      rota=$(cat "$HOST/sys/class/block/$parent/queue/rotational" 2>/dev/null || echo "")
+      # read, not cat: no fork; the words joined with one space, as xargs did
+      words=(); { read -ra words < "$HOST/sys/class/block/$parent/device/model"; } 2>/dev/null; model="${words[*]}"
+      { read -r rota < "$HOST/sys/class/block/$parent/queue/rotational"; } 2>/dev/null || rota=""
     fi
     lines+="$m"$'\t1\t'"$src"$'\t'"$model"$'\t'"$fstype"$'\t'"$rota"$'\t'"$size"$'\t'"$used"$'\t'"$avail"$'\t'"$pct"$'\t'"$dev"$'\n'
   done

@@ -488,3 +488,11 @@ test("ubuntu_json: ESM security updates on an Ubuntu Pro host count as security 
     [NOTIFIER]: "1 update can be applied immediately.\n1 of these updates is an ESM Apps security update.\n" });
   assert.strictEqual(json(runGroup(one, "ubuntu_json")).security, 1);
 });
+
+test("disks_json reads a partition's disk model and kind from sysfs, its words joined by one space", () => {
+  const host = fakeHost({ ...BASE, "sys/class/block/sdb/device/model": "  WD   Red  Plus \n", "sys/class/block/sdb/queue/rotational": "1\n",
+    "sys/class/block/sdb/sdb1/partition": "1\n", "sys/class/block/sda/device/model": "PNY\n", "sys/class/block/sda/queue/rotational": "0\n" });
+  fs.symlinkSync("sdb/sdb1", path.join(host, "sys/class/block/sdb1"));
+  const d = json(runGroup(host, "disks_json", { DISKS: "/srv" }));
+  assert.deepStrictEqual([d[0].model, d[0].rotational], ["WD Red Plus", true]);
+});
