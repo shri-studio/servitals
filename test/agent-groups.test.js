@@ -496,3 +496,14 @@ test("disks_json reads a partition's disk model and kind from sysfs, its words j
   const d = json(runGroup(host, "disks_json", { DISKS: "/srv" }));
   assert.deepStrictEqual([d[0].model, d[0].rotational], ["WD Red Plus", true]);
 });
+
+test("temp_json rounds millidegrees as printf %.0f does (half to even), and keeps a label's inner spaces", () => {
+  const host = fakeHost({ ...BASE,
+    "sys/class/hwmon/hwmon0/temp1_input": "46500\n", "sys/class/hwmon/hwmon0/temp1_label": "Package id 0\n",
+    "sys/class/hwmon/hwmon0/temp2_input": "47500\n", "sys/class/hwmon/hwmon0/temp2_label": "Core 0\n",
+    "sys/class/hwmon/hwmon0/temp3_input": "-5500\n", "sys/class/hwmon/hwmon0/temp3_label": "Core 1\n",
+    "sys/class/hwmon/hwmon0/temp4_input": "51499\n" });
+  const d = json(runGroup(host, "temp_json"));
+  assert.deepStrictEqual(d.sensors.map((s) => [s.label, s.value]),
+    [["Package id 0", 46], ["Core 0", 48], ["Core 1", -6], ["coretemp", 51]], "no label: the chip's name");
+});

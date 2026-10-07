@@ -7,6 +7,21 @@
 # an unconnected sensor input reads -128 or 255 °C: leave those out
 in_range() { [[ $1 =~ ^-?[0-9]+$ ]] && [ "$1" -ge -50 ] && [ "$1" -le 150 ]; }
 
+# the first line of a file into REPLY, as it is (no fork: no cat per sensor)
+line_of() { REPLY=""; { IFS= read -r REPLY < "$1"; } 2>/dev/null; }
+
+# millidegrees in file $1 -> whole degrees in REPLY, rounded as printf "%.0f" does
+# (half to even); empty when the file holds no integer. No awk per sensor.
+deg_of() {
+  local v s=1 q r
+  line_of "$1"; v=$REPLY; REPLY=""
+  [[ $v =~ ^-?[0-9]+$ ]] || return 0
+  if [ "${v:0:1}" = - ]; then s=-1; v=${v#-}; fi
+  v=$((10#$v)); q=$((v / 1000)); r=$((v % 1000))
+  if [ "$r" -gt 500 ] || { [ "$r" -eq 500 ] && [ $((q % 2)) -eq 1 ]; }; then q=$((q + 1)); fi
+  REPLY=$((s * q))
+}
+
 temp_json() {
   # every sensor chip the kernel exposes, as "chip<TAB>label<TAB>value" lines
   # (labels never contain tabs), then one jq pass. lm-sensors' sensors-detect
@@ -14,20 +29,20 @@ temp_json() {
   local lines="" hw nm f base lbl val z
   for hw in "$HOST"/sys/class/hwmon/hwmon*; do
     [ -r "$hw/name" ] || continue
-    nm=$(cat "$hw/name" 2>/dev/null)
+    line_of "$hw/name"; nm=$REPLY
     for f in "$hw"/temp*_input; do
       [ -r "$f" ] || continue
       base=${f%_input}
-      lbl=$(cat "${base}_label" 2>/dev/null || echo "$nm")
-      val=$(awk '{printf "%.0f", $1/1000}' "$f" 2>/dev/null)
+      if [ -r "${base}_label" ]; then line_of "${base}_label"; lbl=$REPLY; else lbl=$nm; fi
+      deg_of "$f"; val=$REPLY
       in_range "$val" && lines+="$nm"$'\t'"$lbl"$'\t'"$val"$'\n'
     done
   done
   if [ -z "$lines" ]; then
     for z in "$HOST"/sys/class/thermal/thermal_zone*; do
       [ -r "$z/temp" ] || continue
-      lbl=$(cat "$z/type" 2>/dev/null || echo zone)
-      val=$(awk '{printf "%.0f", $1/1000}' "$z/temp" 2>/dev/null)
+      if [ -r "$z/type" ]; then line_of "$z/type"; lbl=$REPLY; else lbl=zone; fi
+      deg_of "$z/temp"; val=$REPLY
       in_range "$val" && lines+="thermal"$'\t'"$lbl"$'\t'"$val"$'\n'
     done
   fi
