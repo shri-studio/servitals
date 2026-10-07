@@ -17,13 +17,18 @@ cpu_json() {
   total=0; shift
   for v in "$@"; do total=$((total + v)); done
   if [ -f "$STATE/cpu" ]; then
-    # the older agent wrote only "total idle": then iowait and steal start next tick
-    read -r pt pi pw ps < "$STATE/cpu"
+    read -r pt pi < "$STATE/cpu"
     dt=$((total - pt))
     pct=$(share $((dt - (idle - pi))) "$dt")
-    if [ -n "$ps" ]; then iowait=$(share $((wait - pw)) "$dt"); stolen=$(share $((steal - ps)) "$dt"); fi
+    # iowait and steal counters live in their own file, so "cpu" keeps the shape an
+    # older agent reads (a rollback keeps working); without it they start next tick
+    if [ -f "$STATE/cpu-wait" ]; then
+      read -r pw ps < "$STATE/cpu-wait"
+      iowait=$(share $((wait - pw)) "$dt"); stolen=$(share $((steal - ps)) "$dt")
+    fi
   fi
-  echo "$total $idle $wait $steal" > "$STATE/cpu"
+  echo "$total $idle" > "$STATE/cpu"
+  echo "$wait $steal" > "$STATE/cpu-wait"
 
   # per-core usage from cpuN lines, delta vs previous tick
   local cn rest ct ci ppt ppi cp

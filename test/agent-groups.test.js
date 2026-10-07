@@ -99,7 +99,17 @@ test("cpu_json after an upgrade: a state file from the older agent gives 0, not 
   const d = json(runGroup(host, "cpu_json", { STATE: state }));
   assert.strictEqual(d.iowait, 0);
   assert.strictEqual(d.steal, 0);
-  assert.strictEqual(fs.readFileSync(path.join(state, "cpu"), "utf8").trim().split(" ").length, 4, "the new state has four fields");
+  assert.strictEqual(fs.readFileSync(path.join(state, "cpu"), "utf8").trim().split(" ").length, 2, "the older agent's file keeps its shape");
+});
+
+test("cpu_json leaves a state file the older agent can still read (a rollback keeps working)", () => {
+  const host = fakeHost(BASE);
+  const state = fs.mkdtempSync(path.join(os.tmpdir(), "sv-state-"));
+  json(runGroup(host, "cpu_json", { STATE: state }));
+  // the older cpu.sh: read -r pt pi < "$STATE/cpu"; di=$((idle - pi))
+  const old = spawnSync("bash", ["-c", 'set -u; read -r pt pi < "$1/cpu"; echo $(( 800 - pi + pt * 0 ))', "_", state], { encoding: "utf8" });
+  assert.strictEqual(old.status, 0, old.stderr);
+  assert.match(fs.readFileSync(path.join(state, "cpu-wait"), "utf8"), /^\d+ \d+\n$/, "iowait and steal live beside it");
 });
 
 const PRESSURE = {
