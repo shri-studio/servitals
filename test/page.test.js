@@ -72,7 +72,7 @@ test("vnStat bar titles from remote nodes are escaped, also in the tooltip", () 
 });
 
 test("a panel whose group the node does not send is hidden, never left from the previous node", () => {
-  assert.match(HTML, /for \(const \[panel, group\] of \[\["mem", "mem"\], \["cpu", "cpu"\], \["temp", "temp"\], \["storage", "disks"\], \["docker", "docker"\]\]\)/);
+  assert.match(HTML, /for \(const \[panel, group\] of \[\["mem", "mem"\], \["cpu", "cpu"\], \["temp", "temp"\], \["storage", "disks"\], \["docker", "docker"\], \["procs", "processes"\]\]\)/);
   assert.match(HTML, /\.classList\.toggle\("hidden", !d\[group\] \|\| shown\[panel\] === false\)/);
 });
 
@@ -312,6 +312,19 @@ test("each disk shows its device's read and write rates, once the hub can compar
   assert.match(HTML, /<span class="\$\{freeCls\}">· \$\{esc\(tr\("disk\.free", \{ size: fmtBytes\(dk\.avail\) \}\)\)\}<\/span>\$\{diskIo\(dk, d\.io\)\}\$\{warn\}/);
 });
 
+test("the processes panel lists the busiest and the largest, names escaped, the pid in the title", () => {
+  const esc = (x) => String(x).replace(/[&<>"']/g, (m) => "&#" + m.charCodeAt(0) + ";");
+  const procRows = pageFn("procRows", { esc });
+  const rows = procRows([{ pid: 812, name: "<rsync>", cpuPct: 38.5, rss: 5 }], (p) => p.cpuPct + "%");
+  assert.strictEqual(rows, '<div class="row" title="pid 812"><span class="k pname">&#60;rsync&#62;</span><span class="v">38.5%</span></div>');
+  assert.strictEqual(procRows([], (p) => p), '<span class="muted">none yet</span>', "the first tick has no cpu figures");
+  assert.strictEqual(procRows(undefined, (p) => p), '<span class="muted">none yet</span>');
+  for (const id of ["procs-cpu", "procs-mem"]) assert.ok(HTML.includes(`id="${id}"`), id);
+  assert.match(HTML, /data-panel="procs"/);
+  assert.match(HTML, /procRows\(d\.processes\.cpu, p => fmtShare\(p\.cpuPct\)\)/);
+  assert.match(HTML, /procRows\(d\.processes\.mem, p => fmtBytes\(p\.rss\)\)/);
+});
+
 test("fleet cards show the numbers chosen in settings", () => {
   const CARD_KEYS = ["cpu", "mem", "temp", "disk", "containers", "iowait"];
   assert.match(HTML, new RegExp(`const CARD_KEYS = ${JSON.stringify(CARD_KEYS).replace(/[[\]]/g, "\\$&").replace(/,/g, ", ")};`));
@@ -449,7 +462,7 @@ test("conf.d review: a file with a few panels keeps the built-in panel list and 
   const fromHub = { panels: { weather: false }, panelSize: { docker: "full" }, _managed: ["panelSize.docker", "panels.weather"] };
   const run = new Function("fetch", "lsGet", `let DEFAULTS = {}, cfg = {}; ${helpers}\n${src}\nreturn loadConfig().then(() => ({ DEFAULTS, cfg }));`);
   const { cfg } = await run(async () => ({ json: async () => structuredClone(fromHub) }), () => null);
-  assert.deepStrictEqual(cfg.panelOrder, ["mem", "cpu", "temp", "storage", "network", "docker", "clocks", "weather"]);
+  assert.deepStrictEqual(cfg.panelOrder, ["mem", "cpu", "temp", "storage", "network", "docker", "procs", "clocks", "weather"]);
   assert.strictEqual(cfg.panels.weather, false);
   assert.strictEqual(cfg.panels.mem, 1, "built-in panels stay");
   assert.deepStrictEqual([cfg.panelSize.storage, cfg.panelSize.docker], ["wide", "full"]);

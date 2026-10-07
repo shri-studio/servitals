@@ -100,6 +100,13 @@ function diskIo(dk, io) {
   return ` <span class="dio">· ${esc(tr("disk.io", { read: fmtRate(r.readRate, true), write: fmtRate(r.writeRate, true) }))}</span>`;
 }
 
+// one column of the processes panel: name (pid in the title) and a value
+function procRows(list, value) {
+  if (!list || !list.length) return `<span class="muted">${esc(tr("procs.none"))}</span>`;
+  return list.map(p => `<div class="row" title="${esc(tr("procs.pid", { pid: p.pid }))}">`
+    + `<span class="k pname">${esc(p.name)}</span><span class="v">${value(p)}</span></div>`).join("");
+}
+
 function meter(pct, forceCls) {
   pct = clamp(pct, 0, 100);
   const cls = forceCls || HCLS[health(pct, 70, 90)];
@@ -163,10 +170,10 @@ async function loadConfig() {
   const builtin = {
     title: "servitals", favicon: "", refreshSec: 60,
     weather: [], clocks: [], disks: {},
-    panels: { mem: 1, cpu: 1, temp: 1, storage: 1, network: 1, docker: 1, clocks: 1, weather: 1 },
-    panelOrder: ["mem", "cpu", "temp", "storage", "network", "docker", "clocks", "weather"],
+    panels: { mem: 1, cpu: 1, temp: 1, storage: 1, network: 1, docker: 1, procs: 1, clocks: 1, weather: 1 },
+    panelOrder: ["mem", "cpu", "temp", "storage", "network", "docker", "procs", "clocks", "weather"],
     panelSize: { mem: "normal", cpu: "normal", temp: "normal", storage: "wide",
-                 network: "wide", docker: "full", clocks: "normal", weather: "normal" }
+                 network: "wide", docker: "full", procs: "wide", clocks: "normal", weather: "normal" }
   };
   // a conf.d file may set only a few panels: the others keep their built-in values
   for (const k of ["panels", "panelSize"]) {
@@ -723,11 +730,17 @@ function renderMetrics(d) {
   $("[data-panel=network]").classList.toggle("hidden",
     !d.net || shown.network === false);
 
+  // processes: the busiest and the largest (an older agent sends none: the panel hides)
+  if (d.processes) {
+    $("#procs-cpu").innerHTML = procRows(d.processes.cpu, p => fmtShare(p.cpuPct));
+    $("#procs-mem").innerHTML = procRows(d.processes.mem, p => fmtBytes(p.rss));
+  }
+
   // docker — stash and render (sort / expand handled separately)
   if (d.docker) { dockerData = d.docker; renderDocker(); } else dockerData = null;
 
   // a node without a group: hide its panel, never keep the previous node's
-  for (const [panel, group] of [["mem", "mem"], ["cpu", "cpu"], ["temp", "temp"], ["storage", "disks"], ["docker", "docker"]]) {
+  for (const [panel, group] of [["mem", "mem"], ["cpu", "cpu"], ["temp", "temp"], ["storage", "disks"], ["docker", "docker"], ["procs", "processes"]]) {
     const el = $(`[data-panel=${panel}]`);
     if (el) el.classList.toggle("hidden", !d[group] || shown[panel] === false);
   }

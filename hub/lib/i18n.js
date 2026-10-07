@@ -52,6 +52,7 @@ const STRINGS = {
   "panel.storage": "storage",
   "panel.network": "network",
   "panel.docker": "services",
+  "panel.procs": "processes",
   "panel.clocks": "world clocks",
   "panel.weather": "weather",
 
@@ -134,6 +135,12 @@ const STRINGS = {
   "logs.empty": "(no output)",
   "logs.error": "error: {text}",
   "logs.failed": "failed to fetch logs",
+
+  // processes
+  "procs.byCpu": "by cpu",
+  "procs.byMem": "by memory",
+  "procs.none": "none yet",
+  "procs.pid": "pid {pid}",
 
   // dialogs
   "dlg.close": "[esc]",

@@ -26,6 +26,8 @@ const STYLES = ["classic", "8bit", "phosphor", "eink", "contrast", "nord", "gruv
   await Promise.all([page.waitForNavigation(), page.click("button[type=submit]")]);
   await page.waitForTimeout(1500);
   const local = await page.evaluate(() => localNode);
+  // the demo nas carries the panels the local agent cannot fake (processes with cpu figures)
+  const nas = await page.evaluate(() => (fleetNodes.find((n) => n.name === "nas") || {}).id);
   const shots = { fleet: [], node: [] };
   for (const style of STYLES) for (const mode of ["dark", "light"]) {
     await page.evaluate(([s, m]) => { localStorage.setItem("servitals.style", s); localStorage.setItem("servitals.theme", m); }, [style, mode]);
@@ -102,10 +104,10 @@ const STYLES = ["classic", "8bit", "phosphor", "eink", "contrast", "nord", "gruv
 
   // a phone and a desktop in every density and in kiosk: nothing cut off
   for (const width of [390, 600, 768, 1024, 1280, 1920]) for (const [density, q] of [["compact", ""], ["comfortable", ""], ["large", ""], ["comfortable", "?kiosk"]]) {
-    for (const hash of ["#fleet", "#node=" + local]) {
+    for (const hash of ["#fleet", "#node=" + local, "#node=" + nas]) {
       await page.evaluate((d) => { localStorage.clear(); localStorage.setItem("servitals.density", d); }, density);
       await page.setViewportSize({ width, height: 844 });
-      const name = `${width}-${q ? "kiosk" : density}-${hash === "#fleet" ? "fleet" : "node"}`;
+      const name = `${width}-${q ? "kiosk" : density}-${hash === "#fleet" ? "fleet" : hash.endsWith(local) ? "node" : "nas"}`;
       await page.goto(`${base}/?shot=${name}${q ? "&kiosk" : ""}${hash}`);   // a new query: a real reload
       await page.waitForTimeout(1200);
       const wide = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);

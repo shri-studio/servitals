@@ -33,6 +33,17 @@ test("iowait, steal and pressure pass; a pressure resource the kernel lacks may 
   assert.strictEqual(validate(base({ pressure: null })).value.pressure, null, "no PSI: the group is null");
 });
 
+test("processes pass with a cpu share still unknown; names are cut to 64 and lists to five", () => {
+  const p = (pid, extra = {}) => ({ pid, name: "n" + pid, cpuPct: null, rss: pid, ...extra });
+  const r = validate(base({ processes: { cpu: [p(1, { cpuPct: 250.5 })], mem: [1, 2, 3, 4, 5, 6, 7].map((i) => p(i, { name: "x".repeat(99) })) } }));
+  assert.ok(r.ok, JSON.stringify(r));
+  assert.strictEqual(r.value.processes.cpu[0].cpuPct, 250.5, "a multi-threaded process may pass 100 %");
+  assert.strictEqual(r.value.processes.mem.length, 5);
+  assert.strictEqual(r.value.processes.mem[0].name.length, 64);
+  assert.strictEqual(r.value.processes.mem[0].cpuPct, null);
+  assert.deepStrictEqual(validate(base({ processes: { cpu: [p(1, { rss: -1 })] } })), { ok: false, path: "$.processes.cpu[0].rss" });
+});
+
 test("the first bad value names its path", () => {
   const cases = [
     [null, "$"], [[1], "$"], [{ ...base(), schema: 2 }, "$.schema"], [{ ...base(), ts: -1 }, "$.ts"],

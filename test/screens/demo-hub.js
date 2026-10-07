@@ -56,6 +56,14 @@ function variant(base, c, i, round) {
     s.disks = [{ mount: "/", mounted: true, source: "/dev/sda1", fstype: "ext4", size: 500e9, device: "sda1",
                  used: [0, 470e9, 20e9][i], avail: [0, 30e9, 480e9][i], pct: [0, 94, 4][i] }];
     s.io = [{ device: "sda1", readBytes: 0, writeBytes: 0 }];
+    // the nas: what keeps its disk busy; the pi runs an older agent without processes
+    const proc = (pid, name, cpuPct, mb) => ({ pid, name, cpuPct, rss: mb * 1048576 });
+    s.processes = i === 1 ? {
+      cpu: [proc(812, "rsync", 38.5, 52), proc(1290, "smbd", 12.1, 96), proc(640, "jellyfin", 6.4, 1410),
+            proc(77, "kworker/u8:2-events_unbound", 2.2, 0), proc(1, "systemd", 0.3, 14)],
+      mem: [proc(640, "jellyfin", 6.4, 1410), proc(911, "postgres", 0.1, 820), proc(1290, "smbd", 12.1, 96),
+            proc(812, "rsync", 38.5, 52), proc(1, "systemd", 0.3, 14)],
+    } : undefined;
     s.docker = i === 1 ? (s.docker || []).slice(0, 3) : [];
   }
   if (s.net) { s.net.rxBytes += round * 5e6 * (i + 1); s.net.txBytes += round * 1e6; }

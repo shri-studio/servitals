@@ -7,6 +7,10 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- Processes (spec 9): a new panel lists the five busiest processes by cpu
+  (share of one core since the last tick, as `top` shows it) and the five
+  largest by memory, so a busy server shows what keeps it busy even outside
+  containers. `COLLECT_PROCESSES=0` turns it off.
 - Disk activity (spec 9): each disk in the storage panel shows how fast its
   device reads and writes, from `/proc/diskstats` (LVM and dm devices too;
   network shares, btrfs and zfs have no block device and show none).
