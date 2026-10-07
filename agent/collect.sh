@@ -47,13 +47,13 @@ group() {
 }
 
 collect() {  # $1 = destination file
-  local host mem=null cpu=null temp=null disks=null net=null docker=null pressure=null
+  local host mem=null cpu=null temp=null disks=null io=null net=null docker=null pressure=null
   host=$(host_json)
   if on "${COLLECT_MEM:-1}"; then group mem mem_json; fi
   if on "${COLLECT_CPU:-1}"; then group cpu cpu_json; fi
   if on "${COLLECT_PRESSURE:-1}"; then group pressure pressure_json; fi
   if on "${COLLECT_TEMP:-1}"; then group temp temp_json; fi
-  if on "${COLLECT_DISKS:-1}"; then group disks disks_json; fi
+  if on "${COLLECT_DISKS:-1}"; then group disks disks_json; group io io_json; fi
   if on "${COLLECT_NET:-1}"; then
     [ -n "$IFACE" ] || IFACE=$(pick_iface)   # resolve once; retry only if still unknown
     group net net_json "$IFACE"
@@ -62,11 +62,11 @@ collect() {  # $1 = destination file
 
   jq -cn \
     --argjson host "$host" --argjson mem "$mem" --argjson cpu "$cpu" \
-    --argjson temp "$temp" --argjson disks "$disks" --argjson net "${net:-null}" \
+    --argjson temp "$temp" --argjson disks "$disks" --argjson io "$io" --argjson net "${net:-null}" \
     --argjson docker "$docker" --argjson pressure "$pressure" --argjson interval "$INTERVAL" --arg agent "$AGENT_NAME" \
     '{schema: 1, ts: (now * 1000 | floor), interval: $interval, agent: $agent,
       host: ($host + {os: "linux"}), mem: $mem, cpu: $cpu, pressure: $pressure, temp: $temp,
-      disks: $disks, net: $net, docker: $docker}' \
+      disks: $disks, io: $io, net: $net, docker: $docker}' \
     > "$1.tmp" 2>/dev/null && mv "$1.tmp" "$1"
 }
 

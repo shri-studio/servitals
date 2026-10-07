@@ -170,6 +170,45 @@ test("disks_json reports each DISKS entry with its mountinfo source", () => {
   assert.ok(d[0].size > 0 && d[0].pct >= 0 && d[0].pct <= 100);
 });
 
+// /proc/diskstats: major minor name, then reads ... ($6 sectors read) ... ($10 sectors written)
+const DISKSTATS = [
+  "   8       0 sda 100 0 4000 0 50 0 2000 0 0 0 0 0 0 0 0 0 0",
+  "   8       2 sda2 90 0 3000 0 40 0 1000 0 0 0 0 0 0 0 0 0 0",
+  "   8      17 sdb1 10 0 200 0 5 0 100 0 0 0 0 0 0 0 0 0 0",
+  " 253       0 dm-0 7 0 70 0 7 0 70 0 0 0 0 0 0 0 0 0 0", "",
+].join("\n");
+// the kernel's own link from a device number to its block device
+function linkDevices(host, links) {
+  for (const [majmin, target] of Object.entries(links)) {
+    fs.mkdirSync(path.join(host, "sys/dev/block"), { recursive: true });
+    fs.symlinkSync(target, path.join(host, "sys/dev/block", majmin));
+  }
+}
+
+test("disks_json names each disk's block device, through its device number (LVM and dm too)", () => {
+  const host = fakeHost({ ...BASE, "proc/1/mountinfo": BASE["proc/1/mountinfo"] + "37 25 253:0 / /data rw - xfs /dev/mapper/vg-data rw\n",
+    "data/x": "x" });
+  linkDevices(host, { "8:2": "../../block/sda/sda2", "8:17": "../../block/sdb/sdb1", "253:0": "../../block/dm-0" });
+  const d = json(runGroup(host, "disks_json", { DISKS: "/,/srv,/data" }));
+  assert.deepStrictEqual(d.map((x) => [x.mount, x.device]), [["/", "sda2"], ["/srv", "sdb1"], ["/data", "dm-0"]]);
+  const plain = json(runGroup(fakeHost(BASE), "disks_json", { DISKS: "/" }));
+  assert.strictEqual(plain[0].device, undefined, "no link, no device (and no guess)");
+});
+
+test("io_json: bytes read and written by the devices behind the reported disks, each once", () => {
+  const host = fakeHost({ ...BASE, "proc/diskstats": DISKSTATS,
+    "proc/1/mountinfo": BASE["proc/1/mountinfo"] + "38 25 8:17 /sub /srv2 rw - ext4 /dev/sdb1 rw\n" +
+      "39 25 0:50 / /mnt/nas rw - cifs //nas/share rw\n" });
+  assert.deepStrictEqual(json(runGroup(host, "io_json", { DISKS: "/, /srv,/srv2,/mnt/nas" })), [
+    { device: "sda2", readBytes: 3000 * 512, writeBytes: 1000 * 512 },
+    { device: "sdb1", readBytes: 200 * 512, writeBytes: 100 * 512 },
+  ], "a network share has no block device; a device mounted twice counts once");
+  assert.strictEqual(runGroup(fakeHost(BASE), "io_json", { DISKS: "/" }).stdout.trim(), "null", "no /proc/diskstats: null");
+  const noMounts = fakeHost({ ...BASE, "proc/diskstats": DISKSTATS });
+  fs.rmSync(path.join(noMounts, "proc/1/mountinfo"));
+  assert.deepStrictEqual(json(runGroup(noMounts, "io_json", { DISKS: "/" })), [], "no mountinfo (Android): nothing to match");
+});
+
 test("net_json without an interface is null", () => {
   assert.strictEqual(runGroup(fakeHost(BASE), 'net_json ""').stdout.trim(), "null");
 });

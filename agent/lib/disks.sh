@@ -2,12 +2,13 @@
 # shellcheck shell=bash
 # shellcheck disable=SC2154
 # (globals such as HOST, STATE and NCPU are set by collect.sh)
-# disks: usage per DISKS entry, source and model from mountinfo and sysfs
+# disks: usage per DISKS entry, source and model from mountinfo and sysfs; io: bytes
+# read and written by the block devices behind them, from /proc/diskstats
 
-mount_info() {  # $1 = mountpoint -> "fstype source" of its LAST mountinfo line
+mount_info() {  # $1 = mountpoint -> "fstype source maj:min" of its LAST mountinfo line
   # A mountpoint can appear several times (cifs stacked on autofs); the last
   # line is the mount on top, the one a path lookup reaches.
-  awk -v m="$1" '$5 == m { for (i = 7; i <= NF; i++) if ($i == "-") { v = $(i+1) " " $(i+2); break } }
+  awk -v m="$1" '$5 == m { for (i = 7; i <= NF; i++) if ($i == "-") { v = $(i+1) " " $(i+2) " " $3; break } }
     END { if (v != "") print v }' "$HOST/proc/1/mountinfo" 2>/dev/null
 }
 
@@ -26,7 +27,7 @@ auto_disks() {  # real filesystems from mountinfo, comma separated: DISKS=auto
 }
 
 disks_json() {
-  local lines="" m p info fstype src base parent model rota
+  local lines="" m p info fstype src majmin link dev base parent model rota
   local bs blocks bfree bavail size used avail pct t="${STAT_TIMEOUT:-5}"
   [[ $t =~ ^[0-9]+$ ]] && [ "$t" -ge 1 ] || t=5
   local list=$DISKS
@@ -42,8 +43,12 @@ disks_json() {
       lines+="$m"$'\t0\n'
       continue
     fi
-    read -r fstype src <<< "$info"
+    read -r fstype src majmin <<< "$info"
     [ -n "$src" ] || src="?"
+    # the block device behind it, by device number (works for LVM and dm-crypt too);
+    # network shares, btrfs and zfs have major 0 and no block device
+    dev=""
+    case $majmin in 0:*|"") ;; *) link=$(readlink "$HOST/sys/dev/block/$majmin" 2>/dev/null); dev=${link##*/} ;; esac
 
     # statvfs: %S block size, %b total, %f free, %a avail. A dead network share
     # can block here forever, so bound it; a share that does not answer is left out.
@@ -70,12 +75,30 @@ disks_json() {
       model=$(cat "$HOST/sys/class/block/$parent/device/model" 2>/dev/null | xargs || true)
       rota=$(cat "$HOST/sys/class/block/$parent/queue/rotational" 2>/dev/null || echo "")
     fi
-    lines+="$m"$'\t1\t'"$src"$'\t'"$model"$'\t'"$fstype"$'\t'"$rota"$'\t'"$size"$'\t'"$used"$'\t'"$avail"$'\t'"$pct"$'\n'
+    lines+="$m"$'\t1\t'"$src"$'\t'"$model"$'\t'"$fstype"$'\t'"$rota"$'\t'"$size"$'\t'"$used"$'\t'"$avail"$'\t'"$pct"$'\t'"$dev"$'\n'
   done
   # one jq for all disks
   printf '%s' "$lines" | jq -R -s -c '[ split("\n")[] | select(length > 0) | split("\t") |
     if .[1] == "0" then { mount: .[0], mounted: false }
     else { mount: .[0], mounted: true, source: .[2], model: .[3], fstype: .[4],
            rotational: (.[5] == "1"), size: (.[6] | tonumber), used: (.[7] | tonumber),
-           avail: (.[8] | tonumber), pct: (.[9] | tonumber) } end ]'
+           avail: (.[8] | tonumber), pct: (.[9] | tonumber) }
+         + (if (.[10] // "") != "" then { device: .[10] } else {} end) end ]'
+}
+
+io_json() {  # bytes read and written by the devices behind the DISKS entries, each device once
+  [ -r "$HOST/proc/diskstats" ] || { echo null; return; }
+  [ -r "$HOST/proc/1/mountinfo" ] || { echo "[]"; return; }
+  local list=$DISKS
+  if [ "$list" = auto ]; then list=$(auto_disks); fi
+  # one pass: the device number of each wanted mountpoint (the last line wins, as in
+  # mount_info), then the counters of those devices; diskstats counts 512-byte sectors
+  awk -v list="$list" '
+    BEGIN { n = split(list, ms, ","); for (i = 1; i <= n; i++) { gsub(/^[ \t]+|[ \t]+$/, "", ms[i]); want[ms[i]] = 1 } }
+    FNR == NR { if ($5 in want) num[$5] = $3; next }
+    FNR == 1 { for (m in num) if (num[m] !~ /^0:/) dev[num[m]] = 1 }
+    ($1 ":" $2) in dev { printf "%s\t%.0f\t%.0f\n", $3, $6 * 512, $10 * 512 }
+  ' "$HOST/proc/1/mountinfo" "$HOST/proc/diskstats" 2>/dev/null |
+    jq -R -s -c '[split("\n")[] | select(length > 0) | split("\t")
+      | {device: .[0], readBytes: (.[1] | tonumber), writeBytes: (.[2] | tonumber)}]'
 }
