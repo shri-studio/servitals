@@ -416,3 +416,39 @@ test("processes_json: a comma-decimal locale (de_DE) does not break the cpu shar
   fs.writeFileSync(path.join(host, "proc/10/stat"), stat(10, "postgres", 1500, 0, 1, 5));
   assert.strictEqual(json(runGroup(host, "processes_json", env)).cpu[0].cpuPct, 50);
 });
+
+const NOTIFIER = "var/lib/update-notifier/updates-available";
+
+test("ubuntu_json: pending updates, security updates and a reboot with the packages that ask for it", () => {
+  const host = fakeHost({ ...BASE, "var/lib/dpkg/status": "",
+    [NOTIFIER]: "\nExpanded Security Maintenance for Applications is not enabled.\n\n12 updates can be applied immediately.\n" +
+      "5 of these updates are standard security updates.\nTo see these additional updates run: apt list --upgradable\n",
+    "run/reboot-required": "*** System restart required ***\n",
+    "run/reboot-required.pkgs": "linux-image-7.0.0-38-generic\nlinux-base\nlinux-image-7.0.0-38-generic\n" });
+  assert.deepStrictEqual(json(runGroup(host, "ubuntu_json")),
+    { updates: 12, security: 5, rebootRequired: true, rebootPkgs: ["linux-image-7.0.0-38-generic", "linux-base"] });
+});
+
+test("ubuntu_json: the other wordings, nothing pending, no update-notifier, and a host without dpkg or systemd", () => {
+  const run = (text) => json(runGroup(fakeHost({ ...BASE, "var/lib/dpkg/status": "", ...(text === null ? {} : { [NOTIFIER]: text }) }), "ubuntu_json"));
+  assert.deepStrictEqual(run("0 updates can be applied immediately.\n"), { updates: 0, security: 0, rebootRequired: false, rebootPkgs: [] });
+  assert.deepStrictEqual(run("1 update can be applied immediately.\n1 of these updates is a standard security update.\n"),
+    { updates: 1, security: 1, rebootRequired: false, rebootPkgs: [] });
+  // Ubuntu 20.04 and older
+  assert.deepStrictEqual(run("7 packages can be updated.\n2 updates are security updates.\n"),
+    { updates: 7, security: 2, rebootRequired: false, rebootPkgs: [] });
+  assert.deepStrictEqual(run("Mises à jour : 3\n"), { rebootRequired: false, rebootPkgs: [] }, "a wording it does not know: no counts, no guess");
+  assert.deepStrictEqual(run(null), { rebootRequired: false, rebootPkgs: [] }, "no update-notifier: no counts");
+  assert.strictEqual(runGroup(fakeHost(BASE), "ubuntu_json").stdout.trim(), "null", "no dpkg, not this host's systemd: null");
+});
+
+test("failed_units: the names of systemd's failed units, at most 32", () => {
+  const bin = fs.mkdtempSync(path.join(os.tmpdir(), "sv-bin-"));
+  const units = Array.from({ length: 40 }, (_, i) => `unit${i}.service loaded failed failed Something ${i}`).join("\n");
+  fs.writeFileSync(path.join(bin, "systemctl"), `#!/bin/sh\n[ "$*" = "--failed --no-legend --plain" ] || exit 9\ncat <<'X'\n${units}\nX\n`, { mode: 0o755 });
+  const r = runGroup(fakeHost(BASE), "failed_units", { PATH: `${bin}:${process.env.PATH}` });
+  assert.strictEqual(r.status, 0, r.stderr);
+  const names = r.stdout.trim().split("\n");
+  assert.strictEqual(names.length, 32);
+  assert.deepStrictEqual(names.slice(0, 2), ["unit0.service", "unit1.service"]);
+});

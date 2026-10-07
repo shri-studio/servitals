@@ -243,6 +243,11 @@ Rules that apply to every field:
   memory (`rss` in bytes). `cpuPct` is the share of one core since the
   agent's last tick (as `top` shows it, so above 100 for a busy multi-threaded
   process), or null when there is nothing to compare yet.
+- `ubuntu` counts updates as update-notifier last wrote them (the agent never
+  runs apt): `updates` and `security` are absent when that file is missing or
+  worded in a way the agent does not know. `failedUnits` comes from the
+  host's own systemd and is absent where the agent cannot ask it (a container
+  agent). The group is null on a host with neither dpkg nor systemd.
 - `cpu.usage` is time neither idle nor waiting on I/O; `cpu.iowait` is idle
   time with I/O outstanding. A server stuck on its disk shows a low `usage`
   with a high `iowait` and `pressure.io`.
