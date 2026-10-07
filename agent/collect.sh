@@ -39,10 +39,11 @@ done
 on() { [ "${1:-1}" != 0 ]; }   # COLLECT_<GROUP>=0 turns a group off; it becomes null
 
 collect() {  # $1 = destination file
-  local host mem=null cpu=null temp=null disks=null net=null docker=null
+  local host mem=null cpu=null temp=null disks=null net=null docker=null pressure=null
   host=$(host_json)
   if on "${COLLECT_MEM:-1}"; then mem=$(mem_json); fi
   if on "${COLLECT_CPU:-1}"; then cpu=$(cpu_json); fi
+  if on "${COLLECT_PRESSURE:-1}"; then pressure=$(pressure_json); fi
   if on "${COLLECT_TEMP:-1}"; then temp=$(temp_json); fi
   if on "${COLLECT_DISKS:-1}"; then disks=$(disks_json); fi
   if on "${COLLECT_NET:-1}"; then
@@ -54,9 +55,9 @@ collect() {  # $1 = destination file
   jq -cn \
     --argjson host "$host" --argjson mem "$mem" --argjson cpu "$cpu" \
     --argjson temp "$temp" --argjson disks "$disks" --argjson net "${net:-null}" \
-    --argjson docker "$docker" --argjson interval "$INTERVAL" --arg agent "$AGENT_NAME" \
+    --argjson docker "$docker" --argjson pressure "$pressure" --argjson interval "$INTERVAL" --arg agent "$AGENT_NAME" \
     '{schema: 1, ts: (now * 1000 | floor), interval: $interval, agent: $agent,
-      host: ($host + {os: "linux"}), mem: $mem, cpu: $cpu, temp: $temp,
+      host: ($host + {os: "linux"}), mem: $mem, cpu: $cpu, pressure: $pressure, temp: $temp,
       disks: $disks, net: $net, docker: $docker}' \
     > "$1.tmp" 2>/dev/null && mv "$1.tmp" "$1"
 }

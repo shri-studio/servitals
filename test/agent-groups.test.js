@@ -71,12 +71,56 @@ test("cpu_json is 0 on the first tick and a delta afterwards", () => {
   const host = fakeHost(BASE);
   const state = fs.mkdtempSync(path.join(os.tmpdir(), "sv-state-"));
   assert.deepStrictEqual(json(runGroup(host, "cpu_json", { STATE: state })),
-    { usage: 0, cores: 2, per: [0, 0], load: [0.5, 0.4, 0.3] });
+    { usage: 0, iowait: 0, steal: 0, cores: 2, per: [0, 0], load: [0.5, 0.4, 0.3] });
   fs.writeFileSync(path.join(host, "proc/stat"),
     "cpu  200 0 200 1600 0 0 0 0 0 0\ncpu0 100 0 100 800 0 0 0 0 0 0\ncpu1 100 0 100 800 0 0 0 0 0 0\n");
   const second = json(runGroup(host, "cpu_json", { STATE: state }));
   assert.strictEqual(second.usage, 20);
   assert.deepStrictEqual(second.per, [20, 20]);
+});
+
+test("cpu_json: time waiting on disk (iowait) and taken by the hypervisor (steal) are their own numbers", () => {
+  const host = fakeHost(BASE);
+  const state = fs.mkdtempSync(path.join(os.tmpdir(), "sv-state-"));
+  runGroup(host, "cpu_json", { STATE: state });
+  // of 1000 more ticks: 100 user, 100 system, 500 idle, 250 iowait, 50 steal
+  fs.writeFileSync(path.join(host, "proc/stat"),
+    "cpu  200 0 200 1300 250 0 0 50 0 0\ncpu0 100 0 100 650 125 0 0 25 0 0\ncpu1 100 0 100 650 125 0 0 25 0 0\n");
+  const d = json(runGroup(host, "cpu_json", { STATE: state }));
+  assert.strictEqual(d.usage, 25, "busy: user, system and steal; iowait is idle time the CPU could not use");
+  assert.strictEqual(d.iowait, 25);
+  assert.strictEqual(d.steal, 5);
+});
+
+test("cpu_json after an upgrade: a state file from the older agent gives 0, not an error", () => {
+  const host = fakeHost(BASE);
+  const state = fs.mkdtempSync(path.join(os.tmpdir(), "sv-state-"));
+  fs.writeFileSync(path.join(state, "cpu"), "1000 800\n");   // total idle, as the older agent wrote it
+  const d = json(runGroup(host, "cpu_json", { STATE: state }));
+  assert.strictEqual(d.iowait, 0);
+  assert.strictEqual(d.steal, 0);
+  assert.strictEqual(fs.readFileSync(path.join(state, "cpu"), "utf8").trim().split(" ").length, 4, "the new state has four fields");
+});
+
+const PRESSURE = {
+  "proc/pressure/cpu": "some avg10=0.43 avg60=0.18 avg300=0.05 total=10361151074\nfull avg10=0.00 avg60=0.00 avg300=0.00 total=0\n",
+  "proc/pressure/memory": "some avg10=0.04 avg60=0.15 avg300=0.20 total=8494872319\nfull avg10=0.04 avg60=0.15 avg300=0.18 total=8074947564\n",
+  "proc/pressure/io": "some avg10=14.85 avg60=17.50 avg300=18.90 total=140135240655\nfull avg10=13.29 avg60=15.99 avg300=17.46 total=130849769659\n",
+};
+
+test("pressure_json: the share of the last 10 s that some (or all) tasks waited for cpu, memory or disk", () => {
+  const host = fakeHost({ ...BASE, ...PRESSURE });
+  assert.deepStrictEqual(json(runGroup(host, "pressure_json")), {
+    cpu: { some: 0.43, full: 0 }, mem: { some: 0.04, full: 0.04 }, io: { some: 14.85, full: 13.29 },
+  });
+});
+
+test("pressure_json: a kernel without cpu 'full' (before 5.13) gives null there; without PSI, null", () => {
+  const host = fakeHost({ ...BASE, ...PRESSURE, "proc/pressure/cpu": "some avg10=1.50 avg60=0.18 avg300=0.05 total=1\n" });
+  assert.deepStrictEqual(json(runGroup(host, "pressure_json")).cpu, { some: 1.5, full: null });
+  assert.strictEqual(runGroup(fakeHost(BASE), "pressure_json").stdout.trim(), "null");
+  const partial = fakeHost({ ...BASE, "proc/pressure/io": PRESSURE["proc/pressure/io"] });
+  assert.deepStrictEqual(json(runGroup(partial, "pressure_json")), { cpu: null, mem: null, io: { some: 14.85, full: 13.29 } });
 });
 
 test("temp_json picks the package sensor", () => {

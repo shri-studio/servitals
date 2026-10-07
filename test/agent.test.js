@@ -31,7 +31,7 @@ test("COLLECT_<GROUP>=0 turns a group off", () => {
   const out = path.join(dir, "data.json");
   const r = spawnSync("bash", [path.join(__dirname, "..", "agent", "collect.sh")], {
     env: { ...process.env, HOST_ROOT: "/", OUT_FILE: out, STATE_DIR: dir, ONCE: "1", DISKS: "/",
-           COLLECT_DOCKER: "0", COLLECT_TEMP: "0", COLLECT_NET: "0" },
+           COLLECT_DOCKER: "0", COLLECT_TEMP: "0", COLLECT_NET: "0", COLLECT_PRESSURE: "0" },
     timeout: 30000,
   });
   assert.strictEqual(r.status, 0, r.stderr.toString());
@@ -39,6 +39,7 @@ test("COLLECT_<GROUP>=0 turns a group off", () => {
   assert.strictEqual(d.docker, null);
   assert.strictEqual(d.temp, null);
   assert.strictEqual(d.net, null);
+  assert.strictEqual(d.pressure, null);
   assert.ok(d.mem.total > 0);
   fs.rmSync(dir, { recursive: true, force: true });
 });
