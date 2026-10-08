@@ -7,6 +7,11 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- History graph (spec 10.1): a "history" panel in each node's view charts
+  any of its series (cpu, memory, temperature, load, iowait, pressure,
+  network, each disk and device, each container) over 1 h, 24 h, 7 d, 30 d
+  or 90 d: the average line, the low-high band, and gaps shaded. Its script
+  loads when the panel is first shown.
 - History (spec 7): the hub keeps every node's series (cpu, memory, swap,
   temperature, load, iowait, pressure, network, each disk's use and I/O,
   each container) in ring files under the state directory's `history/`:

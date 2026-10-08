@@ -227,7 +227,7 @@ test("an element tagged data-i18n holds only its text", () => {
 });
 
 test("every key the code asks for is in the dictionary, and every key in it is used", () => {
-  const src = [MARKUP, read("js/app.js"), read("js/settings.js"),
+  const src = [MARKUP, read("js/app.js"), read("js/settings.js"), read("js/history.js"),
                fs.readFileSync(path.join(__dirname, "..", "hub", "server.js"), "utf8")].join("\n");
   const asked = new Set([...src.matchAll(/\btr(?:Html)?\("([^"]+)"/g), ...src.matchAll(/data-i18n(?:-[a-z-]+)?="([^"]+)"/g)].map((m) => m[1]));
   const prefixes = [...asked].filter((k) => k.endsWith("."));
@@ -235,4 +235,8 @@ test("every key the code asks for is in the dictionary, and every key in it is u
   for (const k of Object.keys(STRINGS)) {
     assert.ok(asked.has(k) || prefixes.some((p) => k.startsWith(p)), `never used: ${k}`);
   }
+});
+
+test("history.js puts no words on the page except through tr()", () => {
+  assert.deepStrictEqual(wordsOutsideTr(read("js/history.js")), []);
 });

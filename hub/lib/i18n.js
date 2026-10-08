@@ -55,6 +55,7 @@ const STRINGS = {
   "panel.procs": "processes",
   "panel.system": "system",
   "panel.hw": "hardware",
+  "panel.hist": "history",
   "panel.clocks": "world clocks",
   "panel.weather": "weather",
 
@@ -165,6 +166,18 @@ const STRINGS = {
   "hw.bat.full": "full",
   "hw.bat.notcharging": "not charging",
   "hw.bat.unknown": "unknown",
+
+  // history: series names, ranges, the chart's words
+  "hist.seriesLabel": "series",
+  "hist.r.1h": "1h", "hist.r.24h": "24h", "hist.r.7d": "7d", "hist.r.30d": "30d", "hist.r.90d": "90d",
+  "hist.s.cpu": "cpu", "hist.s.mem": "memory", "hist.s.temp": "temperature", "hist.s.load1": "load 1m",
+  "hist.s.iowait": "iowait", "hist.s.swap": "swap", "hist.s.psi.cpu": "pressure cpu", "hist.s.psi.mem": "pressure memory",
+  "hist.s.psi.io": "pressure io", "hist.s.net.rx": "network in", "hist.s.net.tx": "network out",
+  "hist.disk": "disk {mount}",
+  "hist.io.read": "{device} read", "hist.io.write": "{device} write",
+  "hist.ctr.cpu": "{name} cpu", "hist.ctr.mem": "{name} memory",
+  "hist.empty": "no history yet",
+  "hist.summary": "avg {avg} · low {lo} · high {hi}",
 
   // dialogs
   "dlg.close": "[esc]",

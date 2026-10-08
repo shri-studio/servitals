@@ -314,6 +314,18 @@ a:hover { text-decoration: underline; }
 #hw-body .plbl { margin-top: 10px; }
 .procs .pname { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .sysunits { color: var(--dim); font-size: 12px; margin-top: 6px; overflow-wrap: anywhere; }
+/* history: the chart stretches to the panel; its words are HTML, so they never stretch */
+.hplot { display: flex; gap: 8px; align-items: stretch; height: 160px; }
+.hplot .hy { display: flex; flex-direction: column; justify-content: space-between; color: var(--dim); font-size: 11px; min-width: 44px; text-align: right; }
+.hplot svg { flex: 1; min-width: 0; height: 100%; }
+.hchart .hx { display: flex; justify-content: space-between; color: var(--dim); font-size: 11px; margin: 4px 0 0 52px; }
+.hband { fill: var(--cyan); fill-opacity: .18; }
+.hline { fill: none; stroke: var(--cyan); stroke-width: 1.6; }
+.hgap { fill: var(--dim); fill-opacity: .12; }
+.hnote { color: var(--dim); font-size: 12px; margin-top: 6px; }
+.hrange { cursor: pointer; margin-left: 6px; }
+.hrange.on { color: var(--fg-bright); text-decoration: underline; }
+#hist-series { font: inherit; font-size: 11px; }
 .disk .dmodel .dio { white-space: nowrap; }   /* "read 7.3 MB/s · write 1.1 MB/s" stays on one line */
 .disk .dwarn { color: var(--amber); }
 

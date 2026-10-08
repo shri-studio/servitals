@@ -209,9 +209,9 @@ async function loadConfig() {
   const builtin = {
     title: "servitals", favicon: "", refreshSec: 60,
     weather: [], clocks: [], disks: {},
-    panels: { mem: 1, cpu: 1, temp: 1, storage: 1, network: 1, docker: 1, procs: 1, system: 1, hw: 1, clocks: 1, weather: 1 },
-    panelOrder: ["mem", "cpu", "temp", "storage", "network", "docker", "procs", "system", "hw", "clocks", "weather"],
-    panelSize: { mem: "normal", cpu: "normal", temp: "normal", storage: "wide",
+    panels: { mem: 1, cpu: 1, temp: 1, hist: 1, storage: 1, network: 1, docker: 1, procs: 1, system: 1, hw: 1, clocks: 1, weather: 1 },
+    panelOrder: ["mem", "cpu", "temp", "hist", "storage", "network", "docker", "procs", "system", "hw", "clocks", "weather"],
+    panelSize: { mem: "normal", cpu: "normal", temp: "normal", hist: "full", storage: "wide",
                  network: "wide", docker: "full", procs: "wide", system: "normal", hw: "normal", clocks: "normal", weather: "normal" }
   };
   // a conf.d file may set only a few panels: the others keep their built-in values
@@ -607,6 +607,7 @@ async function tick() {
     if (!r.ok) throw new Error(d.error || "no snapshot");
     lastData = d;
     renderMetrics(d);
+    showHistory();
     setStatus(d.ts);
   } catch (e) {
     setStatus(lastData ? lastData.ts : 0, true);
@@ -1116,6 +1117,21 @@ function closeSettings() {
   applyLayout();
   $("#overlay").classList.remove("open");
 }
+/* ------------------------------------------------------------------ history, loaded on first use (spec 10.5) */
+let historyReady = null;
+function showHistory() {
+  const panel = $("[data-panel=hist]");
+  if (view !== "node" || !panel || panel.classList.contains("hidden")) return;
+  historyReady = historyReady || new Promise((ok, fail) => {
+    const s = document.createElement("script");
+    s.src = "js/history.js";
+    s.onload = () => (typeof initHistory === "function" ? (initHistory(), ok()) : fail(new Error("history.js")));
+    s.onerror = () => { historyReady = null; fail(new Error("history.js")); };
+    document.head.appendChild(s);
+  });
+  historyReady.then(() => loadHistory(), () => {});
+}
+
 let settingsReady = null;
 function openSettings() {
   settingsReady = settingsReady || new Promise((ok, fail) => {

@@ -367,6 +367,39 @@ test("the hardware panel: the battery, fans (a named one stopped is red) and vol
   assert.match(HTML, /\$\("\[data-panel=hw\]"\)\.classList\.toggle\("hidden", !hw \|\| shown\.hw === false\);/, "hidden when there is nothing to show");
 });
 
+test("history: each series reads in its unit, and has a name in words", () => {
+  const kindOf = pageFunction("kindOf");
+  assert.deepStrictEqual(["cpu", "mem", "swap", "iowait", "psi.io", "disk./srv.used", "ctr.web.cpu", "temp", "net.rx", "io.sda1.read",
+    "ctr.web.mem", "load1"].map(kindOf), ["pct", "pct", "pct", "pct", "pct", "pct", "pct", "temp", "net", "io", "bytes", "num"]);
+  const { STRINGS } = require("../hub/lib/i18n");
+  const seriesLabel = pageFn("seriesLabel", { STRINGS });
+  assert.deepStrictEqual(["cpu", "net.rx", "disk./srv.used", "io.sda1.write", "ctr.web.mem", "weird"].map(seriesLabel),
+    ["cpu", "network in", "disk /srv", "sda1 write", "web memory", "weird"]);
+});
+
+test("history chart: the average line and the low-high band per run of data; a gap is shaded; no data says so", () => {
+  const esc = (x) => String(x).replace(/[&<>"']/g, (m) => "&#" + m.charCodeAt(0) + ";");
+  const historyChart = pageFn("historyChart", { esc, fmtKind: (k, v) => (v == null ? "–" : v + "%"),
+    fmtTime: () => "12:00", fmtTimeOrDay: () => "12:00" });
+  const pts = [[0, 10, 5, 20], [60, 20, 10, 30], [120, null, null, null], [180, null, null, null], [240, 40, 30, 50]];
+  const svg = historyChart(pts, "pct", "1h");
+  assert.strictEqual((svg.match(/<polyline class="hline"/g) || []).length, 2, "two runs of data: two lines");
+  assert.strictEqual((svg.match(/<polygon class="hband"/g) || []).length, 2);
+  assert.strictEqual((svg.match(/<rect class="hgap"/g) || []).length, 1, "the gap between them is shaded");
+  assert.match(svg, /<span>100%<\/span><span>0%<\/span>/, "a share reads on 0 to 100");
+  assert.match(svg, /points="0\.0,180\.0 250\.0,160\.0"/, "the line: x across the range, y from the average");
+  assert.strictEqual(historyChart([[0, null, null, null]], "pct", "1h"), '<div class="muted">no history yet</div>');
+  assert.doesNotMatch(svg, /style=/, "the strict CSP: no style attributes");
+});
+
+test("the history panel is in the node view and loads its script when shown", () => {
+  for (const id of ["hist-series", "hist-chart", "hist-note"]) assert.ok(HTML.includes(`id="${id}"`), id);
+  assert.match(HTML, /data-panel="hist"/);
+  assert.match(HTML, /class="hrange" data-r="24h"/);
+  assert.match(JS, /s\.src = "js\/history\.js";/);
+  assert.match(fs.readFileSync(path.join(__dirname, "..", "www", "sw.js"), "utf8"), /"\/js\/history\.js"/, "kept for the offline copy");
+});
+
 test("fleet cards show the numbers chosen in settings", () => {
   const CARD_KEYS = ["cpu", "mem", "temp", "disk", "containers", "iowait", "updates", "battery"];
   assert.match(HTML, new RegExp(`const CARD_KEYS = ${JSON.stringify(CARD_KEYS).replace(/[[\]]/g, "\\$&").replace(/,/g, ", ")};`));
@@ -507,7 +540,7 @@ test("conf.d review: a file with a few panels keeps the built-in panel list and 
   const fromHub = { panels: { weather: false }, panelSize: { docker: "full" }, _managed: ["panelSize.docker", "panels.weather"] };
   const run = new Function("fetch", "lsGet", `let DEFAULTS = {}, cfg = {}; ${helpers}\n${src}\nreturn loadConfig().then(() => ({ DEFAULTS, cfg }));`);
   const { cfg } = await run(async () => ({ json: async () => structuredClone(fromHub) }), () => null);
-  assert.deepStrictEqual(cfg.panelOrder, ["mem", "cpu", "temp", "storage", "network", "docker", "procs", "system", "hw", "clocks", "weather"]);
+  assert.deepStrictEqual(cfg.panelOrder, ["mem", "cpu", "temp", "hist", "storage", "network", "docker", "procs", "system", "hw", "clocks", "weather"]);
   assert.strictEqual(cfg.panels.weather, false);
   assert.strictEqual(cfg.panels.mem, 1, "built-in panels stay");
   assert.deepStrictEqual([cfg.panelSize.storage, cfg.panelSize.docker], ["wide", "full"]);

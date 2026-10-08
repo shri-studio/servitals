@@ -80,6 +80,25 @@ function variant(base, c, i, round) {
   return JSON.stringify(s);
 }
 
+// a day of history for the local node and the nas (the nas was off for two hours),
+// written straight into the hub's history files before the pushes start
+function seedHistory(creds) {
+  const { createHistory } = require(path.join(REPO, "hub/lib/history"));
+  const start = Math.floor(Date.now() / 60000) - 1440;
+  let minute = start;
+  const h = createHistory(path.join(state, "history"), { now: () => minute * 60000 });
+  for (; minute < start + 1440; minute++) {
+    const m = minute - start;
+    for (const [i, c] of creds.slice(0, 2).entries()) {
+      if (i === 1 && m > 900 && m < 1020) continue;   // the nas: two hours offline
+      const wave = Math.sin(m / 90 + i) * 15, spike = m % 360 < 20 ? 30 : 0;
+      h.add(c.id, { cpu: Math.max(1, 25 + wave + spike + (m % 7)), mem: 40 + i * 20 + Math.sin(m / 300) * 5,
+                    temp: 45 + wave / 3, "net.rx": 2e6 + Math.abs(wave) * 1e5 });
+    }
+  }
+  h.flush();
+}
+
 (async () => {
   await sleep(800);
   const base = JSON.parse(execFileSync("bash", [path.join(REPO, "bin/servitals-agent"), "test"],
@@ -90,6 +109,7 @@ function variant(base, c, i, round) {
     const n = JSON.parse(execFileSync(process.execPath, [path.join(REPO, "hub/lib/nodes.js"), path.join(state, "nodes.json"), "add", name, "home"]).toString());
     creds.push({ ...n, name });
   }
+  seedHistory(creds);
   for (let round = 0; round < 3; round++) {
     for (const [i, c] of creds.entries()) {
       const code = await push(c, variant(base, c, i, round));
