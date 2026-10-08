@@ -321,7 +321,9 @@ Snapshots from nodes are untrusted input. On every push the hub:
    numbers must be finite numbers within range, strings are capped (hostname
    64, labels 128, container names 128), arrays are capped (disks 32,
    containers 200, processes 5 per list, sensors 64), unknown keys are
-   dropped;
+   dropped; a failure in a required part (`schema`, `ts`, `interval`,
+   `host`) refuses the snapshot (422), a failure in an optional group drops
+   that group only, so one bad sensor never takes a node offline;
 3. stores the validated copy only, enriched with values the hub derives:
    network and disk I/O rates and per-container CPU % from the counters of
    the previous snapshot. The page reads these derived values; agents never

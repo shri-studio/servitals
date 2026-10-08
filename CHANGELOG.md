@@ -68,6 +68,10 @@ All notable changes to this project are documented here. The format follows
   `HUB_CA_FILE` for agents; `docs/networking.md`.
 
 ### Changed
+- The hub keeps a node's snapshot when one optional group in it is invalid (a
+  glitched sensor, a bad value): that group is left out, named in the reply
+  and logged once, instead of the whole push being refused with 422. Only a
+  bad `schema`, `ts`, `interval` or `host` still refuses it.
 - The page follows the system's light or dark setting until someone picks a
   mode (it used to start dark). The 8bit style moved out of the page into
   `styles/8bit.css`; its light colours are darker so text stays readable.

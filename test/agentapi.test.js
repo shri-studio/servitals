@@ -219,3 +219,14 @@ test("replays are not counted as authentication failures", async () => {
     assert.strictEqual(wait.status, 204);
   });
 });
+
+test("a push with a bad optional group is stored without it, says what was dropped, and logs it once", async () => {
+  await withHub(async (hub, c) => {
+    const r = await signed(hub, c, { body: snap({ fans: [{ label: "f", rpm: 1350000 }], mem: { total: 100, used: 50 } }) });
+    assert.strictEqual(r.status, 200);
+    assert.deepStrictEqual(JSON.parse(r.body), { ok: true, dropped: ["$.fans[0].rpm"] });
+    await new Promise((ok) => setTimeout(ok, 200));
+    assert.strictEqual((hub.logs().match(/api\.groups_dropped/g) || []).length, 1);
+    assert.match(hub.logs(), /api\.groups_dropped.*\$\.fans\[0\]\.rpm/);
+  });
+});

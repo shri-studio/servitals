@@ -41,7 +41,7 @@ test("processes pass with a cpu share still unknown; names are cut to 64 and lis
   assert.strictEqual(r.value.processes.mem.length, 5);
   assert.strictEqual(r.value.processes.mem[0].name.length, 64);
   assert.strictEqual(r.value.processes.mem[0].cpuPct, null);
-  assert.deepStrictEqual(validate(base({ processes: { cpu: [p(1, { rss: -1 })] } })), { ok: false, path: "$.processes.cpu[0].rss" });
+  assert.deepStrictEqual(validate(base({ processes: { cpu: [p(1, { rss: -1 })] } })).dropped, ["$.processes.cpu[0].rss"]);
 });
 
 test("voltages pass with their label; fans and the battery as before", () => {
@@ -49,16 +49,22 @@ test("voltages pass with their label; fans and the battery as before", () => {
     fans: [{ label: "CPU fan", rpm: 1200 }], battery: { capacity: 87, status: "Discharging" } }));
   assert.ok(r.ok, JSON.stringify(r));
   assert.deepStrictEqual(r.value.voltages, [{ label: "Vcore", value: 1.216 }, { label: "-12V", value: -11.9 }]);
-  assert.deepStrictEqual(validate(base({ voltages: [{ label: "x", value: 5000 }] })), { ok: false, path: "$.voltages[0].value" });
-  assert.deepStrictEqual(validate(base({ voltages: [{ label: "x" }] })), { ok: false, path: "$.voltages[0].value" });
+  assert.deepStrictEqual(validate(base({ voltages: [{ label: "x", value: 5000 }] })).dropped, ["$.voltages[0].value"]);
+  assert.deepStrictEqual(validate(base({ voltages: [{ label: "x" }] })).dropped, ["$.voltages[0].value"]);
   assert.strictEqual(validate(base({ voltages: Array.from({ length: 40 }, () => ({ label: "v", value: 1 })) })).value.voltages.length, 32);
 });
 
-test("the first bad value names its path", () => {
+test("a bad required value refuses the snapshot and names its path", () => {
   const cases = [
     [null, "$"], [[1], "$"], [{ ...base(), schema: 2 }, "$.schema"], [{ ...base(), ts: -1 }, "$.ts"],
     [{ ...base(), ts: 1.5 }, "$.ts"], [{ ...base(), interval: 4 }, "$.interval"], [{ ...base(), host: {} }, "$.host.name"],
-    [{ ...base(), host: { name: "x", os: "plan9" } }, "$.host.os"],
+    [{ ...base(), host: { name: "x", os: "plan9" } }, "$.host.os"], [{ ...base(), host: "x" }, "$.host"],
+  ];
+  for (const [s, path] of cases) assert.deepStrictEqual(validate(s), { ok: false, path }, JSON.stringify(s));
+});
+
+test("a bad value in an optional group drops that group only; the rest is kept and the paths are named", () => {
+  const cases = [
     [base({ cpu: { usage: 101 } }), "$.cpu.usage"], [base({ cpu: { usage: Infinity } }), "$.cpu.usage"],
     [base({ cpu: { iowait: 101 } }), "$.cpu.iowait"], [base({ cpu: { steal: -1 } }), "$.cpu.steal"],
     [base({ pressure: { io: { some: 100.5 } } }), "$.pressure.io.some"], [base({ pressure: { mem: { full: "9" } } }), "$.pressure.mem.full"],
@@ -66,9 +72,19 @@ test("the first bad value names its path", () => {
     [base({ mem: { total: "1" } }), "$.mem.total"], [base({ temp: { package: 900 } }), "$.temp.package"],
     [base({ disks: [{ mount: "/", pct: 150 }] }), "$.disks[0].pct"], [base({ disks: "x" }), "$.disks"],
     [base({ docker: [{ name: "a", cpuUsec: -1 }] }), "$.docker[0].cpuUsec"],
-    [base({ net: { rxBytes: 2 ** 60 } }), "$.net.rxBytes"],
+    [base({ net: { rxBytes: 2 ** 60 } }), "$.net.rxBytes"], [base({ agent: 7 }), "$.agent"],
   ];
-  for (const [s, path] of cases) assert.deepStrictEqual(validate(s), { ok: false, path }, JSON.stringify(s));
+  for (const [s, path] of cases) {
+    const r = validate({ ...s, mem: s.mem || { total: 100, used: 50 } });
+    const group = path.split(/[.[]/)[1];
+    assert.ok(r.ok, JSON.stringify(s));
+    assert.deepStrictEqual(r.dropped, [path], JSON.stringify(s));
+    assert.strictEqual(r.value[group], undefined, `${group} is dropped`);
+    if (group !== "mem") assert.deepStrictEqual(r.value.mem, { total: 100, used: 50 }, "the other groups stay");
+  }
+  const two = validate(base({ fans: [{ label: "f", rpm: -5 }], battery: { capacity: 101 }, cpu: { usage: 5 } }));
+  assert.deepStrictEqual([two.ok, two.dropped, two.value.cpu], [true, ["$.fans[0].rpm", "$.battery.capacity"], { usage: 5 }]);
+  assert.deepStrictEqual(validate(base({ cpu: { usage: 5 } })).dropped, [], "nothing dropped: an empty list");
 });
 
 test("strings lose control characters and are cut; lists are cut", () => {

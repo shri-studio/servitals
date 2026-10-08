@@ -59,8 +59,12 @@ signature = lowercase_hex(HMAC-SHA256(key = secret bytes, message))
    agent's wait and push run concurrently), else `401 replay`.
 5. The body is within the size limit, else `413`.
 6. The signature matches, else `401 bad_signature`.
-7. For push: the body validates against the snapshot schema, else
-   `422 invalid_snapshot` with the first failing path.
+7. For push: the required parts (`schema`, `ts`, `interval`, `host`) validate
+   against the snapshot schema, else `422 invalid_snapshot` with the first
+   failing path. An optional group that fails is left out and the rest is
+   stored: the reply is `200 {"ok": true, "dropped": ["$.fans[0].rpm"]}` with
+   the first failing path of each group left out, and the hub logs each new
+   set once per node.
 
 Only after all checks pass does the hub store the new last `TS`.
 During a secret rotation's overlap window, the hub accepts a signature made

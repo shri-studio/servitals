@@ -75,85 +75,92 @@ const proc = (x, p) => obj(x, p, (o) => clean({
 function build(s) {
   if (!isObj(s)) throw new Invalid("$");
   const schema = num(s.schema, 1, 1, "$.schema", { optional: false, int: true });
-  return clean({
+  // the required parts refuse the whole snapshot; an optional group that fails is
+  // dropped alone (its path recorded), so one bad sensor never costs the rest
+  const dropped = [];
+  const opt = (build) => {
+    try { return build(); } catch (e) { if (!(e instanceof Invalid)) throw e; dropped.push(e.path); return undefined; }
+  };
+  const value = clean({
     schema,
     ts: counter(s.ts, "$.ts", { optional: false }),
     interval: num(s.interval, 5, 3600, "$.interval", { optional: false, int: true }),
-    agent: str(s.agent, 32, "$.agent"),
+    agent: opt(() => str(s.agent, 32, "$.agent")),
     host: obj(s.host, "$.host", (h, p) => clean({
       name: str(h.name, 64, `${p}.name`, { optional: false }),
       os: oneOf(h.os, ["linux", "darwin", "windows", "freebsd"], `${p}.os`),
       distro: str(h.distro, 64, `${p}.distro`), kernel: str(h.kernel, 64, `${p}.kernel`),
       uptime: counter(h.uptime, `${p}.uptime`),
     }), { optional: false }),
-    mem: obj(s.mem, "$.mem", (m, p) => clean(Object.fromEntries(
-      ["total", "used", "available", "free", "cache", "swapTotal", "swapUsed"].map((k) => [k, counter(m[k], `${p}.${k}`)])))),
-    cpu: obj(s.cpu, "$.cpu", (c, p) => clean({
+    mem: opt(() => obj(s.mem, "$.mem", (m, p) => clean(Object.fromEntries(
+      ["total", "used", "available", "free", "cache", "swapTotal", "swapUsed"].map((k) => [k, counter(m[k], `${p}.${k}`)]))))),
+    cpu: opt(() => obj(s.cpu, "$.cpu", (c, p) => clean({
       usage: num(c.usage, 0, 100, `${p}.usage`), cores: num(c.cores, 1, 4096, `${p}.cores`, { int: true }),
       iowait: num(c.iowait, 0, 100, `${p}.iowait`), steal: num(c.steal, 0, 100, `${p}.steal`),
       per: list(c.per, 1024, `${p}.per`, (v, q) => num(v, 0, 100, q, { optional: false })),
       load: list(c.load, 3, `${p}.load`, (v, q) => num(v, 0, 1e6, q, { optional: false })),
-    })),
-    pressure: obj(s.pressure, "$.pressure", (x, p) => clean({
+    }))),
+    pressure: opt(() => obj(s.pressure, "$.pressure", (x, p) => clean({
       cpu: stall(x.cpu, `${p}.cpu`), mem: stall(x.mem, `${p}.mem`), io: stall(x.io, `${p}.io`),
-    })),
-    temp: obj(s.temp, "$.temp", (t, p) => clean({
+    }))),
+    temp: opt(() => obj(s.temp, "$.temp", (t, p) => clean({
       package: num(t.package, -50, 150, `${p}.package`, { nullable: true }),
       max: num(t.max, -50, 150, `${p}.max`, { nullable: true }),
       sensors: list(t.sensors, 64, `${p}.sensors`, (x, q) => obj(x, q, (o) => clean({
         label: str(o.label, 128, `${q}.label`), value: num(o.value, -50, 150, `${q}.value`, { optional: false }),
       }), { optional: false })),
-    })),
-    fans: list(s.fans, 32, "$.fans", (x, q) => obj(x, q, (o) => clean({
+    }))),
+    fans: opt(() => list(s.fans, 32, "$.fans", (x, q) => obj(x, q, (o) => clean({
       label: str(o.label, 128, `${q}.label`), rpm: num(o.rpm, 0, 1e6, `${q}.rpm`, { optional: false }),
-    }), { optional: false })),
-    voltages: list(s.voltages, 32, "$.voltages", (x, q) => obj(x, q, (o) => clean({
+    }), { optional: false }))),
+    voltages: opt(() => list(s.voltages, 32, "$.voltages", (x, q) => obj(x, q, (o) => clean({
       label: str(o.label, 128, `${q}.label`), value: num(o.value, -1000, 1000, `${q}.value`, { optional: false }),
-    }), { optional: false })),
-    battery: obj(s.battery, "$.battery", (b, p) => clean({
+    }), { optional: false }))),
+    battery: opt(() => obj(s.battery, "$.battery", (b, p) => clean({
       capacity: num(b.capacity, 0, 100, `${p}.capacity`), status: str(b.status, 16, `${p}.status`),
-    })),
-    disks: list(s.disks, 32, "$.disks", (x, q) => obj(x, q, (d) => clean({
+    }))),
+    disks: opt(() => list(s.disks, 32, "$.disks", (x, q) => obj(x, q, (d) => clean({
       mount: str(d.mount, 128, `${q}.mount`, { optional: false }), mounted: bool(d.mounted, `${q}.mounted`),
       source: str(d.source, 128, `${q}.source`), model: str(d.model, 128, `${q}.model`),
       fstype: str(d.fstype, 128, `${q}.fstype`), rotational: bool(d.rotational, `${q}.rotational`),
       size: counter(d.size, `${q}.size`), used: counter(d.used, `${q}.used`), avail: counter(d.avail, `${q}.avail`),
       pct: num(d.pct, 0, 100, `${q}.pct`), device: str(d.device, 128, `${q}.device`),
-    }), { optional: false })),
-    io: list(s.io, 32, "$.io", (x, q) => obj(x, q, (d) => clean({
+    }), { optional: false }))),
+    io: opt(() => list(s.io, 32, "$.io", (x, q) => obj(x, q, (d) => clean({
       device: str(d.device, 128, `${q}.device`, { optional: false }),
       readBytes: counter(d.readBytes, `${q}.readBytes`), writeBytes: counter(d.writeBytes, `${q}.writeBytes`),
-    }), { optional: false })),
-    net: obj(s.net, "$.net", (n, p) => clean({
+    }), { optional: false }))),
+    net: opt(() => obj(s.net, "$.net", (n, p) => clean({
       iface: str(n.iface, 128, `${p}.iface`), rxBytes: counter(n.rxBytes, `${p}.rxBytes`), txBytes: counter(n.txBytes, `${p}.txBytes`),
       vnstat: obj(n.vnstat, `${p}.vnstat`, (v, q) => clean({
         today: obj(v.today, `${q}.today`, traffic), month: obj(v.month, `${q}.month`, traffic),
         total: obj(v.total, `${q}.total`, traffic),
         days: list(v.days, 31, `${q}.days`, bar), hours: list(v.hours, 24, `${q}.hours`, bar),
       })),
-    })),
-    docker: list(s.docker, 200, "$.docker", (x, q) => obj(x, q, (c) => clean({
+    }))),
+    docker: opt(() => list(s.docker, 200, "$.docker", (x, q) => obj(x, q, (c) => clean({
       name: str(c.name, 128, `${q}.name`, { optional: false }), id: str(c.id, 128, `${q}.id`),
       state: str(c.state, 32, `${q}.state`), status: str(c.status, 128, `${q}.status`),
       health: c.health === null ? null : str(c.health, 32, `${q}.health`),
       cpuUsec: counter(c.cpuUsec, `${q}.cpuUsec`, { nullable: true }),
       mem: counter(c.mem, `${q}.mem`, { nullable: true }),
-    }), { optional: false })),
-    processes: obj(s.processes, "$.processes", (pr, p) => clean({
+    }), { optional: false }))),
+    processes: opt(() => obj(s.processes, "$.processes", (pr, p) => clean({
       cpu: list(pr.cpu, 5, `${p}.cpu`, proc), mem: list(pr.mem, 5, `${p}.mem`, proc),
-    })),
-    ubuntu: obj(s.ubuntu, "$.ubuntu", (u, p) => clean({
+    }))),
+    ubuntu: opt(() => obj(s.ubuntu, "$.ubuntu", (u, p) => clean({
       updates: num(u.updates, 0, 1e6, `${p}.updates`, { int: true }),
       security: num(u.security, 0, 1e6, `${p}.security`, { int: true }),
       rebootRequired: bool(u.rebootRequired, `${p}.rebootRequired`),
       rebootPkgs: list(u.rebootPkgs, 32, `${p}.rebootPkgs`, (v, q) => str(v, 128, q, { optional: false })),
       failedUnits: list(u.failedUnits, 32, `${p}.failedUnits`, (v, q) => str(v, 128, q, { optional: false })),
-    })),
+    }))),
   });
+  return { value, dropped };
 }
 
 function validate(s) {
-  try { return { ok: true, value: build(s) }; }
+  try { return { ok: true, ...build(s) }; }
   catch (e) { if (e instanceof Invalid) return { ok: false, path: e.path }; throw e; }
 }
 

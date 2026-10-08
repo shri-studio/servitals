@@ -87,6 +87,7 @@ function createAgentApi({ nodes, log, onSnapshot, maxBody = 256 * 1024, now = Da
   const lastWake = new Map();   // id -> hub time of the last wake sent
   const waiters = new Map();    // id -> { res, secret, ts, timer }
   const seen = new Set();       // ids that pushed since this process started
+  const droppedSeen = new Map();   // node -> the dropped paths last logged, so a bad sensor logs once
 
   function fail(res, code, error, { headers = {}, body = {} } = {}) {
     res.writeHead(code, { "content-type": "application/json", ...headers });
@@ -172,6 +173,13 @@ function createAgentApi({ nodes, log, onSnapshot, maxBody = 256 * 1024, now = Da
       lastPush.set(id, hubMs);
       if (!seen.has(id)) { seen.add(id); log.info("api.first_push", { node: id }); }
       onSnapshot(id, checked.value);
+      // an optional group that failed validation was left out: say so, and log each new set once
+      if (checked.dropped.length) {
+        const key = checked.dropped.join(" ");
+        if (droppedSeen.get(id) !== key) { droppedSeen.set(id, key); log.warn("api.groups_dropped", { node: id, paths: key }); }
+        return reply(res, 200, secret, tsRaw, { ok: true, dropped: checked.dropped });
+      }
+      droppedSeen.delete(id);
       return reply(res, 200, secret, tsRaw, { ok: true });
     }
 
