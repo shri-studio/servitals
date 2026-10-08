@@ -807,3 +807,119 @@ test("keys typed into the alerts dialog's choice stay there; behind an open dial
   assert.match(JS, /if \(\["INPUT", "TEXTAREA", "SELECT"\]\.includes\(e\.target\.tagName\)\) return;/);
   assert.match(JS, /if \(\$\("#alerts-overlay"\)\.classList\.contains\("open"\)\) \{\n\s+if \(e\.key === "a" \|\| e\.key === "Escape"\) closeAlerts\(\);\n\s+return;\n\s+\}/);
 });
+
+// the rule editor (spec 8.1), in alerts.js
+function rulesScope(extra = {}) {
+  const { STRINGS } = require("../hub/lib/i18n");
+  const { defaultsForPage } = require("../hub/lib/alertrules");
+  const env = { esc: escA, STRINGS, fmtShare: String, fmtTemp: String, fmtDur: String, fmtTime: () => "", Date,
+    units: () => ({ temp: "c" }), tempUnit: () => "°C", fleetNodes: [], $: () => ({}), $$: () => [], toast() {}, fetch: async () => answer({}),
+    loadNodes: async () => {}, renderFleetIfShown() {}, ...extra };
+  const src = fs.readFileSync(path.join(__dirname, "..", "www", "js", "alerts.js"), "utf8");
+  const api = new Function(...Object.keys(env), "tr", `${src}; return { rulesRows, rulesFile, rulesHtml, readRules, saveRules, rulesAction, rulesState, shown, typed };`)(...Object.values(env), tr);
+  api.rulesState.defaults = JSON.parse(JSON.stringify(defaultsForPage()));
+  api.rulesState.metrics = require("../hub/lib/alertrules").METRICS;
+  return api;
+}
+
+test("rule editor: the saved file and the defaults become rows, and rows become the smallest file again", () => {
+  const s = rulesScope();
+  const D = s.rulesState.defaults;
+  assert.deepStrictEqual(s.rulesFile(s.rulesRows({ rules: [] }, D), D), { rules: [] }, "nothing changed: nothing kept");
+  const saved = { rules: [   // in the defaults' order, as the editor writes it
+    { id: "offline", overrides: [{ node: "nodeaaaaaaaa", off: true }] },
+    { id: "disk_full", threshold: 85, clear: 80 },
+    { id: "cpu", off: true, overrides: [{ tag: "lab", threshold: 99 }] },
+    { id: "c_b", name: "backup", metric: "disk.used", op: ">=", threshold: 70, for: 0, clear: null, severity: "warning", scope: { node: "nodeaaaaaaaa" }, sub: "/b" },
+  ] };
+  const rows = s.rulesRows(saved, D);
+  assert.deepStrictEqual(rows.find((r) => r.id === "cpu"), { id: "cpu", own: false, metric: "cpu", op: ">=", threshold: 95, for: 15, clear: null,
+    severity: "warning", on: false, overrides: [{ who: "tag:lab", threshold: 99, off: false }] });
+  assert.strictEqual(rows[rows.length - 1].scope, "node:nodeaaaaaaaa");
+  assert.deepStrictEqual(s.rulesFile(rows, D), saved, "round trip");
+  rows.find((r) => r.id === "memory").clear = 85;
+  rows.find((r) => r.id === "disk_full").clear = null;
+  const f = s.rulesFile(rows, D).rules;
+  assert.deepStrictEqual(f.find((r) => r.id === "memory"), { id: "memory", clear: 85 });
+  assert.deepStrictEqual(f.find((r) => r.id === "disk_full"), { id: "disk_full", threshold: 85, clear: null }, "no hysteresis: null, not the default");
+});
+
+test("rule editor: the form escapes every name, leaves out what a rule cannot set, and shows temperatures in °F when asked", () => {
+  const s = rulesScope({ fleetNodes: [{ id: "nodeaaaaaaaa", name: "<nas>", tags: ["l&b"] }] });
+  const D = s.rulesState.defaults;
+  const rows = s.rulesRows({ rules: [
+    { id: "offline", overrides: [{ node: "nodeaaaaaaaa", off: true }] },
+    { id: "c_x", name: "<img src=x>", metric: "temp", op: ">=", threshold: 70, for: 0, clear: null, severity: "info", scope: { tag: "gone" } },
+  ] }, D);
+  const html = s.rulesHtml(rows);
+  assert.doesNotMatch(html, /<img|<nas>|style=/);
+  assert.match(html, /value="&#60;img src=x&#62;"/);
+  assert.match(html, /<option value="node:nodeaaaaaaaa" selected>server &#60;nas&#62;<\/option>/, "the override names its server");
+  assert.match(html, /<option value="tag:gone" selected>gone<\/option>/, "a tag no server has any more is kept");
+  const off = html.split('<div class="rule')[1];
+  assert.doesNotMatch(off, /data-f="threshold"|data-f="for"|data-f="clear"/, "offline: its time follows the heartbeat");
+  assert.match(off, /data-of="off" checked disabled/);
+  const reboot = html.split('<div class="rule').find((x) => x.includes(">reboot required<"));
+  assert.doesNotMatch(reboot, /data-f="threshold"|data-f="clear"/, "true or false: no threshold");
+  assert.match(reboot, /data-f="for"/);
+  const f = rulesScope({ units: () => ({ temp: "f" }), tempUnit: () => "°F" });
+  assert.match(f.rulesHtml(f.rulesRows({ rules: [] }, f.rulesState.defaults)), /data-f="threshold" value="185"[^>]*><span class="unit">°F</, "85 °C reads 185 °F");
+  assert.deepStrictEqual([f.typed("temp", 185), f.typed("temp", 98.6), f.typed("cpu", 50), f.shown("temp", 85.3)], [85, 37, 50, 185.5]);
+});
+
+// a fake form: what the editor reads back
+function fakeRule(i, fields, overrides = []) {
+  const f = (attr, k, v) => ({ dataset: { [attr]: k }, value: v, checked: v === true });
+  const line = Object.entries(fields).map(([k, v]) => f("f", k, v));
+  const ovs = overrides.map((o, j) => ({ dataset: { o: String(j) }, querySelector: (sel) => {
+    const k = /data-of=(\w+)/.exec(sel)[1];
+    return o[k] === undefined ? null : f("of", k, o[k]);
+  } }));
+  return { dataset: { i: String(i) }, querySelectorAll: (sel) => (sel.includes("[data-f]") ? line : sel.includes(".rov") ? ovs : []) };
+}
+
+test("rule editor: the form is read back into the rules, temperatures from °F, a true-or-false rule kept at 1", () => {
+  let form = [];
+  const s = rulesScope({ $$: () => form, units: () => ({ temp: "f" }), tempUnit: () => "°F" });
+  s.rulesState.rows = s.rulesRows({ rules: [] }, s.rulesState.defaults);
+  const t = s.rulesState.rows.findIndex((r) => r.id === "temperature");
+  const rb = s.rulesState.rows.findIndex((r) => r.id === "reboot_required");
+  form = [fakeRule(t, { on: true, threshold: "176", for: "3", clear: "", severity: "critical" }, [{ who: "tag:lab", threshold: "194", off: false }]),
+          fakeRule(rb, { on: false, for: "0", severity: "info" })];
+  s.rulesState.rows[t].overrides.push({ who: "", threshold: null, off: false });
+  s.readRules();
+  assert.deepStrictEqual(s.rulesState.rows[t], { id: "temperature", own: false, metric: "temp", op: ">=", threshold: 80, for: 3, clear: null,
+    severity: "critical", on: true, overrides: [{ who: "tag:lab", threshold: 90, off: false }] });
+  assert.deepStrictEqual([s.rulesState.rows[rb].on, s.rulesState.rows[rb].threshold], [false, 1]);
+});
+
+test("rule editor: save sends the file and shows what the hub refused; add, remove and overrides change the rows", async () => {
+  const sent = [], toasts = [];
+  let reply = { ok: false, status: 400, json: async () => ({ error: "rules[0]: severity: one of critical, warning, info" }) };
+  const s = rulesScope({ fetch: async (url, opt) => { if (opt) { sent.push(JSON.parse(opt.body)); return reply; } return answer({}); },
+    toast: (m, err) => toasts.push([m, !!err]), fleetNodes: [{ id: "nodeaaaaaaaa", name: "nas", tags: [] }], $: () => ({ innerHTML: "" }) });
+  s.rulesState.rows = s.rulesRows({ rules: [] }, s.rulesState.defaults);
+  s.rulesAction("add");
+  const own = s.rulesState.rows[s.rulesState.rows.length - 1];
+  assert.match(own.id, /^c_[a-z0-9]{1,16}$/);
+  assert.deepStrictEqual([own.own, own.name, own.metric, own.scope], [true, "new rule", "disk.used", ""]);
+  s.rulesAction("addov", 1);
+  assert.deepStrictEqual(s.rulesState.rows[1].overrides, [{ who: "node:nodeaaaaaaaa", threshold: 90, off: false }]);
+  s.rulesAction("addov", 0);
+  assert.deepStrictEqual(s.rulesState.rows[0].overrides, [{ who: "node:nodeaaaaaaaa", threshold: null, off: true }], "offline: only off");
+  s.rulesAction("rmov", 1, 0);
+  assert.deepStrictEqual(s.rulesState.rows[1].overrides, []);
+  assert.strictEqual(s.rulesState.dirty, true);
+  await s.saveRules();
+  assert.strictEqual(sent.length, 1);
+  assert.deepStrictEqual(sent[0].rules.map((r) => r.id), ["offline", own.id]);
+  assert.deepStrictEqual(toasts, [["not saved: rules[0]: severity: one of critical, warning, info", true]]);
+  assert.strictEqual(s.rulesState.dirty, true, "what was typed stays");
+  s.rulesAction("remove", s.rulesState.rows.length - 1);
+  assert.ok(!s.rulesState.rows.some((r) => r.own));
+});
+
+test("the alerts view has a rules tab", () => {
+  for (const id of ["alerts-tab-list", "alerts-tab-rules", "alerts-list", "rules-body"]) assert.ok(HTML.includes(`id="${id}"`), id);
+  assert.match(JS, /\$\("#alerts-tab-rules"\)\.onclick = \(\) => showRulesTab\(true\);/);
+});

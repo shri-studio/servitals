@@ -7,6 +7,14 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- Alert rules (spec 8.1): the alerts view's "rules" tab changes a default
+  rule's threshold, time, clear value and severity, or turns it off; adds
+  rules of one's own on any metric the defaults watch, for all servers, one
+  server or a tag, and optionally one disk or container; and sets per-server
+  or per-tag overrides (another threshold, or off; a server's own wins over
+  its tag's). Turning "offline" off for a laptop or phone stops it paging.
+  Rules are kept in the state directory's `alerts/rules.json`, checked on
+  save, and applied at once; `GET` and `POST /__ctl/alerts/rules`.
 - Alerts on the page (spec 10.1): the header, the node tabs and the fleet
   cards carry a badge with each server's firing alerts, coloured by the
   worst. `[a]` opens the alerts view: what is firing, the mutes still

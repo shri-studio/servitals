@@ -75,6 +75,18 @@ const STYLES = ["classic", "8bit", "phosphor", "eink", "contrast", "nord", "gruv
   }
   await page.click("#alerts-body button[data-unmute]");
   await page.waitForTimeout(500);
+  // the rule editor, with a rule of one's own and an override, on a desktop and a phone
+  for (const width of [1280, 390]) {
+    await page.setViewportSize({ width, height: 1400 });
+    await page.goto(`${base}/?shot=rules-${width}#fleet`);
+    await page.waitForTimeout(1200);
+    await page.keyboard.press("a");
+    await page.click("#alerts-tab-rules");
+    await page.waitForSelector("#rules-body .rule");
+    await page.click("#rules-body .rule:nth-of-type(3) button[data-act=addov]");
+    await page.click("#rules-body button[data-act=add]");
+    await page.screenshot({ path: `${out}/rules-${width}.png`, fullPage: true });
+  }
 
   // the settings panel on a desktop and a phone: styled controls, none squeezed or sticking out
   for (const width of [1280, 390]) {

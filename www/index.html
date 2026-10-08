@@ -312,6 +312,8 @@
   <div class="modal m860">
     <h3><span data-i18n="alerts.title">alerts</span> <span class="x" id="alerts-close" data-i18n="dlg.close">[esc]</span></h3>
     <div class="body">
+      <div class="atabs"><button id="alerts-tab-list" class="on" data-i18n="alerts.tabList">alerts</button><button id="alerts-tab-rules" data-i18n="alerts.tabRules">rules</button></div>
+      <div id="alerts-list">
       <div class="amutefor"><span data-i18n="alerts.muteFor">mute for</span>
         <select id="alerts-for" aria-label="mute for" data-i18n-aria-label="alerts.muteFor">
           <option value="3600000" data-i18n="alerts.for1h">1 hour</option>
@@ -319,6 +321,8 @@
           <option value="604800000" data-i18n="alerts.for7d">7 days</option>
         </select></div>
       <div id="alerts-body"><div class="muted" data-i18n="logs.loading">loading&hellip;</div></div>
+      </div>
+      <div id="rules-body" class="hidden"></div>
     </div>
   </div>
 </div>
