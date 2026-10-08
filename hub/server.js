@@ -817,6 +817,7 @@ async function handle(req, res) {
       let body = null;
       try { body = JSON.parse(await readBodyN(req, 1024)); } catch (_) { return json(400, { error: "invalid json" }); }
       const id = body && typeof body.id === "string" ? body.id : "";
+      log.audit("alert.channel_test", { ip, channel: id.slice(0, 20) });
       return json(200, await notifier.test(id));
     }
 

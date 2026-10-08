@@ -18,13 +18,13 @@ const at = (hhmm, dayOffset = 0) => Date.UTC(2026, 9, 9 + dayOffset, Number(hhmm
 const ntfy = (extra = {}) => ({ id: "ch_n", type: "ntfy", name: "phone", min: "warning", on: true, config: { topic: "sv-home", token: "tk_secret" }, ...extra });
 const hook = (extra = {}) => ({ id: "ch_w", type: "webhook", name: "pager", min: "critical", on: true, config: { url: "https://hooks.test/T0K3N", secret: "s3" }, ...extra });
 
-function setup(config, { fail = () => 0 } = {}) {
+function setup(config, { fail = () => 0, sleep } = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sv-notify-"));
   const sent = [], logs = [], slept = [];
   const clock = { t: at("12:00") };
   const outbound = { request: async (url, o) => { sent.push({ url, ...o }); const s = fail(url, sent.length); return { status: s || 200, headers: {}, body: "" }; } };
-  const make = () => createNotifier({ dir, outbound, now: () => clock.t, env: { NTFY_TOKEN: "from_env", HOOK_URL: "https://hooks.test/env" },
-    log: { info() {}, warn: (event, f) => logs.push([event, f]) }, sleep: async (ms) => { slept.push(ms); } });
+  const make = () => createNotifier({ dir, outbound, now: () => clock.t, env: { SERVITALS_NOTIFY_NTFY: "from_env", SERVITALS_NOTIFY_HOOK: "https://hooks.test/env", SERVITALS_NOTIFY_BAD: "ftp://x", AUTH_PASS: "pw" },
+    log: { info() {}, warn: (event, f) => logs.push([event, f]) }, sleep: sleep || (async (ms) => { slept.push(ms); }) });
   const n = make();
   if (config) n.setConfig(config);
   return { n, dir, sent, logs, slept, clock, make };
@@ -33,8 +33,8 @@ const ev = (kind, severity, extra = {}) => ({ kind, rule: "disk_full", metric: "
   sub: "/srv", value: 92, at: at("12:00"), since: at("11:55"), ...extra });
 
 test("channels are checked: type, severity, topic, URL; a masked secret keeps its value; $NAME comes from the environment", () => {
-  const ok = checkChannels({ channels: [ntfy(), hook({ config: { url: "$HOOK_URL" } })], quiet: { from: "23:00", to: "07:00" } });
-  assert.deepStrictEqual(ok, { channels: [ntfy(), hook({ config: { url: "$HOOK_URL" } })], quiet: { from: "23:00", to: "07:00" }, digestAt: "07:00" });
+  const ok = checkChannels({ channels: [ntfy(), hook({ config: { url: "$SERVITALS_NOTIFY_HOOK" } })], quiet: { from: "23:00", to: "07:00" } });
+  assert.deepStrictEqual(ok, { channels: [ntfy(), hook({ config: { url: "$SERVITALS_NOTIFY_HOOK" } })], quiet: { from: "23:00", to: "07:00" }, digestAt: "07:00" });
   const bad = (chs, re, extra = {}) => assert.throws(() => checkChannels({ channels: chs, ...extra }, ok), re);
   bad([ntfy({ type: "fax" })], /phone: type/);
   bad([ntfy({ min: "page" })], /phone: min/);
@@ -54,7 +54,7 @@ test("channels are checked: type, severity, topic, URL; a masked secret keeps it
 });
 
 test("an alert goes to each channel whose minimum it meets: ntfy as JSON with a bearer token, a webhook signed", async () => {
-  const s = setup({ channels: [ntfy({ config: { topic: "sv-home", token: "$NTFY_TOKEN" } }), hook()] });
+  const s = setup({ channels: [ntfy({ config: { topic: "sv-home", token: "$SERVITALS_NOTIFY_NTFY" } }), hook()] });
   s.n.onEvent(ev("firing", "warning"));
   await s.n.flush();
   assert.deepStrictEqual(s.sent.map((r) => r.url), ["https://ntfy.sh/"], "warning: not to the critical-only pager");
@@ -140,16 +140,60 @@ test("info goes to one digest a day at 07:00, to every channel unless it opts ou
 });
 
 test("send test answers at once; the page sees secrets masked, names from the environment as they are; the file is 0600", async () => {
-  const s = setup({ channels: [ntfy(), hook({ config: { url: "$HOOK_URL" } })] }, { fail: (url) => (url.includes("env") ? 404 : 0) });
+  const s = setup({ channels: [ntfy(), hook({ config: { url: "$SERVITALS_NOTIFY_HOOK" } })] }, { fail: (url) => (url.includes("env") ? 404 : 0) });
   assert.deepStrictEqual(await s.n.test("ch_n"), { ok: true });
   assert.deepStrictEqual(await s.n.test("ch_w"), { ok: false, error: "HTTP_404" });
   assert.deepStrictEqual(await s.n.test("ch_zz"), { ok: false, error: "no such channel" });
   assert.strictEqual(JSON.parse(s.sent[0].body).title, "servitals test");
   assert.strictEqual(s.sent[1].url, "https://hooks.test/env");
   const v = s.n.view();
-  assert.deepStrictEqual(v.channels.map((c) => c.config), [{ topic: "sv-home", token: SECRET }, { url: "$HOOK_URL" }]);
+  assert.deepStrictEqual(v.channels.map((c) => c.config), [{ topic: "sv-home", token: SECRET }, { url: "$SERVITALS_NOTIFY_HOOK" }]);
   assert.strictEqual(v.status.ch_w.lastError, "HTTP_404");
   assert.deepStrictEqual(v.types.ntfy.map((f) => f.key), ["server", "topic", "token"]);
   assert.strictEqual(fs.statSync(path.join(s.dir, "channels.json")).mode & 0o777, 0o600);
   assert.match(fs.readFileSync(path.join(s.dir, "channels.json"), "utf8"), /tk_secret/, "kept in the file, which only the hub reads");
+});
+
+test("$NAME reads only SERVITALS_NOTIFY_ names, never the hub's own settings; what it reads is checked when sent", async () => {
+  assert.throws(() => checkChannels({ channels: [ntfy({ config: { topic: "$AUTH_PASS_HASH", token: "$AUTH_PASS" } })] }), /phone: topic: only \$SERVITALS_NOTIFY_ names/);
+  assert.throws(() => checkChannels({ channels: [hook({ config: { url: "$PATH" } })] }), /pager: url: only \$SERVITALS_NOTIFY_ names/);
+  assert.throws(() => checkChannels({ channels: [ntfy({ config: { topic: "t", token: "t€k" } })] }), /phone: token: printable ASCII/, "a header carries it");
+  const s = setup({ channels: [hook({ id: "ch_b", config: { url: "$SERVITALS_NOTIFY_BAD" } }), hook({ id: "ch_u", config: { url: "$SERVITALS_NOTIFY_UNSET" } })] });
+  assert.deepStrictEqual(await s.n.test("ch_b"), { ok: false, error: "EBADVALUE:url" });
+  assert.deepStrictEqual(await s.n.test("ch_u"), { ok: false, error: "ENV_UNSET:SERVITALS_NOTIFY_UNSET" });
+  assert.deepStrictEqual(s.sent, [], "nothing went out");
+});
+
+test("one channel sends in order: a resolve waits behind a firing being retried; a 4xx is not retried, except 408 and 429", async () => {
+  let open;
+  const gate = new Promise((r) => { open = r; });
+  const s = setup({ channels: [hook({ min: "warning" })] }, { fail: (url, n) => (n === 1 ? 502 : 0), sleep: () => gate });
+  s.n.onEvent(ev("firing", "warning"));
+  await new Promise((r) => setImmediate(r));
+  s.n.onEvent(ev("resolved", "warning"));
+  await new Promise((r) => setImmediate(r));
+  open();
+  await s.n.flush();
+  assert.deepStrictEqual(s.sent.map((r) => JSON.parse(r.body).event.kind), ["firing", "firing", "resolved"], "the phone's last word is the end");
+  const no = setup({ channels: [hook({ min: "warning" })] }, { fail: () => 404 });
+  no.n.onEvent(ev("firing", "warning"));
+  await no.n.flush();
+  assert.deepStrictEqual([no.sent.length, no.slept], [1, []], "a 404 will not work on a second try");
+  const busy = setup({ channels: [hook({ min: "warning" })] }, { fail: (url, n) => (n === 1 ? 429 : 0) });
+  busy.n.onEvent(ev("firing", "warning"));
+  await busy.n.flush();
+  assert.deepStrictEqual([busy.sent.length, busy.slept], [2, [2000]], "429: wait and try again");
+});
+
+test("after quiet hours, the summary goes before anything new, even before the minute's tick; a channels file is kept 0600", async () => {
+  const s = setup({ channels: [ntfy()], quiet: { from: "23:00", to: "07:00" } });
+  s.clock.t = at("23:30"); s.n.tick();
+  s.n.onEvent(ev("firing", "warning"));
+  s.clock.t = at("07:00", 1) + 20000;
+  s.n.onEvent(ev("resolved", "warning"));
+  await s.n.flush();
+  assert.deepStrictEqual(s.sent.map((r) => JSON.parse(r.body).title), ["1 alerts held during quiet hours", "resolved: disk full /srv on nas"]);
+  fs.chmodSync(path.join(s.dir, "channels.json"), 0o644);
+  s.make();
+  assert.strictEqual(fs.statSync(path.join(s.dir, "channels.json")).mode & 0o777, 0o600, "tightened at start");
 });

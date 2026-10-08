@@ -154,3 +154,28 @@ test("a proxy that refuses, a destination too slow or too talkative: an error th
     await assert.rejects(down.request("http://hooks.test/"), (e) => e.code === "ECONNREFUSED");
   } finally { await close(p.srv, slow, big); }
 });
+
+test("an IP address through the proxy is checked against the IP; a % in a proxy password does not stop the hub; a bad header is an error", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sv-out-"));
+  execFileSync("openssl", ["req", "-x509", "-newkey", "rsa:2048", "-nodes", "-days", "1", "-keyout", path.join(dir, "k"), "-out", path.join(dir, "c"),
+    "-subj", "/CN=ip", "-addext", "subjectAltName=IP:127.0.0.1"], { stdio: "ignore" });
+  const c = { key: fs.readFileSync(path.join(dir, "k")), cert: fs.readFileSync(path.join(dir, "c")) };
+  fs.rmSync(dir, { recursive: true, force: true });
+  const local = certFor("localhost");
+  const dest = https.createServer(c, echo), fake = https.createServer(local, echo);
+  const [dport, fport] = [await listen(dest), await listen(fake)];
+  const p = await startProxy();
+  try {
+    const o = createOutbound({ env: { HTTPS_PROXY: `http://127.0.0.1:${p.port}`, NO_PROXY: "" } });
+    // 127.0.0.1 is always direct, so the proxy is asked through a name that NO_PROXY cannot know: the tunnel test uses the IP form
+    const viaProxy = createOutbound({ env: { HTTPS_PROXY: `http://127.0.0.1:${p.port}` } });
+    assert.ok(o.proxyFor(`https://127.0.0.2:${dport}/`), "another loopback address goes through the proxy");
+    const r = await viaProxy.request(`https://127.0.0.2:${dport}/x`, { ca: c.cert }).catch((e) => e);
+    assert.strictEqual(r.code, "ERR_TLS_CERT_ALTNAME_INVALID", "a certificate for 127.0.0.1 is not one for 127.0.0.2");
+    await assert.rejects(viaProxy.request(`https://127.0.0.2:${fport}/x`, { ca: local.cert }), (e) => e.code === "ERR_TLS_CERT_ALTNAME_INVALID",
+      "never checked against localhost");
+    assert.strictEqual(parseProxy("http://u:pa%ss@px.test:3128").auth, "Basic " + Buffer.from("u:pa%ss").toString("base64"));
+    await assert.rejects(o.request(`https://127.0.0.2:${dport}/x`, { ca: c.cert, headers: { authorization: "Bearer t€k" } }), (e) => e.code === "ERR_INVALID_CHAR");
+    await assert.rejects(createOutbound({ env: {} }).request(`https://127.0.0.1:${dport}/x`, { ca: c.cert, headers: { authorization: "t€k" } }), (e) => e.code === "ERR_INVALID_CHAR");
+  } finally { await close(dest, fake, p.srv); }
+});

@@ -445,6 +445,7 @@ test("alert channels: saved from the page with secrets masked; an alert reaches 
       assert.match(got[0].body.title, /^warning: reboot required on \S/);
       const t = JSON.parse((await ctlPost(hub.port, cookie, "/__ctl/alerts/channels/test", JSON.stringify({ id: "ch_w" }))).body);
       assert.deepStrictEqual(t, { ok: true });
+      assert.match(hub.logs(), /event=alert\.channel_test.*channel=ch_w/, "a test is a call out of the hub: audited");
       assert.strictEqual(got[1].body.kind, "test");
       assert.strictEqual((await save({ channels: [{ ...ch, config: { url: url.replace("/hook", "/gone") } }] })).status, 200);
       assert.deepStrictEqual(JSON.parse((await ctlPost(hub.port, cookie, "/__ctl/alerts/channels/test", JSON.stringify({ id: "ch_w" }))).body), { ok: false, error: "HTTP_410" });

@@ -13,8 +13,9 @@ All notable changes to this project are documented here. The format follows
   through) and send one summary of what still fires when they end; info
   events go to one digest a day at 07:00. A failed send is tried again after
   2, 10 and 30 s, then logged as `alert.notify_failed`. Channels live in the
-  state directory's `alerts/channels.json` (mode 0600); a value `$NAME` is read
-  from the environment. `GET` and `POST /__ctl/alerts/channels`, and
+  state directory's `alerts/channels.json` (mode 0600); a value
+  `$SERVITALS_NOTIFY_<NAME>` is read from the hub's environment (no other
+  name, so the hub's own settings never leave it). `GET` and `POST /__ctl/alerts/channels`, and
   `POST /__ctl/alerts/channels/test` to send a test. The page's channel
   settings follow.
 - Outbound proxy (spec 8.4): every call the hub makes goes through

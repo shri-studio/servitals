@@ -8,10 +8,15 @@
  *     { channels: [{ id: "ch_…", type, name, min, on, digest?, config }],
  *       quiet: null | { from: "HH:MM", to: "HH:MM" }, digestAt: "HH:MM" }
  *   <dir>/notify-state.json: what quiet hours hold, the digest so far, the last digest day.
- * Times are the hub's local time. A config value "$NAME" is read from the environment
- * when sent (config as code keeps tokens out of the file). A send that fails is tried
- * again after 2, 10 and 30 s, then logged alert.notify_failed; a channel's last error is
- * kept for the page. Never logged: tokens, and URLs (a webhook URL is a secret).
+ * Times are the hub's local time. A config value "$SERVITALS_NOTIFY_<NAME>" is read from
+ * the environment when sent (tokens out of the file); no other name, so a page session
+ * cannot send the hub's own settings (AUTH_PASS…) anywhere. What it reads is checked as
+ * a typed value would be. Each channel sends one message at a time, in order (at most
+ * 100 waiting); a send that fails is tried again after 2, 10 and 30 s (a 4xx other than
+ * 408 and 429 is not), then logged alert.notify_failed; a channel's last error is kept
+ * for the page. Never logged: tokens, and URLs (a webhook URL is a secret).
+ * Not kept across a restart: sends under way. The digest is emptied at its time even
+ * when no channel is on (the events stay in the alert log).
  *   createNotifier({ dir, outbound, now, log, sleep, env }) → { onEvent(e), tick(), test(id),
  *     setConfig(input), view(), flush() }
  *   checkChannels(input, old) → the clean config, or throws an Error naming the channel
@@ -26,7 +31,8 @@ const SEV = ["critical", "warning", "info"];
 const rank = (s) => (SEV.includes(s) ? SEV.indexOf(s) : 2);
 const SECRET = "********";
 const TIME = /^([01]\d|2[0-3]):[0-5]\d$/;
-const ENVREF = /^\$[A-Z_][A-Z0-9_]*$/;
+const ENVREF = /^\$SERVITALS_NOTIFY_[A-Z0-9_]+$/;
+const MAX_QUEUE = 100;
 const RETRIES = [2000, 10000, 30000];
 const MAX_HELD = 500, MAX_DIGEST = 500;
 
@@ -38,7 +44,7 @@ const httpUrl = (s) => { try { return /^https?:$/.test(new URL(s).protocol); } c
 const ADAPTERS = {
   // ntfy's JSON publishing: no header has to carry the title's characters
   ntfy: {
-    fields: { server: { optional: true, url: true }, topic: { re: /^[A-Za-z0-9_-]{1,64}$/ }, token: { optional: true, secret: true } },
+    fields: { server: { optional: true, url: true }, topic: { re: /^[A-Za-z0-9_-]{1,64}$/ }, token: { optional: true, secret: true, header: true } },
     build(c, m) {
       const server = (c.server || "https://ntfy.sh").replace(/\/+$/, "");
       const tags = m.kind === "test" ? ["white_check_mark"] : m.resolved ? ["white_check_mark"] : m.severity === "critical" ? ["rotating_light"] : ["warning"];
@@ -56,6 +62,14 @@ const ADAPTERS = {
     },
   },
 };
+
+// what is wrong with a field's value, or ""
+function fieldError(f, v) {
+  if (f.url && !httpUrl(v)) return "an http or https URL";
+  if (f.re && !f.re.test(v)) return "not valid";
+  if (f.header && !/^[\x20-\x7e]+$/.test(v)) return "printable ASCII only";
+  return "";
+}
 
 function checkChannels(input, old = { channels: [] }) {
   if (!isObj(input) || !Array.isArray(input.channels)) throw new Error("channels: a list");
@@ -88,9 +102,10 @@ function checkChannels(input, old = { channels: [] }) {
         continue;
       }
       if (typeof v !== "string" || v.length > 2048 || /[\u0000-\u001f\u007f]/.test(v)) throw new Error(`${at}: ${k}: text up to 2048 characters`);
+      if (v.startsWith("$") && !ENVREF.test(v)) throw new Error(`${at}: ${k}: only $SERVITALS_NOTIFY_ names are read from the environment`);
       if (!ENVREF.test(v)) {
-        if (f.url && !httpUrl(v)) throw new Error(`${at}: ${k}: an http or https URL`);
-        if (f.re && !f.re.test(v)) throw new Error(`${at}: ${k}: not valid`);
+        const bad = fieldError(f, v);
+        if (bad) throw new Error(`${at}: ${k}: ${bad}`);
       }
       config[k] = v;
     }
@@ -139,13 +154,14 @@ function createNotifier({ dir, outbound, now = Date.now, log = { info() {}, warn
   let cfg = { channels: [], quiet: null, digestAt: "07:00" };
   try { cfg = checkChannels(JSON.parse(fs.readFileSync(cfgFile, "utf8"))); }
   catch (e) { if (e.code !== "ENOENT") log.warn("alerts.channels_ignored", { error: e.message }); }
-  let st = { held: [], digest: [], digestDay: null, quietWas: false };
+  // the files hold tokens: only the hub reads them, also when an older build or a hand made them
+  for (const f of [cfgFile, stFile]) { try { fs.chmodSync(f, 0o600); } catch (_) { /* not there yet */ } }
+  let st = { held: [], digest: [], digestDay: null };
   try {
     const f = JSON.parse(fs.readFileSync(stFile, "utf8"));
     if (Array.isArray(f.held)) st.held = f.held;
     if (Array.isArray(f.digest)) st.digest = f.digest;
     if (typeof f.digestDay === "string") st.digestDay = f.digestDay;
-    st.quietWas = f.quietWas === true;
   } catch (_) { /* first start */ }
   let saved = JSON.stringify(st);
   const save = () => {
@@ -164,14 +180,30 @@ function createNotifier({ dir, outbound, now = Date.now, log = { info() {}, warn
   }
   const day = (t) => { const d = new Date(t); return `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`; };
 
-  // a channel's config with "$NAME" read from the environment
-  const resolved = (c) => Object.fromEntries(Object.entries(c).map(([k, v]) => [k, ENVREF.test(v) ? env[v.slice(1)] || "" : v]));
+  // a channel's config with $SERVITALS_NOTIFY_… read from the environment and checked
+  const coded = (code) => { const e = new Error(code); e.code = code; return e; };
+  function resolved(ch) {
+    const out = {};
+    for (const [k, f] of Object.entries(ADAPTERS[ch.type].fields)) {
+      let v = ch.config[k];
+      if (v !== undefined && ENVREF.test(v)) {
+        const name = v.slice(1);
+        v = env[name];
+        if (v === undefined || v === "") { if (f.optional) continue; throw coded("ENV_UNSET:" + name); }
+        if (fieldError(f, v) || /[\u0000-\u001f\u007f]/.test(v)) throw coded("EBADVALUE:" + k);
+      }
+      if (v !== undefined) out[k] = v;
+    }
+    return out;
+  }
   async function sendOnce(ch, m) {
-    const req = ADAPTERS[ch.type].build(resolved(ch.config), m);
+    const req = ADAPTERS[ch.type].build(resolved(ch), m);
     const r = await outbound.request(req.url, { method: "POST", headers: req.headers, body: req.body, timeoutMs: 15000 });
     if (r.status < 200 || r.status >= 300) { const e = new Error(`HTTP ${r.status}`); e.code = "HTTP_" + r.status; throw e; }
   }
   const errText = (e) => (e && e.code ? String(e.code) : "failed");
+  // a failure a second try cannot fix: a 4xx (other than 408 and 429), a bad value
+  const final = (e) => /^HTTP_4\d\d$/.test(e.code) && !/^HTTP_(408|429)$/.test(e.code) || /^(ENV_UNSET|EBADVALUE|EURL)/.test(String(e.code));
   async function send(ch, m) {
     for (let i = 0; ; i++) {
       try {
@@ -180,16 +212,48 @@ function createNotifier({ dir, outbound, now = Date.now, log = { info() {}, warn
         return true;
       } catch (e) {
         status[ch.id] = { ...status[ch.id], lastError: errText(e), at: now() };
-        if (i >= RETRIES.length) { log.warn("alert.notify_failed", { channel: ch.id, type: ch.type, error: errText(e) }); return false; }
+        if (i >= RETRIES.length || final(e)) { log.warn("alert.notify_failed", { channel: ch.id, type: ch.type, error: errText(e) }); return false; }
         await sleep(RETRIES[i]);
       }
     }
   }
+  // per channel, one message at a time in order: an end never overtakes its start
+  const queues = {};   // id → { items, running }
   function deliver(m, to) {
     for (const ch of cfg.channels.filter((c) => c.on && to(c))) {
-      const p = send(ch, m);
-      pending.add(p);
-      p.finally(() => pending.delete(p));
+      const q = queues[ch.id] = queues[ch.id] || { items: [], running: null };
+      q.items.push(m);
+      if (q.items.length > MAX_QUEUE) { q.items.shift(); log.warn("alert.notify_dropped", { channel: ch.id }); }
+      if (!q.running) {
+        const run = (async () => {
+          await null;   // start after run is set
+          while (q.items.length) {
+            const next = q.items.shift();
+            const cur = cfg.channels.find((c) => c.id === ch.id && c.on);   // changed or turned off meanwhile
+            if (cur) await send(cur, next);
+          }
+          q.running = null;
+          pending.delete(run);
+        })();
+        q.running = run;
+        pending.add(run);
+      }
+    }
+  }
+  // quiet hours over: per alert, its last event; one summary of what still fires and of
+  // ends told before the window (fired and ended inside: the alert log only)
+  function releaseHeld() {
+    const last = new Map(), firedInside = new Set();
+    for (const e of st.held) {
+      const k = `${e.rule}|${e.node}|${e.sub || ""}`;
+      last.set(k, e);
+      if (e.kind === "firing") firedInside.add(k);
+    }
+    const lines = [...last.entries()].filter(([k, e]) => e.kind !== "resolved" || !firedInside.has(k)).map(([, e]) => line(e));
+    st.held = [];
+    if (lines.length) {
+      deliver({ kind: "summary", severity: "warning", title: tr("notify.summaryTitle", { n: lines.length }), text: lines.join("\n") },
+        (c) => rank("warning") <= rank(c.min));
     }
   }
   const slim = (e) => ({ kind: e.kind, rule: e.rule, ...(e.name ? { name: e.name } : {}), ...(e.metric ? { metric: e.metric } : {}), severity: e.severity,
@@ -199,6 +263,7 @@ function createNotifier({ dir, outbound, now = Date.now, log = { info() {}, warn
     // an alert event from the engine
     onEvent(e) {
       const t = now();
+      if (st.held.length && !inQuiet(t)) releaseHeld();   // the summary first, even before the minute's tick
       if (rank(e.severity) >= 2) {
         st.digest.push(slim(e));
         if (st.digest.length > MAX_DIGEST) st.digest.splice(0, st.digest.length - MAX_DIGEST);
@@ -215,23 +280,8 @@ function createNotifier({ dir, outbound, now = Date.now, log = { info() {}, warn
     },
     // once a minute: the summary when quiet hours end, the digest at its time
     tick() {
-      const t = now(), quiet = inQuiet(t);
-      if (st.quietWas && !quiet && st.held.length) {
-        // per alert, its last event: still firing, or ended after it was told before the window
-        const last = new Map(), firedInside = new Set();
-        for (const e of st.held) {
-          const k = `${e.rule}|${e.node}|${e.sub || ""}`;
-          last.set(k, e);
-          if (e.kind === "firing") firedInside.add(k);
-        }
-        const lines = [...last.entries()].filter(([k, e]) => e.kind !== "resolved" || !firedInside.has(k)).map(([, e]) => line(e));
-        if (lines.length) {
-          deliver({ kind: "summary", severity: "warning", title: tr("notify.summaryTitle", { n: lines.length }), text: lines.join("\n") },
-            (c) => rank("warning") <= rank(c.min));
-        }
-        st.held = [];
-      }
-      st.quietWas = quiet;
+      const t = now();
+      if (st.held.length && !inQuiet(t)) releaseHeld();
       const d = new Date(t);
       if (d.getHours() * 60 + d.getMinutes() >= mins(cfg.digestAt) && st.digestDay !== day(t)) {
         st.digestDay = day(t);
@@ -270,7 +320,7 @@ function createNotifier({ dir, outbound, now = Date.now, log = { info() {}, warn
                types: Object.fromEntries(Object.entries(ADAPTERS).map(([t, a]) => [t, Object.entries(a.fields).map(([k, f]) => ({ key: k, secret: !!f.secret, optional: !!f.optional }))])) };
     },
     // for tests: wait for the sends under way
-    flush() { return Promise.all([...pending]); },
+    async flush() { while (pending.size) await Promise.all([...pending]); },
   };
 }
 

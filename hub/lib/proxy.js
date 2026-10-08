@@ -33,7 +33,9 @@ function parseProxy(s) {
   let u;
   try { u = new URL(s); } catch (_) { return null; }
   if (u.protocol !== "http:" || !u.hostname) return null;
-  const auth = u.username ? "Basic " + Buffer.from(decodeURIComponent(u.username) + ":" + decodeURIComponent(u.password)).toString("base64") : null;
+  // a % that starts no escape stays as it is: a mistyped hub.env line must not stop the hub
+  const dec = (x) => { try { return decodeURIComponent(x); } catch (_) { return x; } };
+  const auth = u.username ? "Basic " + Buffer.from(dec(u.username) + ":" + dec(u.password)).toString("base64") : null;
   return { host: u.hostname.replace(/^\[|\]$/g, ""), port: Number(u.port) || 80, auth };
 }
 
@@ -111,7 +113,10 @@ function createOutbound({ env = process.env } = {}) {
         });
         res.on("error", (e) => fail(e));
       };
-      const send = (req) => {
+      // a request Node refuses to build (a header value it cannot send) is an error, not a throw
+      const send = (make) => {
+        let req;
+        try { req = make(); } catch (e) { fail(e); return; }
         req.on("socket", (s) => sockets.push(s));
         req.on("error", (e) => fail(e));
         if (data) req.write(data);
@@ -119,12 +124,12 @@ function createOutbound({ env = process.env } = {}) {
       };
 
       if (!proxy) {
-        send((secure ? https : http).request({ host, port, method, path: u.pathname + u.search, headers: hdrs, servername: net.isIP(host) ? undefined : host, ca, agent: false }, onResponse));
+        send(() => (secure ? https : http).request({ host, port, method, path: u.pathname + u.search, headers: hdrs, servername: net.isIP(host) ? undefined : host, ca, agent: false }, onResponse));
         return;
       }
       const pauth = proxy.auth ? { "proxy-authorization": proxy.auth } : {};
       if (!secure) {
-        send(http.request({ host: proxy.host, port: proxy.port, method, path: u.href, headers: { host: u.host, ...hdrs, ...pauth }, agent: false }, onResponse));
+        send(() => http.request({ host: proxy.host, port: proxy.port, method, path: u.href, headers: { host: u.host, ...hdrs, ...pauth }, agent: false }, onResponse));
         return;
       }
       // https: a CONNECT tunnel, then TLS end to end with the destination
@@ -135,13 +140,14 @@ function createOutbound({ env = process.env } = {}) {
       tunnel.on("connect", (res, socket) => {
         sockets.push(socket);
         if (res.statusCode !== 200) { fail(new Error(`proxy answered ${res.statusCode} to CONNECT`), "EPROXY"); return; }
-        const secured = tls.connect({ socket, servername: net.isIP(host) ? undefined : host, ca });
+        // host: the name (or IP address) the certificate must be for; without it Node checks "localhost"
+        const secured = tls.connect({ socket, host, servername: net.isIP(host) ? undefined : host, ca });
         sockets.push(secured);
         secured.on("error", (e) => fail(e));
         // an agent that hands over the tunnel's TLS socket (agent: false would dial again)
         const agent = new https.Agent({ keepAlive: false });
         agent.createConnection = () => secured;
-        send(https.request({ host, port, method, path: u.pathname + u.search, headers: hdrs, agent }, onResponse));
+        send(() => https.request({ host, port, method, path: u.pathname + u.search, headers: hdrs, agent }, onResponse));
       });
       tunnel.end();
     });
