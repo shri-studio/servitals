@@ -67,6 +67,10 @@ function variant(base, c, i, round) {
     // the nas waits for a reboot and has a failed unit; the pi's older agent sends neither
     s.ubuntu = i === 1 ? { updates: 12, security: 5, rebootRequired: true, rebootPkgs: ["linux-image-7.0.0-38-generic"],
                            failedUnits: ["smartd.service"] } : undefined;
+    // the nas: its board's fans (the pump has stopped) and voltages; the pi runs on a battery
+    s.fans = i === 1 ? [{ label: "CPU fan", rpm: 1180 }, { label: "Case fan 1", rpm: 820 }, { label: "Pump", rpm: 0 }] : undefined;
+    s.voltages = i === 1 ? [{ label: "Vcore", value: 1.216 }, { label: "+12V", value: 12.096 }, { label: "+5V", value: 5.04 }] : undefined;
+    s.battery = i === 2 ? { capacity: 64, status: "Discharging" } : undefined;
     s.docker = i === 1 ? (s.docker || []).slice(0, 3) : [];
   }
   if (s.net) { s.net.rxBytes += round * 5e6 * (i + 1); s.net.txBytes += round * 1e6; }

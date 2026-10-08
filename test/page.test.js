@@ -344,8 +344,28 @@ test("the system panel: updates and security updates, a reboot and its packages,
   assert.match(HTML, /data-panel="system"/);
 });
 
+test("the hardware panel: the battery, fans (a named one stopped is red) and voltages; names escaped", () => {
+  const esc = (x) => String(x).replace(/[&<>"']/g, (m) => "&#" + m.charCodeAt(0) + ";");
+  const { STRINGS } = require("../hub/lib/i18n");
+  const hardwareHtml = pageFn("hardwareHtml", { esc, STRINGS });
+  const html = hardwareHtml({ battery: { capacity: 15, status: "Discharging" },
+    fans: [{ label: "CPU <fan>", rpm: 1200 }, { label: "Pump", rpm: 0 }], voltages: [{ label: "Vcore", value: 1.216 }] });
+  assert.strictEqual(html,
+    '<div class="row"><span class="k">battery</span><span class="v"><span class="hl-red">15%</span> · discharging</span></div>'
+    + '<div class="plbl">fans</div>'
+    + '<div class="row"><span class="k">CPU &#60;fan&#62;</span><span class="v">1200 rpm</span></div>'
+    + '<div class="row"><span class="k">Pump</span><span class="v"><span class="hl-red">0 rpm</span></span></div>'
+    + '<div class="plbl">voltages</div>'
+    + '<div class="row"><span class="k">Vcore</span><span class="v">1.22 V</span></div>');
+  assert.match(hardwareHtml({ battery: { capacity: 30, status: "Charging" } }), /<span class="">30%<\/span> · charging/, "charging: never red");
+  assert.match(hardwareHtml({ battery: { capacity: 80, status: "<Odd>" } }), /80%<\/span> · &#60;Odd&#62;/, "a status the dictionary lacks: as sent, escaped");
+  assert.strictEqual(hardwareHtml({}), "");
+  assert.match(HTML, /data-panel="hw"/);
+  assert.match(HTML, /\$\("\[data-panel=hw\]"\)\.classList\.toggle\("hidden", !\(d\.fans \|\| d\.voltages \|\| d\.battery\) \|\| shown\.hw === false\);/);
+});
+
 test("fleet cards show the numbers chosen in settings", () => {
-  const CARD_KEYS = ["cpu", "mem", "temp", "disk", "containers", "iowait", "updates"];
+  const CARD_KEYS = ["cpu", "mem", "temp", "disk", "containers", "iowait", "updates", "battery"];
   assert.match(HTML, new RegExp(`const CARD_KEYS = ${JSON.stringify(CARD_KEYS).replace(/[[\]]/g, "\\$&").replace(/,/g, ", ")};`));
   const cardNumbers = pageFn("cardNumbers", { CARD_KEYS, cfg: { fleet: { card: ["disk", "containers", "bogus"] } } });
   assert.deepStrictEqual(cardNumbers(), ["disk", "containers"]);
@@ -354,6 +374,7 @@ test("fleet cards show the numbers chosen in settings", () => {
   assert.deepStrictEqual([cardValue("iowait", { iowait: 31 }), cardValue("iowait", { iowait: null })], ["31%", "–"]);
   assert.deepStrictEqual([cardValue("updates", { updates: 12, reboot: true }), cardValue("updates", { updates: 0, reboot: false }),
     cardValue("updates", { updates: null, reboot: true }), cardValue("updates", {})], ["12 ↻", "0", "↻", "–"]);
+  assert.deepStrictEqual([cardValue("battery", { battery: 87 }), cardValue("battery", { battery: null })], ["87%", "–"]);
   for (const id of ["cfg-f-sort", "cfg-f-group", "cfg-servers"]) assert.ok(HTML.includes(`id="${id}"`), id);
   assert.match(HTML, /for \(const g of arrangeFleet\(fleetNodes, cfg\.fleet \|\| \{\}\)\)/, "renderFleet uses it");
 });
@@ -483,7 +504,7 @@ test("conf.d review: a file with a few panels keeps the built-in panel list and 
   const fromHub = { panels: { weather: false }, panelSize: { docker: "full" }, _managed: ["panelSize.docker", "panels.weather"] };
   const run = new Function("fetch", "lsGet", `let DEFAULTS = {}, cfg = {}; ${helpers}\n${src}\nreturn loadConfig().then(() => ({ DEFAULTS, cfg }));`);
   const { cfg } = await run(async () => ({ json: async () => structuredClone(fromHub) }), () => null);
-  assert.deepStrictEqual(cfg.panelOrder, ["mem", "cpu", "temp", "storage", "network", "docker", "procs", "system", "clocks", "weather"]);
+  assert.deepStrictEqual(cfg.panelOrder, ["mem", "cpu", "temp", "storage", "network", "docker", "procs", "system", "hw", "clocks", "weather"]);
   assert.strictEqual(cfg.panels.weather, false);
   assert.strictEqual(cfg.panels.mem, 1, "built-in panels stay");
   assert.deepStrictEqual([cfg.panelSize.storage, cfg.panelSize.docker], ["wide", "full"]);

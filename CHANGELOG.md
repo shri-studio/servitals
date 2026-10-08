@@ -7,6 +7,10 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- Hardware (spec 9): a new panel shows fan speeds (a named fan that stopped
+  in red), voltages and the battery, from hwmon and
+  `/sys/class/power_supply`; it hides on hosts with none. Fleet cards can
+  show the battery. `COLLECT_HARDWARE=0` turns it off.
 - System (spec 9): a new panel shows pending and security updates (as
   update-notifier counted them; the agent never runs apt), whether the system
   asks for a reboot and which packages ask, and systemd's failed units. Fleet

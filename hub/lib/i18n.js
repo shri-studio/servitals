@@ -54,6 +54,7 @@ const STRINGS = {
   "panel.docker": "services",
   "panel.procs": "processes",
   "panel.system": "system",
+  "panel.hw": "hardware",
   "panel.clocks": "world clocks",
   "panel.weather": "weather",
 
@@ -153,6 +154,18 @@ const STRINGS = {
   "sys.rebootNo": "not needed",
   "sys.none": "none",
 
+  // hardware: fans, voltages, battery
+  "hw.battery": "battery",
+  "hw.fans": "fans",
+  "hw.voltages": "voltages",
+  "hw.rpm": "{n} rpm",
+  "hw.volts": "{v} V",
+  "hw.bat.charging": "charging",
+  "hw.bat.discharging": "discharging",
+  "hw.bat.full": "full",
+  "hw.bat.notcharging": "not charging",
+  "hw.bat.unknown": "unknown",
+
   // dialogs
   "dlg.close": "[esc]",
   "dlg.confirm": "confirm",
@@ -175,6 +188,7 @@ const STRINGS = {
   "card.containers": "up",
   "card.iowait": "iowait",
   "card.updates": "updates",
+  "card.battery": "battery",
 
   // clocks and weather
   "clock.badTz": "bad tz",
@@ -237,6 +251,7 @@ const STRINGS = {
   "set.card.containers": "containers",
   "set.card.iowait": "iowait (waiting on disk)",
   "set.card.updates": "updates (↻ reboot needed)",
+  "set.card.battery": "battery",
   "set.serversHint": "name and tags save at once; pin and hide with the other settings",
   "set.srvName": "name of {name}",
   "set.srvTags": "tags of {name}",

@@ -122,6 +122,29 @@ function systemHtml(u) {
   };
 }
 
+// the hardware panel: the battery (red or amber when low and draining), fans (one the
+// agent lists at 0 rpm has a name, so it should spin: red) and voltages
+function hardwareHtml(d) {
+  const row = (k, v) => `<div class="row"><span class="k">${esc(k)}</span><span class="v">${v}</span></div>`;
+  let h = "";
+  if (d.battery) {
+    const b = d.battery, draining = b.status === "Discharging";
+    const cls = draining && b.capacity < 20 ? "hl-red" : draining && b.capacity < 40 ? "hl-amber" : "";
+    // the kernel's words (Charging, Not charging...) in the dictionary; others as sent
+    const word = String(b.status || "").toLowerCase().replace(/ /g, "");
+    const status = b.status ? " · " + esc(STRINGS["hw.bat." + word] ? tr("hw.bat." + word) : b.status) : "";
+    h += row(tr("hw.battery"), `<span class="${cls}">${b.capacity}%</span>${status}`);
+  }
+  if (d.fans && d.fans.length) {
+    h += `<div class="plbl">${esc(tr("hw.fans"))}</div>` + d.fans.map(f => row(f.label,
+      f.rpm > 0 ? esc(tr("hw.rpm", { n: f.rpm })) : `<span class="hl-red">${esc(tr("hw.rpm", { n: f.rpm }))}</span>`)).join("");
+  }
+  if (d.voltages && d.voltages.length) {
+    h += `<div class="plbl">${esc(tr("hw.voltages"))}</div>` + d.voltages.map(v => row(v.label, esc(tr("hw.volts", { v: v.value.toFixed(2) })))).join("");
+  }
+  return h;
+}
+
 function meter(pct, forceCls) {
   pct = clamp(pct, 0, 100);
   const cls = forceCls || HCLS[health(pct, 70, 90)];
@@ -185,10 +208,10 @@ async function loadConfig() {
   const builtin = {
     title: "servitals", favicon: "", refreshSec: 60,
     weather: [], clocks: [], disks: {},
-    panels: { mem: 1, cpu: 1, temp: 1, storage: 1, network: 1, docker: 1, procs: 1, system: 1, clocks: 1, weather: 1 },
-    panelOrder: ["mem", "cpu", "temp", "storage", "network", "docker", "procs", "system", "clocks", "weather"],
+    panels: { mem: 1, cpu: 1, temp: 1, storage: 1, network: 1, docker: 1, procs: 1, system: 1, hw: 1, clocks: 1, weather: 1 },
+    panelOrder: ["mem", "cpu", "temp", "storage", "network", "docker", "procs", "system", "hw", "clocks", "weather"],
     panelSize: { mem: "normal", cpu: "normal", temp: "normal", storage: "wide",
-                 network: "wide", docker: "full", procs: "wide", system: "normal", clocks: "normal", weather: "normal" }
+                 network: "wide", docker: "full", procs: "wide", system: "normal", hw: "normal", clocks: "normal", weather: "normal" }
   };
   // a conf.d file may set only a few panels: the others keep their built-in values
   for (const k of ["panels", "panelSize"]) {
@@ -519,9 +542,9 @@ function cardNumbers() {
   return want.length ? want.slice(0, 4) : ["cpu", "mem", "temp"];
 }
 // the numbers a fleet card can show; their labels are card.<key> in the dictionary
-const CARD_KEYS = ["cpu", "mem", "temp", "disk", "containers", "iowait", "updates"];
+const CARD_KEYS = ["cpu", "mem", "temp", "disk", "containers", "iowait", "updates", "battery"];
 function cardValue(k, s) {
-  if (k === "cpu" || k === "mem" || k === "iowait") return fmtVal(s[k], "%");
+  if (k === "cpu" || k === "mem" || k === "iowait" || k === "battery") return fmtVal(s[k], "%");
   if (k === "temp") return fmtTemp(s.temp, true);
   if (k === "disk") return s.disk ? s.disk.pct + "%" : "–";
   // pending updates, and ↻ when the system asks for a reboot
@@ -763,6 +786,9 @@ function renderMetrics(d) {
     $("#sys-units").innerHTML = sys.units;
   }
 
+  // hardware: fans, voltages, the battery (most servers have some of these, many none)
+  $("#hw-body").innerHTML = hardwareHtml(d);
+
   // docker — stash and render (sort / expand handled separately)
   if (d.docker) { dockerData = d.docker; renderDocker(); } else dockerData = null;
 
@@ -771,6 +797,7 @@ function renderMetrics(d) {
     const el = $(`[data-panel=${panel}]`);
     if (el) el.classList.toggle("hidden", !d[group] || shown[panel] === false);
   }
+  $("[data-panel=hw]").classList.toggle("hidden", !(d.fans || d.voltages || d.battery) || shown.hw === false);
 }
 
 /* ------------------------------------------------------------------ network bars */
