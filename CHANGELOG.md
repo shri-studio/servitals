@@ -7,6 +7,15 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- Alerts (spec 8.1, 8.2): the hub judges the default rules on each push and
+  once a minute: node offline, disk full and critical, memory, cpu,
+  temperature, a container that stopped, failed units, a needed reboot and
+  security updates. Each fires after its time, resolves past its clear value
+  (no flapping), repeats daily while it lasts, and stays quiet while its node
+  is offline or the rule or node is muted. State and the last 1000 events
+  live under the state directory's `alerts/`. `GET /__ctl/alerts` lists what
+  is firing and what happened; `POST /__ctl/alerts/mute` mutes a rule or a
+  node. Events go to the hub's log for now; channels follow.
 - History graph (spec 10.1): a "history" panel in each node's view charts
   any of its series (cpu, memory, temperature, load, iowait, pressure,
   network, each disk and device, each container) over 1 h, 24 h, 7 d, 30 d

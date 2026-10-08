@@ -281,3 +281,22 @@ test("history: a push becomes series the page can ask for, and they outlive a re
     } finally { await again.stop(); }
   } finally { await hub.stop().catch(() => {}); fs.rmSync(dataDir, { recursive: true, force: true }); }
 });
+
+test("alerts: a push that meets a rule shows as firing; it can be muted; the log keeps it", async () => {
+  await withHub(async (hub, c) => {
+    const cookie = cookieFrom(await login(hub.port));
+    const get = async () => JSON.parse((await request(hub.port, { path: "/__ctl/alerts", headers: { cookie } })).body);
+    assert.deepStrictEqual((await get()).firing, []);
+    assert.strictEqual((await signed(hub, c, { body: snap({ ubuntu: { rebootRequired: true } }) })).status, 200);
+    const a = await get();
+    assert.deepStrictEqual(a.firing.map((f) => [f.rule, f.severity, f.node, f.muted]), [["reboot_required", "info", c.id, false]]);
+    assert.deepStrictEqual(a.recent.map((e) => [e.kind, e.rule]), [["firing", "reboot_required"]]);
+    assert.match(hub.logs(), /event=alert\.firing.*rule=reboot_required/);
+    const until = Date.now() + 3600000;
+    const m = await ctlPost(hub.port, cookie, "/__ctl/alerts/mute", JSON.stringify({ rule: "reboot_required", until }));
+    assert.strictEqual(m.status, 200);
+    assert.strictEqual((await get()).firing[0].muted, true);
+    assert.strictEqual((await ctlPost(hub.port, cookie, "/__ctl/alerts/mute", JSON.stringify({ until }))).status, 400, "a rule or a node");
+    assert.strictEqual((await request(hub.port, { path: "/__ctl/alerts" })).status, 401, "logged in only");
+  });
+});

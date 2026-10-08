@@ -30,6 +30,7 @@ const { createNodeStore, localAgentEnv } = require("./lib/nodes");
 const { createAgentApi } = require("./lib/agentapi");
 const { view: snapshotView } = require("./lib/snapshot");
 const { createHistory, seriesOf } = require("./lib/history");
+const { createAlerts, DEFAULT_RULES } = require("./lib/alerts");
 const fleet = require("./lib/fleet");
 const { createAdminStore, USER_RE } = require("./lib/admin");
 const { createLinks } = require("./lib/link");
@@ -189,6 +190,19 @@ const historySweep = () => {
 setInterval(historyFlush, 60000).unref();
 setInterval(historySweep, 86400000).unref();
 historySweep();
+// alerts (spec 8.1): judged on each push and once a minute; events go to the log (channels: 6c)
+const alerts = createAlerts(path.join(DATA, "alerts"), {
+  onEvent: (e) => log.info("alert." + e.kind, { rule: e.rule, severity: e.severity, node: e.node, ...(e.sub ? { sub: e.sub } : {}), value: e.value }),
+});
+const nodeName = (id) => { const n = nodes.get(id); return (n && n.name) || id; };
+setInterval(() => {
+  try {
+    alerts.check(nodes.list().map((n) => {
+      const rec = latest.get(n.id);
+      return { id: n.id, name: n.name, lastPush: rec ? rec.at : null, interval: rec ? rec.snap.interval : null };
+    }));
+  } catch (e) { log.warn("alerts.check_failed", { error: e.code || String(e) }); }
+}, 60000).unref();
 const agentApi = createAgentApi({
   nodes, log,
   replayFile: path.join(DATA, "replay.json"),
@@ -198,6 +212,7 @@ const agentApi = createAgentApi({
     const rec = { snap, view: snapshotView(snap, prev && prev.snap, prev ? prev.view.trend : []), at: Date.now() };
     latest.set(id, rec);
     try { history.add(id, seriesOf(rec.view)); } catch (e) { log.warn("history.add_failed", { node: id, error: e.code || String(e) }); }
+    try { alerts.evaluate({ id, name: nodeName(id) }, rec.view); } catch (e) { log.warn("alerts.evaluate_failed", { node: id, error: e.code || String(e) }); }
     try { writeFileAtomic(path.join(SNAP_DIR, id + ".json"), JSON.stringify(rec)); }
     catch (e) { log.warn("api.snapshot_write_failed", { node: id, error: e.code || String(e) }); }
   },
@@ -720,6 +735,27 @@ async function handle(req, res) {
       return json(200, { ok: true, woke: r.woke, fresh: r.fresh });
     }
 
+    // alerts (spec 8): what is firing, and the last events
+    if (req.method === "GET" && pathname === "/__ctl/alerts") {
+      return json(200, { firing: alerts.firing(), recent: alerts.recent(50) });
+    }
+    // mute a rule or a node until a time (ms since 1970; at most a year ahead)
+    if (req.method === "POST" && pathname === "/__ctl/alerts/mute") {
+      let body = null;
+      try { body = JSON.parse(await readBodyN(req, 1024)); } catch (_) { /* answered below */ }
+      const b = body && typeof body === "object" ? body : {};
+      const okRule = typeof b.rule === "string" && DEFAULT_RULES.some((r) => r.id === b.rule);
+      const okNode = typeof b.node === "string" && !!nodes.get(b.node);
+      const until = Number(b.until);
+      if ((!okRule && !okNode) || (b.rule !== undefined && !okRule) || (b.node !== undefined && !okNode)
+          || !Number.isFinite(until) || until > Date.now() + 366 * 86400000) {
+        return json(400, { error: "mute needs a known rule or node, and until (ms, at most a year ahead)" });
+      }
+      alerts.mute(okRule ? { rule: b.rule, until } : { node: b.node, until });
+      log.audit("alert.muted", { ip, ...(okRule ? { rule: b.rule } : { node: b.node }), until });
+      return json(200, { ok: true });
+    }
+
     // history (spec 7): ?node=<id>&series=<name>&range=1h|24h|7d|30d|90d, or series=list
     if (req.method === "GET" && pathname === "/__ctl/history") {
       const q = new URL(req.url, "http://x").searchParams;
@@ -766,6 +802,7 @@ async function handle(req, res) {
         latest.delete(id);
         try { fs.unlinkSync(path.join(SNAP_DIR, id + ".json")); } catch (_) { /* never pushed */ }
         try { history.remove(id); } catch (_) { /* swept later */ }
+        try { alerts.forget(id); } catch (_) { /* nothing to forget */ }
         log.audit("node.revoked", { ip, node: id });
         return json(200, { ok: true });
       }
