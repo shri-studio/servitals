@@ -138,3 +138,66 @@ test("an offline node's other alerts do not repeat; the overdue repeat goes out 
   c.at(24 * 60 + 6); a.evaluate(N, view({ ubuntu: { rebootRequired: true } }));
   assert.deepStrictEqual(kinds(events).slice(2), ["resolved:offline", "repeat:reboot_required"], "back: the overdue repeat goes out");
 });
+
+test("a group the push lacks leaves its alerts alone: a crashed docker daemon or a dropped group is not a recovery", () => {
+  const { c, a, events } = setup();
+  const ctr = (state) => view({ docker: [{ name: "web", state, health: null }] });
+  c.at(0); a.evaluate(N, ctr("running"));
+  c.at(1); a.evaluate(N, ctr("exited")); c.at(4); a.evaluate(N, ctr("exited"));
+  assert.deepStrictEqual(kinds(events), ["firing:container_down:web"]);
+  c.at(5); a.evaluate(N, view({ docker: [] }));          // the daemon is restarting: the agent sends []
+  c.at(6); a.evaluate(N, view({}));                      // or no docker group at all
+  c.at(7); a.evaluate(N, ctr("exited"));
+  assert.deepStrictEqual(kinds(events), ["firing:container_down:web"], "still the one incident");
+  c.at(8); a.evaluate(N, view({ docker: [{ name: "db", state: "running" }] }));   // web removed from a real list
+  assert.deepStrictEqual(kinds(events).slice(1), ["resolved:container_down:web"]);
+
+  const d = setup();
+  const disk = (disks) => view({ disks, temp: { package: 90 } });
+  d.c.at(0); d.a.evaluate(N, disk([{ mount: "/srv", pct: 96 }]));
+  d.c.at(5); d.a.evaluate(N, disk([{ mount: "/srv", pct: 96 }]));
+  assert.deepStrictEqual(kinds(d.events).sort(), ["firing:disk_critical:/srv", "firing:disk_full:/srv", "firing:temperature"]);
+  d.c.at(6); d.a.evaluate(N, view({ temp: { package: null } }));   // no disks group, a failed sensor read
+  d.c.at(7); d.a.evaluate(N, disk([{ mount: "/srv", pct: 96 }]));
+  assert.strictEqual(d.events.length, 3, "nothing resolved, nothing fired again");
+  d.c.at(8); d.a.evaluate(N, disk([{ mount: "/srv", mounted: false }]));
+  assert.deepStrictEqual(kinds(d.events).slice(3).sort(), ["resolved:disk_critical:/srv", "resolved:disk_full:/srv"], "unmounted: an explicit end");
+});
+
+test("an alert that was told ends told, also while muted, and when its node is revoked", () => {
+  const { c, a, events } = setup();
+  c.at(0); a.evaluate(N, view({ ubuntu: { rebootRequired: true, security: 2 } }));
+  a.mute({ rule: "reboot_required", until: c.t + 60 * MIN });
+  c.at(5); a.evaluate(N, view({ ubuntu: { rebootRequired: false, security: 2 } }));
+  assert.deepStrictEqual(kinds(events), ["firing:reboot_required", "firing:security_updates", "resolved:reboot_required"]);
+  a.forget(N.id);
+  assert.deepStrictEqual(kinds(events).at(-1), "resolved:security_updates");
+  const quietOne = setup();
+  quietOne.a.mute({ node: N.id, until: quietOne.c.t + 60 * MIN });
+  quietOne.c.at(0); quietOne.a.evaluate(N, view({ ubuntu: { rebootRequired: true } }));
+  quietOne.c.at(1); quietOne.a.evaluate(N, view({ ubuntu: { rebootRequired: false } }));
+  assert.deepStrictEqual(quietOne.events, [], "never told: its end is not told either");
+  assert.deepStrictEqual(quietOne.a.recent(5).map((e) => [e.kind, e.quiet]), [["resolved", "muted"], ["firing", "muted"]], "but both are in the log");
+});
+
+test("the alert log survives a torn line and a failed append; state is written only when it changed", () => {
+  const { c, a, dir } = setup();
+  c.at(0); a.evaluate(N, view({ ubuntu: { rebootRequired: true } }));
+  fs.appendFileSync(path.join(dir, "events.jsonl"), '{"kind":"fir');   // a crash in the middle of a line
+  const again = createAlerts(dir, { now: c.now });
+  assert.deepStrictEqual(again.recent(5).map((e) => e.kind), ["firing"]);
+  const writes = [];
+  const orig = fs.writeFileSync;
+  fs.writeFileSync = (f, ...r) => { writes.push(String(f)); return orig.call(fs, f, ...r); };
+  try {
+    c.at(1); again.evaluate(N, view({ ubuntu: { rebootRequired: true } }));
+    c.at(2); again.evaluate(N, view({ ubuntu: { rebootRequired: true } }));
+  } finally { fs.writeFileSync = orig; }
+  assert.deepStrictEqual(writes.filter((f) => f.includes("state.json")), [], "nothing changed: nothing written");
+  fs.rmSync(path.join(dir, "events.jsonl")); fs.mkdirSync(path.join(dir, "events.jsonl"));   // appends now fail
+  const warned = [];
+  const b = createAlerts(dir, { now: c.now, warn: (e) => warned.push(e) });
+  c.at(3); assert.doesNotThrow(() => b.evaluate(N, view({ ubuntu: { rebootRequired: false, security: 1 } })));
+  assert.deepStrictEqual(b.firing().map((f) => f.rule), ["security_updates"], "judged and kept all the same");
+  assert.ok(warned.includes("alerts.log_failed"));
+});

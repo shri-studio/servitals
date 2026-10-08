@@ -191,7 +191,9 @@ setInterval(historyFlush, 60000).unref();
 setInterval(historySweep, 86400000).unref();
 historySweep();
 // alerts (spec 8.1): judged on each push and once a minute; events go to the log (channels: 6c)
+const HUB_START = Date.now();
 const alerts = createAlerts(path.join(DATA, "alerts"), {
+  warn: (event, fields) => log.warn(event, fields),
   onEvent: (e) => log.info("alert." + e.kind, { rule: e.rule, severity: e.severity, node: e.node, ...(e.sub ? { sub: e.sub } : {}), value: e.value }),
 });
 const nodeName = (id) => { const n = nodes.get(id); return (n && n.name) || id; };
@@ -199,7 +201,8 @@ setInterval(() => {
   try {
     alerts.check(nodes.list().map((n) => {
       const rec = latest.get(n.id);
-      return { id: n.id, name: n.name, lastPush: rec ? rec.at : null, interval: rec ? rec.snap.interval : null };
+      // a hub that was down is no reason to page: a node's time runs from the hub's start at the earliest
+      return { id: n.id, name: n.name, lastPush: rec ? Math.max(rec.at, HUB_START) : null, interval: rec ? rec.snap.interval : null };
     }));
   } catch (e) { log.warn("alerts.check_failed", { error: e.code || String(e) }); }
 }, 60000).unref();

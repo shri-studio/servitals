@@ -300,3 +300,9 @@ test("alerts: a push that meets a rule shows as firing; it can be muted; the log
     assert.strictEqual((await request(hub.port, { path: "/__ctl/alerts" })).status, 401, "logged in only");
   });
 });
+
+test("alerts: after a hub restart, a node is offline only once its own limit passed since the hub started", () => {
+  const src = fs.readFileSync(path.join(__dirname, "..", "hub", "server.js"), "utf8");
+  assert.match(src, /lastPush: rec \? Math\.max\(rec\.at, HUB_START\) : null/);
+  assert.match(src, /^const HUB_START = Date\.now\(\);/m);
+});

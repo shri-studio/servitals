@@ -7,11 +7,12 @@
  *   ok -> pending (the condition holds) -> firing (it held for the rule's time)
  *      -> resolved (it stopped holding; past the clear value when the rule has one)
  * A firing alert is told once (onEvent), then once a day while it lasts; its end is
- * told if its start was. A muted rule or node changes state silently and is told when
- * the mute ends, if still firing. An offline node's other alerts are held back.
+ * always told if its start was, mute or not. A muted rule or node changes state
+ * silently and is told when the mute ends, if still firing. A push that lacks a group
+ * (a dropped group, a crashed docker daemon) leaves that group's alerts as they are. An offline node's other alerts are held back.
  * State and mutes live in <dir>/state.json, every event in <dir>/events.jsonl (the
  * alert log, the last 1000).
- *   createAlerts(dir, { now, onEvent }) → { evaluate(node, view), check(nodes),
+ *   createAlerts(dir, { now, onEvent, warn }) → { evaluate(node, view), check(nodes),
  *     firing(), recent(n), mute({ rule | node, until }), forget(node), log(event) }
  */
 const fs = require("fs");
@@ -38,51 +39,88 @@ const DEFAULT_RULES = [
 const OPS = { ">=": (a, b) => a >= b, "<=": (a, b) => a <= b, "==": (a, b) => a === b };
 const num = (v) => (typeof v === "number" && Number.isFinite(v) ? v : null);
 
-// a metric's values in a node's view: [{ sub, value }], [] when the node sends none
+// a metric's values in a node's view: [{ sub, value }], or null when the push lacks the
+// group (a crashed docker daemon sends [], a dropped group or a failed sensor read sends
+// nothing): then the rule's alerts stay as they are. Only a real list ends one: a disk
+// gone from it or unmounted, a container gone from a list that has containers.
 function valuesOf(metric, v, running) {
   switch (metric) {
-    case "disk.used": return (v.disks || []).filter((d) => d.mounted !== false && num(d.pct) !== null).map((d) => ({ sub: d.mount, value: d.pct }));
-    case "mem": return v.mem && num(v.mem.total) > 0 && num(v.mem.used) !== null ? [{ sub: "", value: (v.mem.used * 100) / v.mem.total }] : [];
-    case "cpu": return v.cpu && num(v.cpu.usage) !== null ? [{ sub: "", value: v.cpu.usage }] : [];
-    case "temp": return v.temp && num(v.temp.package) !== null ? [{ sub: "", value: v.temp.package }] : [];
+    case "disk.used": return Array.isArray(v.disks)
+      ? v.disks.filter((d) => d.mounted !== false && num(d.pct) !== null).map((d) => ({ sub: d.mount, value: d.pct })) : null;
+    case "mem": return v.mem && num(v.mem.total) > 0 && num(v.mem.used) !== null ? [{ sub: "", value: Math.round((v.mem.used * 1000) / v.mem.total) / 10 }] : null;
+    case "cpu": return v.cpu && num(v.cpu.usage) !== null ? [{ sub: "", value: v.cpu.usage }] : null;
+    case "temp": return v.temp && num(v.temp.package) !== null ? [{ sub: "", value: v.temp.package }] : null;
     // a container counts once it was seen running: down while not running, or unhealthy
-    case "container.down": return (v.docker || []).filter((c) => running.has(c.name))
-      .map((c) => ({ sub: c.name, value: c.state !== "running" || c.health === "unhealthy" ? 1 : 0 }));
-    case "failed_units": return v.ubuntu && Array.isArray(v.ubuntu.failedUnits) ? [{ sub: "", value: v.ubuntu.failedUnits.length }] : [];
-    case "reboot_required": return v.ubuntu && typeof v.ubuntu.rebootRequired === "boolean" ? [{ sub: "", value: v.ubuntu.rebootRequired ? 1 : 0 }] : [];
-    case "security_updates": return v.ubuntu && num(v.ubuntu.security) !== null ? [{ sub: "", value: v.ubuntu.security }] : [];
-    default: return [];
+    case "container.down": return Array.isArray(v.docker) && v.docker.length
+      ? v.docker.filter((c) => running.has(c.name)).map((c) => ({ sub: c.name, value: c.state !== "running" || c.health === "unhealthy" ? 1 : 0 }))
+      : null;
+    case "failed_units": return v.ubuntu && Array.isArray(v.ubuntu.failedUnits) ? [{ sub: "", value: v.ubuntu.failedUnits.length }] : null;
+    case "reboot_required": return v.ubuntu && typeof v.ubuntu.rebootRequired === "boolean" ? [{ sub: "", value: v.ubuntu.rebootRequired ? 1 : 0 }] : null;
+    case "security_updates": return v.ubuntu && num(v.ubuntu.security) !== null ? [{ sub: "", value: v.ubuntu.security }] : null;
+    default: return null;
   }
 }
 
-function createAlerts(dir, { now = Date.now, onEvent = () => {}, rules = DEFAULT_RULES } = {}) {
+function createAlerts(dir, { now = Date.now, onEvent = () => {}, warn = () => {}, rules = DEFAULT_RULES } = {}) {
   fs.mkdirSync(dir, { recursive: true });
   const stateFile = path.join(dir, "state.json"), logFile = path.join(dir, "events.jsonl");
+  const isObj = (o) => o !== null && typeof o === "object" && !Array.isArray(o);
   let st = { instances: {}, running: {}, mutes: { rules: {}, nodes: {} } };
-  try { st = { ...st, ...JSON.parse(fs.readFileSync(stateFile, "utf8")) }; } catch (_) { /* first start */ }
+  try {
+    const f = JSON.parse(fs.readFileSync(stateFile, "utf8"));
+    if (isObj(f.instances)) st.instances = f.instances;
+    if (isObj(f.running)) st.running = f.running;
+    if (isObj(f.mutes) && isObj(f.mutes.rules) && isObj(f.mutes.nodes)) st.mutes = f.mutes;
+  } catch (_) { /* first start */ }
+  // the log, a line at a time: a line torn by a crash is skipped, not the whole log
   let events = [];
-  try { events = fs.readFileSync(logFile, "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l)).slice(-LOG_MAX); } catch (_) { /* none yet */ }
-  const save = () => writeFileAtomic(stateFile, JSON.stringify(st));
+  try {
+    for (const line of fs.readFileSync(logFile, "utf8").split("\n")) {
+      if (!line) continue;
+      try { events.push(JSON.parse(line)); } catch (_) { /* torn */ }
+    }
+    events = events.slice(-LOG_MAX);
+  } catch (_) { /* none yet */ }
+  // state is written when it changed; a value that moves on every push is not state
+  let saved = "";
+  const save = () => {
+    const text = JSON.stringify(st, (k, v) => (k === "value" ? undefined : v));
+    if (text === saved) return;
+    writeFileAtomic(stateFile, text);
+    saved = text;
+  };
+  try { saved = fs.readFileSync(stateFile, "utf8"); } catch (_) { /* none */ }
 
   function log(e) {
     events.push(e);
-    fs.appendFileSync(logFile, JSON.stringify(e) + "\n");
-    if (events.length > LOG_MAX + 100) { events = events.slice(-LOG_MAX); fs.writeFileSync(logFile, events.map((x) => JSON.stringify(x)).join("\n") + "\n"); }
+    try {
+      fs.appendFileSync(logFile, JSON.stringify(e) + "\n");
+      if (events.length > LOG_MAX + 100) {
+        events = events.slice(-LOG_MAX);
+        writeFileAtomic(logFile, events.map((x) => JSON.stringify(x)).join("\n") + "\n");
+      }
+    } catch (err) { warn("alerts.log_failed", { error: err.code || String(err) }); }
   }
   const muted = (inst, t) => (st.mutes.rules[inst.rule] || 0) > t || (st.mutes.nodes[inst.node] || 0) > t;
   const offline = (node) => { const o = st.instances[`offline|${node}|`]; return !!(o && o.state === "firing"); };
   // why an instance is not told now: muted, or its node is offline (inhibition); else ""
   const quiet = (inst, r, t) => (muted(inst, t) ? "muted" : r.id !== "offline" && offline(inst.node) ? "offline" : "");
-  // an event: always in the log (with why it stayed quiet); passed on unless quiet
+  // an event: always in the log (with why it stayed quiet); passed on unless quiet. The end
+  // of an alert whose start was told is always told, mute or not (spec 8.1).
   function tell(kind, inst, r, t) {
     const e = { kind, rule: inst.rule, severity: r.severity, node: inst.node, nodeName: inst.nodeName,
                 ...(inst.sub ? { sub: inst.sub } : {}), value: inst.value, at: t, since: inst.since };
-    const why = quiet(inst, r, t);
+    const why = kind === "resolved" ? (inst.notified ? "" : quiet(inst, r, t) || "untold") : quiet(inst, r, t);
     log(why ? { ...e, quiet: why } : e);
     if (!why) onEvent(e);
     return !why;
   }
-  // one instance, one value (null: the node does not send it, so the condition does not hold)
+  // a firing alert not told yet (it was quiet) is told now if no longer quiet; a told one repeats
+  function retell(inst, r, t) {
+    if (!inst.notified && !quiet(inst, r, t)) { tell("firing", inst, r, t); inst.notified = true; inst.lastNotified = t; }
+    else if (inst.notified && t - inst.lastNotified >= r.repeat && !quiet(inst, r, t)) { tell("repeat", inst, r, t); inst.lastNotified = t; }
+  }
+  // one instance, one value (null: its disk or container is gone, so it ends)
   function judge(r, node, sub, value, t) {
     const key = `${r.id}|${node.id}|${sub}`;
     let inst = st.instances[key];
@@ -94,14 +132,8 @@ function createAlerts(dir, { now = Date.now, onEvent = () => {}, rules = DEFAULT
     inst.value = value; inst.nodeName = node.name;
     if (inst.state === "firing") {
       const over = value === null || (r.clear !== null ? !OPS[r.op](value, r.clear) : !holds);
-      if (over) {
-        if (inst.notified) tell("resolved", inst, r, t);
-        delete st.instances[key];
-        return;
-      }
-      // told late: quiet when it fired (muted, or its node offline) and no longer
-      if (!inst.notified && !quiet(inst, r, t)) { tell("firing", inst, r, t); inst.notified = true; inst.lastNotified = t; }
-      else if (inst.notified && t - inst.lastNotified >= r.repeat && !quiet(inst, r, t)) { tell("repeat", inst, r, t); inst.lastNotified = t; }
+      if (over) { tell("resolved", inst, r, t); delete st.instances[key]; return; }
+      retell(inst, r, t);
       return;
     }
     if (!holds) { delete st.instances[key]; return; }
@@ -117,16 +149,19 @@ function createAlerts(dir, { now = Date.now, onEvent = () => {}, rules = DEFAULT
     // a push from node ({ id, name }): every rule on what it sends; a push ends "offline"
     evaluate(node, v) {
       const t = now();
+      // the containers seen running: kept as they were when the push has no containers
       const run = new Set(st.running[node.id] || []);
-      for (const c of v.docker || []) if (c.state === "running") run.add(c.name);
-      for (const name of [...run]) if (!(v.docker || []).some((c) => c.name === name)) run.delete(name);   // removed
-      st.running[node.id] = [...run];
+      if (Array.isArray(v.docker) && v.docker.length) {
+        for (const c of v.docker) if (c.state === "running") run.add(c.name);
+        for (const name of [...run]) if (!v.docker.some((c) => c.name === name)) run.delete(name);   // removed
+        st.running[node.id] = [...run];
+      }
       for (const r of rules) {
         if (r.metric === "offline") { judge(r, node, "", 0, t); continue; }
         const vals = valuesOf(r.metric, v, run);
+        if (vals === null) continue;   // the push lacks the group: its alerts stay as they are
         const seen = new Set(vals.map((x) => x.sub));
         for (const x of vals) judge(r, node, x.sub, x.value, t);
-        // an instance whose disk or container is gone: no value, so it ends
         for (const inst of Object.values(st.instances)) {
           if (inst.rule === r.id && inst.node === node.id && !seen.has(inst.sub)) judge(r, node, inst.sub, null, t);
         }
@@ -134,7 +169,7 @@ function createAlerts(dir, { now = Date.now, onEvent = () => {}, rules = DEFAULT
       save();
     },
     // once a minute: nodes ({ id, name, lastPush, interval }) that stopped pushing go offline;
-    // firing alerts of nodes that are not offline repeat
+    // firing alerts of nodes that are not offline repeat (nothing else is judged without a push)
     check(nodes) {
       const t = now();
       const r = rules.find((x) => x.metric === "offline");
@@ -145,7 +180,7 @@ function createAlerts(dir, { now = Date.now, onEvent = () => {}, rules = DEFAULT
         for (const inst of Object.values(st.instances)) {
           if (inst.node !== n.id || inst.state !== "firing" || inst.rule === "offline") continue;
           const rr = rules.find((x) => x.id === inst.rule);
-          if (rr) judge(rr, n, inst.sub, inst.value, t);
+          if (rr) retell(inst, rr, t);
         }
       }
       save();
@@ -164,8 +199,15 @@ function createAlerts(dir, { now = Date.now, onEvent = () => {}, rules = DEFAULT
       if (id) st.mutes.rules[id] = until; else st.mutes.nodes[node] = until;
       save();
     },
+    // a revoked node: its told alerts end told
     forget(node) {
-      for (const [k, i] of Object.entries(st.instances)) if (i.node === node) delete st.instances[k];
+      const t = now();
+      for (const [k, i] of Object.entries(st.instances)) {
+        if (i.node !== node) continue;
+        const r = rules.find((x) => x.id === i.rule);
+        if (r && i.state === "firing") tell("resolved", i, r, t);
+        delete st.instances[k];
+      }
       delete st.running[node]; delete st.mutes.nodes[node];
       save();
     },
