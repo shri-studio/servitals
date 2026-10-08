@@ -175,8 +175,8 @@ function createAgentApi({ nodes, log, onSnapshot, maxBody = 256 * 1024, now = Da
       onSnapshot(id, checked.value);
       // an optional group that failed validation was left out: say so, and log each new set once
       if (checked.dropped.length) {
-        const key = checked.dropped.join(" ");
-        if (droppedSeen.get(id) !== key) { droppedSeen.set(id, key); log.warn("api.groups_dropped", { node: id, paths: key }); }
+        const droppedKey = checked.dropped.join(" ");
+        if (droppedSeen.get(id) !== droppedKey) { droppedSeen.set(id, droppedKey); log.warn("api.groups_dropped", { node: id, paths: droppedKey }); }
         return reply(res, 200, secret, tsRaw, { ok: true, dropped: checked.dropped });
       }
       droppedSeen.delete(id);

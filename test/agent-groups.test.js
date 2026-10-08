@@ -565,5 +565,7 @@ test("hardware_json: a reading the hub would refuse is skipped, never a refused 
   const d = json(runGroup(host, "hardware_json"));
   assert.deepStrictEqual(d, { fans: [{ label: "nct6798 fan3", rpm: 700 }],
     voltages: [{ label: "VBAT", value: 0 }, { label: "nct6798 in7", value: 3.312 }], battery: null });
-  assert.ok(validate({ schema: 1, ts: 1, interval: 60, host: { name: "x" }, ...d }).ok, "the hub accepts it");
+  const checked = validate({ schema: 1, ts: 1, interval: 60, host: { name: "x" }, ...d });
+  assert.ok(checked.ok);
+  assert.deepStrictEqual(checked.dropped, [], "the hub keeps every group the agent sends");
 });

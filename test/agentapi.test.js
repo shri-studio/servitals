@@ -222,11 +222,29 @@ test("replays are not counted as authentication failures", async () => {
 
 test("a push with a bad optional group is stored without it, says what was dropped, and logs it once", async () => {
   await withHub(async (hub, c) => {
-    const r = await signed(hub, c, { body: snap({ fans: [{ label: "f", rpm: 1350000 }], mem: { total: 100, used: 50 } }) });
+    const cookie = cookieFrom(await login(hub.port));
+    const bad = () => snap({ fans: [{ label: "f", rpm: 1350000 }], mem: { total: 100, used: 50 } });
+    const count = () => (hub.logs().match(/api\.groups_dropped/g) || []).length;
+    const pause = () => new Promise((ok) => setTimeout(ok, 5100));   // the hub stores one push per 5 s
+    const r = await signed(hub, c, { body: bad() });
     assert.strictEqual(r.status, 200);
     assert.deepStrictEqual(JSON.parse(r.body), { ok: true, dropped: ["$.fans[0].rpm"] });
+    assert.ok(replyOk(r, c), "the reply is signed");
+    const d = JSON.parse((await request(hub.port, { path: "/data.json?t=1", headers: { cookie } })).body);
+    assert.strictEqual(d.fans, undefined, "the bad group is not stored");
+    assert.deepStrictEqual(d.mem, { total: 100, used: 50 }, "the rest is");
     await new Promise((ok) => setTimeout(ok, 200));
-    assert.strictEqual((hub.logs().match(/api\.groups_dropped/g) || []).length, 1);
+    assert.strictEqual(count(), 1);
     assert.match(hub.logs(), /api\.groups_dropped.*\$\.fans\[0\]\.rpm/);
+    await pause();
+    assert.strictEqual((await signed(hub, c, { body: bad() })).status, 200);
+    await new Promise((ok) => setTimeout(ok, 200));
+    assert.strictEqual(count(), 1, "the same bad sensor again: not logged again");
+    await pause();
+    assert.deepStrictEqual(JSON.parse((await signed(hub, c, { body: snap() })).body), { ok: true });
+    await pause();
+    await signed(hub, c, { body: bad() });
+    await new Promise((ok) => setTimeout(ok, 200));
+    assert.strictEqual(count(), 2, "after a clean push, it is news again");
   });
 });

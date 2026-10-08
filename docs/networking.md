@@ -133,8 +133,13 @@ Protocol errors in the agent's log (`journalctl -u servitals-agent`):
 | `status=401 error=clock_skew` | clock off by more than 2 minutes | backs off; fix NTP |
 | `status=401 error=replay` | a request was sent twice | retries once with a new timestamp |
 | `status=413 error=too_large` | snapshot over 256 KiB | resends without the container and process lists |
-| `status=422 error=invalid_snapshot` | a value outside its range | report a bug with the log line |
+| `status=422 error=invalid_snapshot` | a bad `schema`, `ts`, `interval` or `host` | report a bug with the log line |
 | `status=426` | unsupported protocol | stops; update |
 | `status=429` | pushing more often than every 5 s, or too many failed requests from this address | waits `Retry-After` |
 | `status=000` | no answer (network, DNS, proxy, TLS) | backs off from 5 s up to the heartbeat |
 | `status=bad_reply_signature` | a reply the hub did not sign: an impostor, or a proxy that rewrites bodies | treats it as a failure |
+
+A panel that stays empty on one node while the push succeeds can be a group
+the hub left out because a value in it was out of range (a glitched sensor):
+the hub logs `event=api.groups_dropped node=… paths=…` once, and the agent's
+log shows a normal push.

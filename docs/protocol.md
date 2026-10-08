@@ -87,7 +87,8 @@ it like a network error. A `204` has an empty body.
 ### 5.1 `POST /api/v1/agent/push`
 
 - Body: one snapshot (section 6).
-- `200 {"ok": true}` when stored.
+- `200 {"ok": true}` when stored; `200 {"ok": true, "dropped": [...]}` when an
+  optional group failed validation and was left out (rule 7).
 - `429` when the node pushes more often than once per 5 seconds;
   `Retry-After` gives seconds.
 
@@ -184,7 +185,8 @@ Error replies are JSON: `{"error": "<code>", "message": "<text>"}` plus, for
 
 Required: `schema`, `ts`, `interval`, `host`. Every other group is optional
 and may be `null`. Unknown keys are dropped by the hub. Limits apply after
-parsing; a value outside its range fails validation.
+parsing; a value outside its range fails validation: in a required part it
+refuses the snapshot, in an optional group it drops that group (section 4.1, rule 7).
 
 ```jsonc
 {

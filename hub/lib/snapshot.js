@@ -2,9 +2,11 @@
 "use strict";
 /*
  * Snapshots are untrusted input (spec 6.3, docs/protocol.md section 6).
- *   validate(obj) → { ok: true, value } | { ok: false, path }
- *     Numbers must be finite and in range, else the snapshot is refused with
- *     the first failing path. Strings lose control characters and are cut to
+ *   validate(obj) → { ok: true, value, dropped } | { ok: false, path }
+ *     Numbers must be finite and in range. A failure in a required part
+ *     (schema, ts, interval, host) refuses the snapshot with its path; a
+ *     failure in an optional group leaves that group out and adds its first
+ *     failing path to dropped. Strings lose control characters and are cut to
  *     their limit; arrays are cut to theirs; unknown keys are dropped.
  *   view(cur, prev, trend) → what the page reads: the validated snapshot plus
  *     values only the hub derives (network rates, container CPU %, the trend).
