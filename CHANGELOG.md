@@ -7,6 +7,19 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- Alert channels (spec 8.3, 8.4): ntfy and webhooks (JSON, signed with
+  `X-Servitals-Signature` when a secret is set) get each alert at or above
+  their minimum severity. Quiet hours hold warnings (critical always goes
+  through) and send one summary of what still fires when they end; info
+  events go to one digest a day at 07:00. A failed send is tried again after
+  2, 10 and 30 s, then logged as `alert.notify_failed`. Channels live in the
+  state directory's `alerts/channels.json` (mode 0600); a value `$NAME` is read
+  from the environment. `GET` and `POST /__ctl/alerts/channels`, and
+  `POST /__ctl/alerts/channels/test` to send a test. The page's channel
+  settings follow.
+- Outbound proxy (spec 8.4): every call the hub makes goes through
+  `HTTPS_PROXY` / `HTTP_PROXY` from `hub.env` unless `NO_PROXY` says
+  otherwise, with a `CONNECT` tunnel for HTTPS.
 - Alert rules (spec 8.1): the alerts view's "rules" tab changes a default
   rule's threshold, time, clear value and severity, or turns it off; adds
   rules of one's own on any metric the defaults watch, for all servers, one

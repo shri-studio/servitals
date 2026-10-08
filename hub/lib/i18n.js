@@ -244,6 +244,16 @@ const STRINGS = {
   "alert.rule.containerDown": "container down", "alert.rule.failedUnits": "failed units",
   "alert.rule.rebootRequired": "reboot required", "alert.rule.securityUpdates": "security updates",
 
+  // what the alert channels send (the hub's words: hub/lib/notify.js)
+  "notify.title": "{head}: {what} on {node}",
+  "notify.line": "{kind}: {what} on {node}",
+  "notify.value": "value {value}",
+  "notify.since": "since {time}",
+  "notify.summaryTitle": "{n} alerts held during quiet hours",
+  "notify.digestTitle": "daily digest: {n} events",
+  "notify.testTitle": "servitals test",
+  "notify.testText": "This channel works.",
+
   // dialogs
   "dlg.close": "[esc]",
   "dlg.confirm": "confirm",

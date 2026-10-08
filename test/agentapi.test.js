@@ -413,3 +413,44 @@ test("alert rules: a server revoked after it was named stays savable; a new name
     assert.deepStrictEqual([fresh.status, JSON.parse(fresh.body).error], [400, "cpu: override 1: no such server"]);
   }, { CTL_LAN_ONLY: "0" });
 });
+
+test("alert channels: saved from the page with secrets masked; an alert reaches a webhook; send test answers", async () => {
+  const got = [];
+  const dest = require("node:http").createServer((req, res) => {
+    const chunks = [];
+    req.on("data", (c) => chunks.push(c));
+    req.on("end", () => { got.push({ url: req.url, body: JSON.parse(Buffer.concat(chunks).toString()) }); res.writeHead(req.url === "/gone" ? 410 : 200); res.end(); });
+  });
+  await new Promise((r) => dest.listen(0, "127.0.0.1", r));
+  const url = `http://127.0.0.1:${dest.address().port}/hook`;
+  try {
+    await withHub(async (hub, c) => {
+      const cookie = cookieFrom(await login(hub.port));
+      const get = async () => JSON.parse((await request(hub.port, { path: "/__ctl/alerts/channels", headers: { cookie } })).body);
+      const save = (b) => ctlPost(hub.port, cookie, "/__ctl/alerts/channels", JSON.stringify(b));
+      assert.deepStrictEqual((await get()).channels, []);
+      const ch = { id: "ch_w", type: "webhook", name: "hook", min: "warning", on: true, config: { url } };
+      assert.strictEqual((await save({ channels: [ch] })).status, 200);
+      assert.match(hub.logs(), /event=alert\.channels_saved/);
+      assert.deepStrictEqual((await get()).channels[0].config, { url: "********" }, "a webhook URL is a secret");
+      assert.strictEqual(fs.statSync(path.join(hub.dataDir, "alerts", "channels.json")).mode & 0o777, 0o600);
+      assert.strictEqual((await save({ channels: [{ ...ch, config: { url: "********" } }] })).status, 200, "masked: kept");
+      const bad = await save({ channels: [{ ...ch, min: "page" }] });
+      assert.deepStrictEqual([bad.status, JSON.parse(bad.body).error], [400, "hook: min: one of critical, warning, info"]);
+      // reboot_required raised to warning, so it is sent at once
+      assert.strictEqual((await ctlPost(hub.port, cookie, "/__ctl/alerts/rules", JSON.stringify({ rules: [{ id: "reboot_required", severity: "warning" }] }))).status, 200);
+      assert.strictEqual((await signed(hub, c, { body: snap({ ubuntu: { rebootRequired: true } }) })).status, 200);
+      for (let i = 0; i < 50 && !got.length; i++) await new Promise((r) => setTimeout(r, 20));
+      assert.deepStrictEqual([got[0].url, got[0].body.kind], ["/hook", "alert"]);
+      assert.match(got[0].body.title, /^warning: reboot required on \S/);
+      const t = JSON.parse((await ctlPost(hub.port, cookie, "/__ctl/alerts/channels/test", JSON.stringify({ id: "ch_w" }))).body);
+      assert.deepStrictEqual(t, { ok: true });
+      assert.strictEqual(got[1].body.kind, "test");
+      assert.strictEqual((await save({ channels: [{ ...ch, config: { url: url.replace("/hook", "/gone") } }] })).status, 200);
+      assert.deepStrictEqual(JSON.parse((await ctlPost(hub.port, cookie, "/__ctl/alerts/channels/test", JSON.stringify({ id: "ch_w" }))).body), { ok: false, error: "HTTP_410" });
+      assert.strictEqual((await get()).status.ch_w.lastError, "HTTP_410");
+      assert.doesNotMatch(hub.logs(), /127\.0\.0\.1:\d+\/(hook|gone)/, "the hub's log never shows a channel's URL");
+      assert.strictEqual((await request(hub.port, { path: "/__ctl/alerts/channels" })).status, 401);
+    });
+  } finally { dest.close(); }
+});

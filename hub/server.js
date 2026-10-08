@@ -32,6 +32,8 @@ const { view: snapshotView } = require("./lib/snapshot");
 const { createHistory, seriesOf } = require("./lib/history");
 const { createAlerts } = require("./lib/alerts");
 const alertRules = require("./lib/alertrules");
+const { createOutbound } = require("./lib/proxy");
+const { createNotifier } = require("./lib/notify");
 const fleet = require("./lib/fleet");
 const { createAdminStore, USER_RE } = require("./lib/admin");
 const { createLinks } = require("./lib/link");
@@ -191,8 +193,12 @@ const historySweep = () => {
 setInterval(historyFlush, 60000).unref();
 setInterval(historySweep, 86400000).unref();
 historySweep();
-// alerts (spec 8.1): judged on each push and once a minute; events go to the log (channels: 6c)
+// alerts (spec 8.1): judged on each push and once a minute; events go to the log and to
+// the channels the person set (spec 8.3, 8.4), through HTTPS_PROXY when hub.env sets one
 const HUB_START = Date.now();
+const outbound = createOutbound();
+if (outbound.describe().https !== "direct" || outbound.describe().http !== "direct") log.info("outbound.proxy", outbound.describe());
+const notifier = createNotifier({ dir: path.join(DATA, "alerts"), outbound, log });
 // the alert rules the person set (spec 8.1); a file that cannot be read leaves the defaults
 const RULES_F = path.join(DATA, "alerts", "rules.json");
 let savedRules = { rules: [] };
@@ -201,7 +207,10 @@ catch (e) { if (e.code !== "ENOENT") log.warn("alerts.rules_ignored", { error: e
 const alerts = createAlerts(path.join(DATA, "alerts"), {
   rules: alertRules.buildRules(savedRules),
   warn: (event, fields) => log.warn(event, fields),
-  onEvent: (e) => log.info("alert." + e.kind, { rule: e.rule, severity: e.severity, node: e.node, ...(e.sub ? { sub: e.sub } : {}), value: e.value }),
+  onEvent: (e) => {
+    log.info("alert." + e.kind, { rule: e.rule, severity: e.severity, node: e.node, ...(e.sub ? { sub: e.sub } : {}), value: e.value });
+    try { notifier.onEvent(e); } catch (err) { log.warn("alerts.notify_error", { error: err.code || String(err) }); }
+  },
 });
 const nodeName = (id) => { const n = nodes.get(id); return (n && n.name) || id; };
 setInterval(() => {
@@ -212,6 +221,7 @@ setInterval(() => {
       return { id: n.id, name: n.name, tags: n.tags, lastPush: rec ? Math.max(rec.at, HUB_START) : null, interval: rec ? rec.snap.interval : null };
     }));
   } catch (e) { log.warn("alerts.check_failed", { error: e.code || String(e) }); }
+  try { notifier.tick(); } catch (e) { log.warn("alerts.notify_error", { error: e.code || String(e) }); }
 }, 60000).unref();
 const agentApi = createAgentApi({
   nodes, log,
@@ -791,6 +801,23 @@ async function handle(req, res) {
       alerts.setRules(alertRules.buildRules(clean));
       log.audit("alert.rules_saved", { ip, rules: clean.rules.length });
       return json(200, { ok: true });
+    }
+
+    // the alert channels (spec 8.4): secrets come back masked; a save keeps a masked one
+    if (req.method === "GET" && pathname === "/__ctl/alerts/channels") return json(200, notifier.view());
+    if (req.method === "POST" && pathname === "/__ctl/alerts/channels") {
+      let body = null;
+      try { body = JSON.parse(await readBodyN(req, 64 * 1024)); } catch (_) { return json(400, { error: "invalid json" }); }
+      try { notifier.setConfig(body); } catch (e) { return json(e.code ? 500 : 400, { error: e.code ? String(e.code) : e.message }); }
+      log.audit("alert.channels_saved", { ip, channels: notifier.view().channels.length });
+      return json(200, { ok: true });
+    }
+    // "send test": one message, the answer at once
+    if (req.method === "POST" && pathname === "/__ctl/alerts/channels/test") {
+      let body = null;
+      try { body = JSON.parse(await readBodyN(req, 1024)); } catch (_) { return json(400, { error: "invalid json" }); }
+      const id = body && typeof body.id === "string" ? body.id : "";
+      return json(200, await notifier.test(id));
     }
 
     // history (spec 7): ?node=<id>&series=<name>&range=1h|24h|7d|30d|90d, or series=list

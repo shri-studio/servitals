@@ -39,7 +39,7 @@ test("a rule fires only after its condition held for its time, once, and resolve
   c.at(3); a.evaluate(N, disk(92));
   c.at(5); a.evaluate(N, disk(92));
   assert.deepStrictEqual(kinds(events), ["firing:disk_full:/srv"]);
-  assert.deepStrictEqual(events[0], { kind: "firing", rule: "disk_full", severity: "warning", node: N.id, nodeName: "nas",
+  assert.deepStrictEqual(events[0], { kind: "firing", rule: "disk_full", metric: "disk.used", severity: "warning", node: N.id, nodeName: "nas",
     sub: "/srv", value: 92, at: c.t, since: 1790000000000 });
   c.at(6); a.evaluate(N, disk(89));                      // below 90, but not below 88: still firing (hysteresis)
   c.at(7); a.evaluate(N, disk(92));

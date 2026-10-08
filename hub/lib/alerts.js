@@ -124,7 +124,7 @@ function createAlerts(dir, { now = Date.now, onEvent = () => {}, warn = () => {}
   // of an alert whose start was told is always told, mute or not (spec 8.1).
   // (extra: { ended: "rule" } when it ends because its rule no longer holds there, not because it is fixed)
   function tell(kind, inst, r, t, extra) {
-    const e = { kind, rule: inst.rule, ...(r.name ? { name: r.name } : {}), severity: r.severity, node: inst.node, nodeName: inst.nodeName,
+    const e = { kind, rule: inst.rule, ...(r.name ? { name: r.name } : {}), ...(r.metric ? { metric: r.metric } : {}), severity: r.severity, node: inst.node, nodeName: inst.nodeName,
                 ...(inst.sub ? { sub: inst.sub } : {}), value: inst.value, at: t, since: inst.since, ...extra };
     const why = kind === "resolved" ? (inst.notified ? "" : quiet(inst, r, t) || "untold") : quiet(inst, r, t);
     log(why ? { ...e, quiet: why } : e);

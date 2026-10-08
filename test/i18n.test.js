@@ -228,7 +228,8 @@ test("an element tagged data-i18n holds only its text", () => {
 
 test("every key the code asks for is in the dictionary, and every key in it is used", () => {
   const src = [MARKUP, read("js/app.js"), read("js/settings.js"), read("js/history.js"), read("js/alerts.js"),
-               fs.readFileSync(path.join(__dirname, "..", "hub", "server.js"), "utf8")].join("\n");
+               fs.readFileSync(path.join(__dirname, "..", "hub", "server.js"), "utf8"),
+               fs.readFileSync(path.join(__dirname, "..", "hub", "lib", "notify.js"), "utf8")].join("\n");
   const asked = new Set([...src.matchAll(/\btr(?:Html)?\("([^"]+)"/g), ...src.matchAll(/data-i18n(?:-[a-z-]+)?="([^"]+)"/g)].map((m) => m[1]));
   const prefixes = [...asked].filter((k) => k.endsWith("."));
   for (const k of asked) if (!k.endsWith(".")) assert.ok(Object.prototype.hasOwnProperty.call(STRINGS, k), `missing from the dictionary: ${k}`);
