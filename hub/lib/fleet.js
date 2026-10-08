@@ -28,6 +28,7 @@ function summary(v) {
     iowait: v.cpu && typeof v.cpu.iowait === "number" ? v.cpu.iowait : null,
     updates: v.ubuntu && typeof v.ubuntu.updates === "number" ? v.ubuntu.updates : null,
     reboot: !!(v.ubuntu && v.ubuntu.rebootRequired),
+    battery: v.battery && typeof v.battery.capacity === "number" ? v.battery.capacity : null,
     mem,
     temp: v.temp && typeof v.temp.package === "number" ? v.temp.package : null,
     disk: fullest ? { mount: fullest.mount, pct: fullest.pct } : null,

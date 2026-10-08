@@ -107,6 +107,9 @@ function build(s) {
     fans: list(s.fans, 32, "$.fans", (x, q) => obj(x, q, (o) => clean({
       label: str(o.label, 128, `${q}.label`), rpm: num(o.rpm, 0, 1e6, `${q}.rpm`, { optional: false }),
     }), { optional: false })),
+    voltages: list(s.voltages, 32, "$.voltages", (x, q) => obj(x, q, (o) => clean({
+      label: str(o.label, 128, `${q}.label`), value: num(o.value, -1000, 1000, `${q}.value`, { optional: false }),
+    }), { optional: false })),
     battery: obj(s.battery, "$.battery", (b, p) => clean({
       capacity: num(b.capacity, 0, 100, `${p}.capacity`), status: str(b.status, 16, `${p}.status`),
     })),

@@ -26,6 +26,7 @@ test("a card's numbers come from the view", () => {
   assert.strictEqual(summary({ cpu: { usage: 5 } }).iowait, null, "an older agent sends no iowait");
   assert.deepStrictEqual([summary({ ubuntu: { updates: 3, rebootRequired: true } }).updates, summary({ ubuntu: { updates: 3, rebootRequired: true } }).reboot], [3, true]);
   assert.deepStrictEqual([summary({}).updates, summary({}).reboot], [null, false]);
+  assert.deepStrictEqual([summary({ battery: { capacity: 87, status: "Discharging" } }).battery, summary({}).battery], [87, null]);
   assert.strictEqual(s.trend.length, 20);
   assert.strictEqual(summary(null), null);
 });

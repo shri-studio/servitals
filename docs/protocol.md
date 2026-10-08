@@ -206,6 +206,7 @@ parsing; a value outside its range fails validation.
   "temp": { "package": 46, "max": 51,                               // °C, -50..150 or null
             "sensors": [ { "label": "Package id 0", "value": 46 } ] }, // ≤ 64
   "fans": [ { "label": "fan1", "rpm": 1200 } ],                     // ≤ 32
+  "voltages": [ { "label": "Vcore", "value": 1.216 } ],             // V, -1000..1000, ≤ 32
   "battery": { "capacity": 87, "status": "Discharging" },           // % 0..100, status ≤ 16
   "disks": [ { "mount": "/srv", "mounted": true, "source": "/dev/sdb1",
                "model": "WD Red", "fstype": "ext4", "rotational": true,
@@ -251,6 +252,8 @@ Rules that apply to every field:
   `failedUnits` comes from the agent's own host's systemd and is absent where
   it cannot ask (a container agent, no bus, no answer within 5 s). The group
   is null on a host with neither dpkg nor the agent's own systemd.
+- `fans`, `voltages` and `battery` are null on a host without them. A fan is
+  listed when it spins or has a name (boards list empty headers at 0 rpm).
 - `cpu.usage` is time neither idle nor waiting on I/O; `cpu.iowait` is idle
   time with I/O outstanding. A server stuck on its disk shows a low `usage`
   with a high `iowait` and `pressure.io`.

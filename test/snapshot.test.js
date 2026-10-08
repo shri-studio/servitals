@@ -44,6 +44,16 @@ test("processes pass with a cpu share still unknown; names are cut to 64 and lis
   assert.deepStrictEqual(validate(base({ processes: { cpu: [p(1, { rss: -1 })] } })), { ok: false, path: "$.processes.cpu[0].rss" });
 });
 
+test("voltages pass with their label; fans and the battery as before", () => {
+  const r = validate(base({ voltages: [{ label: "Vcore", value: 1.216 }, { label: "-12V", value: -11.9 }],
+    fans: [{ label: "CPU fan", rpm: 1200 }], battery: { capacity: 87, status: "Discharging" } }));
+  assert.ok(r.ok, JSON.stringify(r));
+  assert.deepStrictEqual(r.value.voltages, [{ label: "Vcore", value: 1.216 }, { label: "-12V", value: -11.9 }]);
+  assert.deepStrictEqual(validate(base({ voltages: [{ label: "x", value: 5000 }] })), { ok: false, path: "$.voltages[0].value" });
+  assert.deepStrictEqual(validate(base({ voltages: [{ label: "x" }] })), { ok: false, path: "$.voltages[0].value" });
+  assert.strictEqual(validate(base({ voltages: Array.from({ length: 40 }, () => ({ label: "v", value: 1 })) })).value.voltages.length, 32);
+});
+
 test("the first bad value names its path", () => {
   const cases = [
     [null, "$"], [[1], "$"], [{ ...base(), schema: 2 }, "$.schema"], [{ ...base(), ts: -1 }, "$.ts"],
