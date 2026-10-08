@@ -232,3 +232,69 @@ test("the firing list says why an alert is not told: muted, or held back by its 
   a.mute({ node: N.id, until: c.t + MIN });
   assert.deepStrictEqual(a.firing().map((f) => f.quiet), ["muted", "muted"]);
 });
+
+// rules the person set (spec 8.1): built by hub/lib/alertrules.js
+const { buildRules } = require("../hub/lib/alertrules");
+function setupWith(saved) {
+  const c = { t: 1790000000000, now: () => c.t, at: (m) => { c.t = 1790000000000 + m * MIN; } };
+  const events = [];
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sv-alerts-"));
+  const a = createAlerts(dir, { now: c.now, onEvent: (e) => events.push(e), rules: buildRules({ rules: saved }) });
+  return { c, a, events, dir };
+}
+const LAB = { id: "nodebbbbbbbb", name: "lab-pi", tags: ["lab"] };
+
+test("a rule of one's own: its scope (a server or a tag), its disk, its operator", () => {
+  const { c, a, events } = setupWith([
+    { id: "c_backup", name: "backup", metric: "disk.used", op: ">=", threshold: 70, for: 0, clear: null, severity: "warning", scope: { node: N.id }, sub: "/mnt/b" },
+    { id: "c_cold", name: "cold", metric: "temp", op: "<=", threshold: 5, for: 0, clear: null, severity: "info", scope: { tag: "lab" } },
+  ]);
+  const v = view({ disks: [{ mount: "/", pct: 75 }, { mount: "/mnt/b", pct: 75 }], temp: { package: 3 } });
+  c.at(0); a.evaluate(N, v); a.evaluate(LAB, v);
+  assert.deepStrictEqual(kinds(events).sort(), ["firing:c_backup:/mnt/b", "firing:c_cold"], "only its disk, only its server; only the tagged one is cold");
+  assert.strictEqual(events.find((e) => e.rule === "c_cold").node, LAB.id);
+});
+
+test("overrides: a server's own threshold beats its tag's; off for a server ends its alert, told", () => {
+  const { c, a, events } = setupWith([
+    { id: "memory", for: 0, overrides: [{ tag: "lab", threshold: 50 }, { node: LAB.id, threshold: 70 }, { node: N.id, off: true }] },
+    { id: "disk_full", for: 0, overrides: [{ node: LAB.id, threshold: 80 }] },
+  ]);
+  const mem = (pct, extra) => view({ mem: { total: 100, used: pct }, ...extra });
+  c.at(0); a.evaluate(LAB, mem(60)); a.evaluate(N, mem(99));
+  assert.deepStrictEqual(kinds(events), [], "60 is under the server's own 70; the nas has memory off");
+  a.evaluate(LAB, mem(72, { disks: [{ mount: "/", pct: 81 }] }));
+  assert.deepStrictEqual(kinds(events), ["firing:disk_full:/", "firing:memory"]);
+  a.evaluate(LAB, mem(72, { disks: [{ mount: "/", pct: 79 }] }));
+  assert.deepStrictEqual(kinds(events).slice(2), [], "the clear value moved with the threshold: 88 - 10 = 78");
+  a.evaluate(LAB, mem(72, { disks: [{ mount: "/", pct: 77 }] }));
+  assert.deepStrictEqual(kinds(events).slice(2), ["resolved:disk_full:/"]);
+  a.setRules(buildRules({ rules: [{ id: "memory", overrides: [{ node: LAB.id, off: true }] }] }));
+  a.evaluate(LAB, mem(72));
+  assert.deepStrictEqual(kinds(events).slice(3), ["resolved:memory"], "turned off for the server: the told alert ends told");
+});
+
+test("new rules: a rule removed or turned off ends its alerts at once; a mute names the rules there are", () => {
+  const { c, a, events } = setupWith([{ id: "c_ups", name: "ups", metric: "security_updates", op: ">=", threshold: 1, for: 0, clear: null, severity: "info" }]);
+  c.at(0); a.evaluate(N, view({ ubuntu: { security: 2, rebootRequired: true } }));
+  assert.deepStrictEqual(kinds(events).sort(), ["firing:c_ups", "firing:reboot_required", "firing:security_updates"]);
+  assert.ok(a.ruleIds().includes("c_ups"));
+  a.setRules(buildRules({ rules: [{ id: "reboot_required", off: true }] }));
+  assert.deepStrictEqual(kinds(events).slice(3).sort(), ["resolved:c_ups", "resolved:reboot_required"]);
+  assert.deepStrictEqual(a.firing().map((f) => f.rule), ["security_updates"]);
+  assert.ok(!a.ruleIds().includes("c_ups"));
+  c.at(1); a.evaluate(N, view({ ubuntu: { security: 2, rebootRequired: true } }));
+  assert.deepStrictEqual(a.firing().map((f) => f.rule), ["security_updates"], "off stays off");
+});
+
+test("offline turned off for a server (a laptop, a phone): it is never offline, and an offline alert ends", () => {
+  const { c, a, events } = setupWith([]);
+  c.at(0); a.evaluate(N, view({}));
+  c.at(20); a.check([{ ...N, lastPush: c.t - 15 * MIN, interval: 60 }]);
+  assert.deepStrictEqual(kinds(events), ["firing:offline"]);
+  a.setRules(buildRules({ rules: [{ id: "offline", overrides: [{ tag: "roaming", off: true }] }] }));
+  c.at(21); a.check([{ ...N, tags: ["roaming"], lastPush: c.t - 16 * MIN, interval: 60 }]);
+  assert.deepStrictEqual(kinds(events), ["firing:offline", "resolved:offline"]);
+  c.at(40); a.check([{ ...N, tags: ["roaming"], lastPush: c.t - 35 * MIN, interval: 60 }]);
+  assert.deepStrictEqual(kinds(events), ["firing:offline", "resolved:offline"]);
+});

@@ -30,7 +30,8 @@ const { createNodeStore, localAgentEnv } = require("./lib/nodes");
 const { createAgentApi } = require("./lib/agentapi");
 const { view: snapshotView } = require("./lib/snapshot");
 const { createHistory, seriesOf } = require("./lib/history");
-const { createAlerts, DEFAULT_RULES } = require("./lib/alerts");
+const { createAlerts } = require("./lib/alerts");
+const alertRules = require("./lib/alertrules");
 const fleet = require("./lib/fleet");
 const { createAdminStore, USER_RE } = require("./lib/admin");
 const { createLinks } = require("./lib/link");
@@ -192,7 +193,13 @@ setInterval(historySweep, 86400000).unref();
 historySweep();
 // alerts (spec 8.1): judged on each push and once a minute; events go to the log (channels: 6c)
 const HUB_START = Date.now();
+// the alert rules the person set (spec 8.1); a file that cannot be read leaves the defaults
+const RULES_F = path.join(DATA, "alerts", "rules.json");
+let savedRules = { rules: [] };
+try { savedRules = alertRules.checkRules(JSON.parse(fs.readFileSync(RULES_F, "utf8")), { nodeIds: null }); }
+catch (e) { if (e.code !== "ENOENT") log.warn("alerts.rules_ignored", { error: e.message || String(e) }); }
 const alerts = createAlerts(path.join(DATA, "alerts"), {
+  rules: alertRules.buildRules(savedRules),
   warn: (event, fields) => log.warn(event, fields),
   onEvent: (e) => log.info("alert." + e.kind, { rule: e.rule, severity: e.severity, node: e.node, ...(e.sub ? { sub: e.sub } : {}), value: e.value }),
 });
@@ -202,7 +209,7 @@ setInterval(() => {
     alerts.check(nodes.list().map((n) => {
       const rec = latest.get(n.id);
       // a hub that was down is no reason to page: a node's time runs from the hub's start at the earliest
-      return { id: n.id, name: n.name, lastPush: rec ? Math.max(rec.at, HUB_START) : null, interval: rec ? rec.snap.interval : null };
+      return { id: n.id, name: n.name, tags: n.tags, lastPush: rec ? Math.max(rec.at, HUB_START) : null, interval: rec ? rec.snap.interval : null };
     }));
   } catch (e) { log.warn("alerts.check_failed", { error: e.code || String(e) }); }
 }, 60000).unref();
@@ -215,7 +222,7 @@ const agentApi = createAgentApi({
     const rec = { snap, view: snapshotView(snap, prev && prev.snap, prev ? prev.view.trend : []), at: Date.now() };
     latest.set(id, rec);
     try { history.add(id, seriesOf(rec.view)); } catch (e) { log.warn("history.add_failed", { node: id, error: e.code || String(e) }); }
-    try { alerts.evaluate({ id, name: nodeName(id) }, rec.view); } catch (e) { log.warn("alerts.evaluate_failed", { node: id, error: e.code || String(e) }); }
+    try { alerts.evaluate({ id, name: nodeName(id), tags: (nodes.get(id) || {}).tags || [] }, rec.view); } catch (e) { log.warn("alerts.evaluate_failed", { node: id, error: e.code || String(e) }); }
     try { writeFileAtomic(path.join(SNAP_DIR, id + ".json"), JSON.stringify(rec)); }
     catch (e) { log.warn("api.snapshot_write_failed", { node: id, error: e.code || String(e) }); }
   },
@@ -748,7 +755,7 @@ async function handle(req, res) {
       let body = null;
       try { body = JSON.parse(await readBodyN(req, 1024)); } catch (_) { /* answered below */ }
       const b = body && typeof body === "object" ? body : {};
-      const okRule = typeof b.rule === "string" && DEFAULT_RULES.some((r) => r.id === b.rule);
+      const okRule = typeof b.rule === "string" && alerts.ruleIds().includes(b.rule);
       const okNode = typeof b.node === "string" && !!nodes.get(b.node);
       const YEAR = 366 * 86400000;
       const okFor = b.for === undefined || (typeof b.for === "number" && b.for > 0 && b.for <= YEAR);
@@ -760,6 +767,27 @@ async function handle(req, res) {
       }
       alerts.mute(okRule ? { rule: b.rule, until } : { node: b.node, until });
       log.audit("alert.muted", { ip, ...(okRule ? { rule: b.rule } : { node: b.node }), until });
+      return json(200, { ok: true });
+    }
+
+    // the alert rules (spec 8.1): what is saved, the defaults and the metrics, for the editor
+    if (req.method === "GET" && pathname === "/__ctl/alerts/rules") {
+      return json(200, { saved: savedRules, defaults: alertRules.defaultsForPage(), metrics: alertRules.METRICS });
+    }
+    // save them whole: checked, kept, applied at once. A server named before it was revoked
+    // may stay named; a new one must exist.
+    if (req.method === "POST" && pathname === "/__ctl/alerts/rules") {
+      let body = null;
+      try { body = JSON.parse(await readBodyN(req, 64 * 1024)); } catch (_) { return json(400, { error: "invalid json" }); }
+      const named = savedRules.rules.flatMap((r) => [r.scope && r.scope.node, ...(r.overrides || []).map((o) => o.node)]).filter(Boolean);
+      let clean;
+      try { clean = alertRules.checkRules(body, { nodeIds: [...nodes.list().map((n) => n.id), ...named] }); }
+      catch (e) { return json(400, { error: e.message }); }
+      try { writeFileAtomic(RULES_F, JSON.stringify(clean, null, 2) + "\n"); }
+      catch (e) { return json(500, { error: String(e.code || e) }); }
+      savedRules = clean;
+      alerts.setRules(alertRules.buildRules(clean));
+      log.audit("alert.rules_saved", { ip, rules: clean.rules.length });
       return json(200, { ok: true });
     }
 

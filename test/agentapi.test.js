@@ -341,3 +341,69 @@ test("alerts: a mute runs for a time the hub counts from its own clock; until 0 
     assert.strictEqual((await post({ node: c.id, for: 3600000, until: 0 })).status, 400, "one of the two");
   });
 });
+
+test("alert rules: the page reads and saves them; they apply at once, survive a restart, and a bad set is refused", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sv-api-"));
+  const a = await startHub({}, { dataDir: dir });
+  const c = creds(a);
+  const own = { id: "c_upd", name: "any update", metric: "security_updates", op: ">=", threshold: 1, for: 0, severity: "warning",
+                scope: { node: c.id } };
+  try {
+    const cookie = cookieFrom(await login(a.port));
+    const get = async (p) => JSON.parse((await request(a.port, { path: p, headers: { cookie } })).body);
+    const r0 = await get("/__ctl/alerts/rules");
+    assert.deepStrictEqual(r0.saved, { rules: [] });
+    assert.strictEqual(r0.defaults.find((r) => r.id === "disk_full").for, 5, "minutes");
+    assert.ok(r0.metrics.includes("disk.used") && !r0.metrics.includes("offline"));
+    const save = (body) => ctlPost(a.port, cookie, "/__ctl/alerts/rules", JSON.stringify(body));
+    const refused = await save({ rules: [{ id: "cpu", severity: "page" }] });
+    assert.strictEqual(refused.status, 400);
+    assert.match(JSON.parse(refused.body).error, /severity/);
+    assert.strictEqual((await save({ rules: [own, { id: "reboot_required", off: true }] })).status, 200);
+    assert.match(a.logs(), /event=alert\.rules_saved/);
+    assert.strictEqual((await signed(a, c, { body: snap({ ubuntu: { rebootRequired: true, security: 2 } }) })).status, 200);
+    assert.deepStrictEqual((await get("/__ctl/alerts")).firing.map((f) => f.rule).sort(), ["c_upd", "security_updates"], "applied at once");
+    assert.strictEqual((await ctlPost(a.port, cookie, "/__ctl/alerts/mute", JSON.stringify({ rule: "c_upd", for: 60000 }))).status, 200,
+      "a rule of one's own can be muted");
+    assert.strictEqual((await request(a.port, { path: "/__ctl/alerts/rules" })).status, 401);
+  } finally { await a.stop(); }
+  const b = await startHub({}, { dataDir: dir });
+  try {
+    const cookie = cookieFrom(await login(b.port));
+    const r1 = JSON.parse((await request(b.port, { path: "/__ctl/alerts/rules", headers: { cookie } })).body);
+    assert.deepStrictEqual(r1.saved.rules.map((r) => r.id), ["c_upd", "reboot_required"], "kept");
+    assert.strictEqual((await signed(b, c, { body: snap({ ubuntu: { rebootRequired: true, security: 2 } }) })).status, 200);
+    const f = JSON.parse((await request(b.port, { path: "/__ctl/alerts", headers: { cookie } })).body).firing;
+    assert.ok(!f.some((x) => x.rule === "reboot_required"), "still off after the restart");
+  } finally { await b.stop(); }
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test("alert rules: a rules file that cannot be read leaves the defaults, and says so", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sv-api-"));
+  fs.mkdirSync(path.join(dir, "alerts"), { recursive: true });
+  fs.writeFileSync(path.join(dir, "alerts", "rules.json"), '{"rules":[{"id":"cpu","severity":"page"}]}');
+  const h = await startHub({}, { dataDir: dir });
+  try {
+    assert.match(h.logs(), /event=alerts\.rules_ignored/);
+    const cookie = cookieFrom(await login(h.port));
+    const r = JSON.parse((await request(h.port, { path: "/__ctl/alerts/rules", headers: { cookie } })).body);
+    assert.deepStrictEqual(r.saved, { rules: [] });
+  } finally { await h.stop(); }
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test("alert rules: a server revoked after it was named stays savable; a new name must be a server there is", async () => {
+  await withHub(async (hub) => {
+    const other = JSON.parse(require("node:child_process").execFileSync(process.execPath,
+      [path.join(__dirname, "..", "hub", "lib", "nodes.js"), path.join(hub.dataDir, "nodes.json"), "add", "other"]).toString());
+    const cookie = cookieFrom(await login(hub.port));
+    const save = (body) => ctlPost(hub.port, cookie, "/__ctl/alerts/rules", JSON.stringify(body));
+    const rules = { rules: [{ id: "cpu", overrides: [{ node: other.id, off: true }] }] };
+    assert.strictEqual((await save(rules)).status, 200);
+    assert.strictEqual((await ctlPost(hub.port, cookie, `/__ctl/node/${other.id}/revoke`)).status, 200);
+    assert.strictEqual((await save({ rules: [...rules.rules, { id: "memory", threshold: 80 }] })).status, 200, "the revoked server's override is kept");
+    const fresh = await save({ rules: [{ id: "cpu", overrides: [{ node: "nodecccccccc", off: true }] }] });
+    assert.deepStrictEqual([fresh.status, JSON.parse(fresh.body).error], [400, "rules[0].overrides[0]: no such server"]);
+  }, { CTL_LAN_ONLY: "0" });
+});

@@ -12,7 +12,7 @@
  * (a dropped group, a crashed docker daemon) leaves that group's alerts as they are. An offline node's other alerts are held back.
  * State and mutes live in <dir>/state.json, every event in <dir>/events.jsonl (the
  * alert log, the last 1000).
- *   createAlerts(dir, { now, onEvent, warn }) → { evaluate(node, view), check(nodes),
+ *   createAlerts(dir, { now, onEvent, warn, rules }) → { evaluate(node, view), check(nodes), setRules(rules), ruleIds(),
  *     firing(), recent(n), mute({ rule | node, until }), mutes(), badges(), forget(node), log(event) }
  */
 const fs = require("fs");
@@ -60,6 +60,20 @@ function valuesOf(metric, v, running) {
     case "security_updates": return v.ubuntu && num(v.ubuntu.security) !== null ? [{ sub: "", value: v.ubuntu.security }] : null;
     default: return null;
   }
+}
+
+// a rule as it holds for one node ({ id, tags }): null when it is off, out of its scope, or
+// turned off for the node; else the rule, with the node's override threshold (the clear value
+// moves with it). A node's own override wins over its tag's.
+function forNode(r, node) {
+  if (r.off) return null;
+  const s = r.scope || {}, tags = Array.isArray(node.tags) ? node.tags : [];
+  if ((s.node && s.node !== node.id) || (s.tag && !tags.includes(s.tag))) return null;
+  const ovs = Array.isArray(r.overrides) ? r.overrides : [];
+  const ov = ovs.find((o) => o.node === node.id) || ovs.find((o) => o.tag && tags.includes(o.tag));
+  if (!ov) return r;
+  if (ov.off) return null;
+  return { ...r, threshold: ov.threshold, clear: r.clear === null ? null : r.clear + (ov.threshold - r.threshold) };
 }
 
 function createAlerts(dir, { now = Date.now, onEvent = () => {}, warn = () => {}, rules = DEFAULT_RULES } = {}) {
@@ -146,8 +160,15 @@ function createAlerts(dir, { now = Date.now, onEvent = () => {}, warn = () => {}
     }
   }
 
+  // a rule that no longer holds for a node: its alerts there end (a told one ends told)
+  function endAll(r, node, t) {
+    for (const inst of Object.values(st.instances)) {
+      if (inst.rule === r.id && inst.node === node.id) judge(r, node, inst.sub, null, t);
+    }
+  }
+
   return {
-    // a push from node ({ id, name }): every rule on what it sends; a push ends "offline"
+    // a push from node ({ id, name, tags }): every rule on what it sends; a push ends "offline"
     evaluate(node, v) {
       const t = now();
       // the containers seen running: kept as they were when the push has no containers
@@ -157,10 +178,13 @@ function createAlerts(dir, { now = Date.now, onEvent = () => {}, warn = () => {}
         for (const name of [...run]) if (!v.docker.some((c) => c.name === name)) run.delete(name);   // removed
         st.running[node.id] = [...run];
       }
-      for (const r of rules) {
+      for (const rule of rules) {
+        const r = forNode(rule, node);
+        if (!r) { endAll(rule, node, t); continue; }
         if (r.metric === "offline") { judge(r, node, "", 0, t); continue; }
-        const vals = valuesOf(r.metric, v, run);
+        let vals = valuesOf(r.metric, v, run);
         if (vals === null) continue;   // the push lacks the group: its alerts stay as they are
+        if (r.sub) vals = vals.filter((x) => x.sub === r.sub);
         const seen = new Set(vals.map((x) => x.sub));
         for (const x of vals) judge(r, node, x.sub, x.value, t);
         for (const inst of Object.values(st.instances)) {
@@ -173,11 +197,13 @@ function createAlerts(dir, { now = Date.now, onEvent = () => {}, warn = () => {}
     // firing alerts of nodes that are not offline repeat (nothing else is judged without a push)
     check(nodes) {
       const t = now();
-      const r = rules.find((x) => x.metric === "offline");
+      const off = rules.find((x) => x.metric === "offline");
       for (const n of nodes) {
         if (!n.lastPush) continue;   // waiting for its first push: not offline
         const limit = Math.max(10 * MIN, 5 * (n.interval || 60) * 1000);
+        const r = off && forNode(off, n);
         if (r) judge(r, n, "", t - n.lastPush >= limit ? 1 : 0, t);
+        else if (off) endAll(off, n, t);
         for (const inst of Object.values(st.instances)) {
           if (inst.node !== n.id || inst.state !== "firing" || inst.rule === "offline") continue;
           const rr = rules.find((x) => x.id === inst.rule);
@@ -221,6 +247,21 @@ function createAlerts(dir, { now = Date.now, onEvent = () => {}, warn = () => {}
       }
       return out;
     },
+    // new rules (from the editor): the alerts of a rule removed or turned off end now (a told
+    // one ends told); a change of scope or override applies at each node's next push
+    setRules(list) {
+      const t = now(), old = rules;
+      rules = list;
+      for (const [k, i] of Object.entries(st.instances)) {
+        const r = rules.find((x) => x.id === i.rule);
+        if (r && !r.off) continue;
+        const was = r || old.find((x) => x.id === i.rule);
+        if (was && i.state === "firing") tell("resolved", i, was, t);
+        delete st.instances[k];
+      }
+      save();
+    },
+    ruleIds() { return rules.map((r) => r.id); },
     // a revoked node: its told alerts end told
     forget(node) {
       const t = now();
@@ -237,4 +278,4 @@ function createAlerts(dir, { now = Date.now, onEvent = () => {}, warn = () => {}
   };
 }
 
-module.exports = { createAlerts, DEFAULT_RULES, valuesOf };
+module.exports = { createAlerts, DEFAULT_RULES, valuesOf, forNode };
