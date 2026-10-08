@@ -67,6 +67,11 @@ code=$(curl -s -o /dev/null -w '%{http_code}' -c "$jar" -H "Origin: $BASE" -X PO
 grep -q sv_session "$jar" || fail "no sv_session cookie"
 
 # capture first: `curl | grep -q` fails under pipefail when grep exits early
+# the page comes through the gateway from the web container, which may still be starting (502)
+for _ in $(seq 1 30); do
+  curl -fsS -b "$jar" "$BASE/" >/dev/null 2>&1 && break
+  sleep 1
+done
 page=$(curl -fsS -b "$jar" "$BASE/")
 grep -q '<title>servitals</title>' <<<"$page" || fail "page not served through nginx"
 
