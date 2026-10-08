@@ -603,3 +603,73 @@ test("review: boot.js runs in <head> before the stylesheet, synchronously; app.j
   assert.ok(boot < head.indexOf('<link rel="stylesheet" href="app.css">'), "before the stylesheet: the look is set before the first paint");
   assert.match(head, /<script src="js\/app\.js" defer><\/script>/);
 });
+
+test("history chart: a busy container above 100 % stays on the chart, a lone point shows, a missed heartbeat minute is not a gap", () => {
+  const esc = (x) => String(x);
+  const historyChart = pageFn("historyChart", { esc, fmtKind: (k, v) => (v == null ? "–" : v + "%"), fmtTimeOrDay: () => "" });
+  assert.match(historyChart([[0, 250, 200, 300], [60, 100, 90, 110]], "pct", "1h"), /<span>300%<\/span><span>0%<\/span>/, "scale reaches the highest");
+  const lone = historyChart([[0, null, null, null], [60, 50, 50, 50], [120, null, null, null]], "pct", "1h");
+  assert.match(lone, /<polyline class="hline" vector-effect="non-scaling-stroke" points="250\.0,100\.0 750\.0,100\.0"\/>/, "a lone point: a short segment");
+  const jitter = [[0, 10, 10, 10], [60, 20, 20, 20], [120, null, null, null], [180, 30, 30, 30], [240, 40, 40, 40]];
+  const bridged = historyChart(jitter, "pct", "1h", 1);
+  assert.strictEqual((bridged.match(/<polyline/g) || []).length, 1, "one missed minute: one line");
+  assert.doesNotMatch(bridged, /hgap/);
+  assert.strictEqual((historyChart(jitter, "pct", "1h", 0).match(/<polyline/g) || []).length, 2, "no bridge: two runs");
+  const outage = [[0, 10, 10, 10], [60, null, null, null], [120, null, null, null], [180, 30, 30, 30]];
+  assert.match(historyChart(outage, "pct", "1h", 1), /hgap/, "longer than a heartbeat: a gap");
+});
+
+// history.js run with stubbed DOM and fetch: answers arrive when the test says so
+function historyHarness(fetchImpl, store = {}) {
+  const els = {};
+  const el = (sel) => (els[sel] = els[sel] || { innerHTML: "", textContent: "", value: "", classList: { toggle() {} } });
+  const src = fs.readFileSync(path.join(__dirname, "..", "www", "js", "history.js"), "utf8");
+  const env = { lsGet: (k) => store[k] ?? null, lsSet: (k, v) => { store[k] = v; }, $: el, $$: () => [], fetch: fetchImpl,
+    esc: (x) => String(x), tr: (k, v) => k + (v ? ":" + JSON.stringify(v) : ""), STRINGS: {}, fmtShare: (v) => v + "%", fmtTemp: String, fmtRate: String, fmtBytes: String,
+    fmtTime: () => "", currentNode: "nodeaaaaaaaa", localNode: "nodeaaaaaaaa", lastData: { interval: 60 } };
+  const api = new Function(...Object.keys(env), `${src}; return { loadHistory, histState };`)(...Object.values(env));
+  return { ...api, els };
+}
+const later = () => { let done; const p = new Promise((r) => { done = r; }); return { p, done }; };
+const answer = (body) => ({ ok: true, json: async () => body });
+
+test("history: a late answer never draws over a newer one", async () => {
+  const pending = [];
+  const tick = () => new Promise((r) => setImmediate(r));
+  const h = historyHarness((url) => { const l = later(); pending.push({ url, l }); return l.p; }, { "hist.range": "7d" });
+  const first = h.loadHistory(true);
+  pending[0].l.done(answer({ series: ["cpu"] }));          // the list
+  await tick();
+  assert.match(pending[1].url, /range=7d/);
+  h.histState.range = "24h";                                 // the user picks 24h while 7d is on its way
+  const second = h.loadHistory(true);
+  await tick();
+  pending[2].l.done(answer({ series: ["cpu"] }));          // the second load's list (asked every time)
+  await tick();
+  const newer = pending.find((x) => /range=24h/.test(x.url));
+  newer.l.done(answer({ step: 60, points: [[0, 2, 2, 2]] }));
+  await second;
+  pending[1].l.done(answer({ step: 600, points: [[0, 9, 9, 9]] }));   // the stale 7d answer, last
+  await first;
+  assert.match(h.els["#hist-note"].textContent, /"avg":"2%"/);
+  assert.doesNotMatch(h.els["#hist-note"].textContent + h.els["#hist-chart"].innerHTML, /9%/, "the stale answer is never drawn");
+});
+
+test("history: a series list that failed is asked again; a container past 24 h shows its 24 h", async () => {
+  const urls = [];
+  let listOk = false;
+  const h = historyHarness(async (url) => {
+    urls.push(url);
+    if (/series=list/.test(url)) return listOk ? answer({ series: ["cpu", "ctr.web.cpu"] }) : { ok: false, json: async () => ({}) };
+    return answer({ step: 60, points: [[0, 1, 1, 1]] });
+  }, { "hist.range": "7d", "hist.series": "ctr.web.cpu" });
+  await h.loadHistory(true);
+  assert.strictEqual((h.els["#hist-series"] || { innerHTML: "" }).innerHTML, "", "no list: an empty picker");
+  listOk = true;
+  await h.loadHistory(false);                               // the next tick: the list again
+  assert.match(h.els["#hist-series"].innerHTML, /ctr\.web\.cpu/);
+  assert.match(urls.at(-1), /series=ctr\.web\.cpu&range=24h/, "containers keep 24 h");
+  assert.match(h.els["#hist-note"].textContent, /hist\.ctr24/);
+  const bad = historyHarness(async () => answer({ series: [] }), { "hist.range": "2h" });
+  assert.strictEqual(bad.histState.range, "24h", "a stored range it does not know: 24h");
+});

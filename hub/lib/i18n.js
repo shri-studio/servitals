@@ -177,6 +177,7 @@ const STRINGS = {
   "hist.io.read": "{device} read", "hist.io.write": "{device} write",
   "hist.ctr.cpu": "{name} cpu", "hist.ctr.mem": "{name} memory",
   "hist.empty": "no history yet",
+  "hist.ctr24": "containers keep 24 hours",
   "hist.summary": "avg {avg} · low {lo} · high {hi}",
 
   // dialogs
