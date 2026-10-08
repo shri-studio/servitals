@@ -7,19 +7,26 @@
    and POST /__ctl/alerts/rules. Loaded by openAlerts() in app.js on first use. */
 const ALERT_SEV = ["critical", "warning", "info"];
 let alertsSeq = 0;
+// each rule's name (a rule of one's own) and metric, from GET /__ctl/alerts: { id: { name?, metric } }
+let alertRuleInfo = {};
+const DEFAULT_METRIC = { disk_full: "disk.used", disk_critical: "disk.used", memory: "mem", cpu: "cpu", temperature: "temp",
+  failed_units: "failed_units", security_updates: "security_updates" };
 
 // a rule in words: the default rules from the dictionary (disk_full is alert.rule.diskFull),
-// any other by its id
+// one's own by its name, any other by its id
 function ruleLabel(id) {
   const k = String(id).replace(/_([a-z])/g, (m, c) => c.toUpperCase());
-  return STRINGS["alert.rule." + k] ? tr("alert.rule." + k) : id;
+  if (STRINGS["alert.rule." + k]) return tr("alert.rule." + k);
+  const info = alertRuleInfo[id];
+  return info && info.name ? info.name : id;
 }
-// an alert's value in its unit; rules that are only true or false show none
+// an alert's value in its metric's unit; true-or-false metrics show none
 function alertValue(rule, v) {
   if (v == null || !Number.isFinite(Number(v))) return "";
-  if (/^disk_|^memory$|^cpu$/.test(rule)) return fmtShare(v);
-  if (rule === "temperature") return fmtTemp(v, true);
-  if (rule === "failed_units" || rule === "security_updates") return String(v);
+  const m = (alertRuleInfo[rule] && alertRuleInfo[rule].metric) || DEFAULT_METRIC[rule];
+  if (m === "disk.used" || m === "mem" || m === "cpu") return fmtShare(v);
+  if (m === "temp") return fmtTemp(v, true);
+  if (m === "failed_units" || m === "security_updates") return String(v);
   return "";
 }
 // a time: the clock today, the date and the clock before
@@ -28,7 +35,7 @@ function alertWhen(t) {
   return d.toDateString() === new Date().toDateString() ? fmtTime(d) : d.toLocaleDateString(undefined, { month: "short", day: "numeric" }) + " " + fmtTime(d);
 }
 const sevTag = sev => `<span class="asev ${esc(sev)}">${esc(tr("alert.sev." + (ALERT_SEV.includes(sev) ? sev : "info")))}</span>`;
-const alertWhat = a => esc(ruleLabel(a.rule)) + (a.sub ? ` <span class="asub">${esc(a.sub)}</span>` : "");
+const alertWhat = a => esc(a.name || ruleLabel(a.rule)) + (a.sub ? ` <span class="asub">${esc(a.sub)}</span>` : "");
 
 // the whole view from one answer of GET /__ctl/alerts
 function alertsHtml(d, names) {
@@ -60,7 +67,7 @@ function alertsHtml(d, names) {
   const recent = Array.isArray(d.recent) ? d.recent : [];
   h += `<section><label>${esc(tr("alerts.recent"))}</label>`;
   h += recent.length ? recent.map(e => `<div class="arow">${sevTag(e.severity)}`
-    + `<span class="awhat">${esc(tr("alert.kind." + (e.kind === "resolved" || e.kind === "repeat" ? e.kind : "firing")))}: ${alertWhat(e)} `
+    + `<span class="awhat">${esc(e.ended ? tr("alert.kind.ended") : tr("alert.kind." + (e.kind === "resolved" || e.kind === "repeat" ? e.kind : "firing")))}: ${alertWhat(e)} `
     + `<b>${esc(alertValue(e.rule, e.value))}</b></span>`
     + `<span class="anode">${esc(e.nodeName || e.node)}</span>`
     + `<span class="asince">${esc(alertWhen(e.at))}</span>`
@@ -80,6 +87,7 @@ async function loadAlerts() {
   if (seq !== alertsSeq) return;
   if (!d) { $("#alerts-body").innerHTML = `<div class="muted">${esc(tr("alerts.failed"))}</div>`; return; }
   const names = Object.fromEntries(fleetNodes.map(n => [n.id, n.name]));
+  alertRuleInfo = d.rules && typeof d.rules === "object" ? d.rules : {};
   $("#alerts-body").innerHTML = alertsHtml(d, names);
 }
 
@@ -102,6 +110,7 @@ async function muteAlert(kind, id, ms) {
 // severity, on, scope ("", "node:<id>", "tag:<tag>"), sub, overrides: [{ who, threshold, off }] }
 const rulesState = { defaults: [], metrics: [], rows: [], dirty: false };
 const YESNO = ["reboot_required", "container.down"];   // true or false: no threshold to set
+const USUAL = { "disk.used": 90, mem: 90, cpu: 95, temp: 85 };   // a new metric's threshold (counts and yes-no: 1)
 const metricLabel = m => tr("alert.metric." + String(m).replace(/[._]([a-z])/g, (x, c) => c.toUpperCase()));
 const metricUnit = m => (/^(disk\.used|mem|cpu)$/.test(m) ? "%" : m === "temp" ? tempUnit() : "");
 // a temperature rule is kept in °C and shown (and typed) in the page's unit
@@ -200,8 +209,8 @@ function rulesHtml(rows) {
     row += "</div>";
     row += r.overrides.map((o, j) => `<div class="rov" data-o="${j}"><span>${esc(tr("rules.overrideFor"))}</span>`
       + `<select data-of="who" aria-label="${esc(tr("rules.overrideWho"))}">${opts(known(o.who), o.who)}</select>`
-      + (offline ? "" : `<input type="number" step="any" class="rnum" data-of="threshold" value="${numVal(shown(r.metric, o.threshold))}"${o.off ? " disabled" : ""} aria-label="${esc(tr("rules.threshold"))}">`)
-      + `<label><input type="checkbox" data-of="off"${o.off || offline ? " checked" : ""}${offline ? " disabled" : ""}> ${esc(tr("rules.off"))}</label>`
+      + (offline || yesno ? "" : `<input type="number" step="any" class="rnum" data-of="threshold" value="${numVal(shown(r.metric, o.threshold))}"${o.off ? " disabled" : ""} aria-label="${esc(tr("rules.threshold"))}">`)
+      + `<label><input type="checkbox" data-of="off"${o.off || offline || yesno ? " checked" : ""}${offline || yesno ? " disabled" : ""}> ${esc(tr("rules.off"))}</label>`
       + `<button data-act="rmov">${esc(tr("rules.remove"))}</button></div>`).join("");
     if (targets.length) row += `<div class="rov"><button data-act="addov">${esc(tr("rules.addOverride"))}</button></div>`;
     return row + "</div>";
@@ -226,11 +235,12 @@ function readRules() {
       if (!ov) continue;
       ov.who = o.querySelector("[data-of=who]").value;
       const off = o.querySelector("[data-of=off]");
-      ov.off = r.metric === "offline" || (off ? off.checked : false);
+      ov.off = r.metric === "offline" || YESNO.includes(r.metric) || (off ? off.checked : false);
       const th = o.querySelector("[data-of=threshold]");
       ov.threshold = ov.off || !th ? null : typed(r.metric, num(th.value));
     }
     if (YESNO.includes(r.metric)) { r.threshold = 1; r.op = ">="; r.clear = null; }
+    if (r.own && !/^(disk\.used|container\.down)$/.test(r.metric)) r.sub = "";
     if (r.op === "==") r.clear = null;
   }
 }
@@ -275,7 +285,10 @@ function rulesAction(act, i, j) {
                 clear: null, severity: "warning", on: true, scope: "", sub: "", overrides: [] });
   }
   if (act === "remove") rows.splice(i, 1);
-  if (act === "addov") rows[i].overrides.push({ who: rulesTargets()[0][0], threshold: rows[i].metric === "offline" ? null : rows[i].threshold, off: rows[i].metric === "offline" });
+  if (act === "addov") {
+    const only = rows[i].metric === "offline" || YESNO.includes(rows[i].metric);   // these can only be turned off
+    rows[i].overrides.push({ who: rulesTargets()[0][0], threshold: only ? null : rows[i].threshold, off: only });
+  }
   if (act === "rmov") rows[i].overrides.splice(j, 1);
   if (act === "revert") { rulesState.dirty = false; loadRules(true); return; }
   rulesState.dirty = true;
@@ -302,9 +315,16 @@ function initAlerts() {
     rulesAction(b.dataset.act, row ? Number(row.dataset.i) : -1, ov ? Number(ov.dataset.o) : -1);
   };
   // a change that alters the form's shape (metric, operator, on, off) draws it again
+  // every change is read at once (a tab change keeps it); one that alters the form's shape
+  // draws it again, and a new metric starts from its usual threshold
   $("#rules-body").onchange = e => {
     rulesState.dirty = true;
-    if (e.target.matches("[data-f=metric], [data-f=op], [data-f=on], [data-of=off]")) { readRules(); drawRules(); }
+    readRules();
+    if (e.target.matches("[data-f=metric]")) {
+      const el = e.target.closest(".rule"), r = el && rulesState.rows[Number(el.dataset.i)];
+      if (r) Object.assign(r, { op: ">=", threshold: USUAL[r.metric] ?? 1, clear: null, sub: "" });
+    }
+    if (e.target.matches("[data-f=metric], [data-f=op], [data-f=on], [data-of=off]")) drawRules();
   };
   $("#alerts-body").onclick = e => {
     const b = e.target.closest("button[data-mute], button[data-unmute]");

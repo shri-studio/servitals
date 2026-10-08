@@ -747,7 +747,7 @@ async function handle(req, res) {
 
     // alerts (spec 8): what is firing, and the last events
     if (req.method === "GET" && pathname === "/__ctl/alerts") {
-      return json(200, { firing: alerts.firing(), recent: alerts.recent(50), mutes: alerts.mutes() });
+      return json(200, { firing: alerts.firing(), recent: alerts.recent(50), mutes: alerts.mutes(), rules: alerts.ruleInfo() });
     }
     // mute a rule or a node for a time (ms, counted from the hub's clock, at most a year), or
     // until a time (ms since 1970; at most a year ahead); now or earlier (0) unmutes
@@ -755,7 +755,9 @@ async function handle(req, res) {
       let body = null;
       try { body = JSON.parse(await readBodyN(req, 1024)); } catch (_) { /* answered below */ }
       const b = body && typeof body === "object" ? body : {};
-      const okRule = typeof b.rule === "string" && alerts.ruleIds().includes(b.rule);
+      // a rule there is; an unmute also for one removed since (its mute went with it)
+      const unmute = b.for === undefined && Number(b.until) <= Date.now();
+      const okRule = typeof b.rule === "string" && (alerts.ruleIds().includes(b.rule) || (unmute && /^[a-z0-9_]{1,32}$/.test(b.rule)));
       const okNode = typeof b.node === "string" && !!nodes.get(b.node);
       const YEAR = 366 * 86400000;
       const okFor = b.for === undefined || (typeof b.for === "number" && b.for > 0 && b.for <= YEAR);

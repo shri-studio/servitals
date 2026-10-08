@@ -816,7 +816,8 @@ function rulesScope(extra = {}) {
     units: () => ({ temp: "c" }), tempUnit: () => "°C", fleetNodes: [], $: () => ({}), $$: () => [], toast() {}, fetch: async () => answer({}),
     loadNodes: async () => {}, renderFleetIfShown() {}, ...extra };
   const src = fs.readFileSync(path.join(__dirname, "..", "www", "js", "alerts.js"), "utf8");
-  const api = new Function(...Object.keys(env), "tr", `${src}; return { rulesRows, rulesFile, rulesHtml, readRules, saveRules, rulesAction, rulesState, shown, typed };`)(...Object.values(env), tr);
+  const api = new Function(...Object.keys(env), "tr", `${src}; return { rulesRows, rulesFile, rulesHtml, readRules, saveRules, rulesAction, rulesState, shown, typed, initAlerts,
+    alertsHtmlWith: (info, d) => { alertRuleInfo = info; return alertsHtml(d, {}); } };`)(...Object.values(env), tr);
   api.rulesState.defaults = JSON.parse(JSON.stringify(defaultsForPage()));
   api.rulesState.metrics = require("../hub/lib/alertrules").METRICS;
   return api;
@@ -922,4 +923,39 @@ test("rule editor: save sends the file and shows what the hub refused; add, remo
 test("the alerts view has a rules tab", () => {
   for (const id of ["alerts-tab-list", "alerts-tab-rules", "alerts-list", "rules-body"]) assert.ok(HTML.includes(`id="${id}"`), id);
   assert.match(JS, /\$\("#alerts-tab-rules"\)\.onclick = \(\) => showRulesTab\(true\);/);
+});
+
+test("alerts view: a rule of one's own shows by its name and its metric's unit; an alert ended by a rule change says so", () => {
+  const s = rulesScope({ fmtShare: (v) => v + "%" });
+  const html = s.alertsHtmlWith({ c_b: { name: "backup <disk>", metric: "disk.used" }, cpu: { metric: "cpu" } }, {
+    firing: [{ rule: "c_b", name: "backup <disk>", severity: "warning", node: "n", nodeName: "nas", value: 71, since: 0, sub: "/b" }],
+    mutes: { rules: { c_b: Date.now() + 1 }, nodes: {} },
+    recent: [{ kind: "resolved", rule: "c_gone", name: "old rule", severity: "info", node: "n", nodeName: "nas", at: 0, ended: "rule" }] });
+  assert.match(html, /<span class="awhat">backup &#60;disk&#62; <span class="asub">\/b<\/span> <b>71%<\/b>/);
+  assert.match(html, /rule: backup &#60;disk&#62;/, "the mutes list names it too");
+  assert.match(html, /no longer watched: old rule/);
+});
+
+test("rule editor: what is typed survives a tab change; a metric change resets what no longer fits; true-or-false overrides only turn off", () => {
+  const els = {};
+  let form = [];
+  const s = rulesScope({ $: (sel) => (els[sel] = els[sel] || { innerHTML: "", classList: { toggle() {} } }), $$: () => form,
+    fleetNodes: [{ id: "nodeaaaaaaaa", name: "nas", tags: [] }] });
+  s.rulesState.rows = s.rulesRows({ rules: [{ id: "c_b", name: "b", metric: "disk.used", op: "<=", threshold: 20, for: 0, clear: 30,
+    severity: "info", sub: "/b", scope: {} }] }, s.rulesState.defaults);
+  const own = s.rulesState.rows.length - 1;
+  s.initAlerts();
+  const cpu = s.rulesState.rows.findIndex((r) => r.id === "cpu");
+  form = [fakeRule(cpu, { on: true, threshold: "80", for: "15", clear: "", severity: "warning" })];
+  els["#rules-body"].onchange({ target: { matches: () => false, closest: () => null } });
+  assert.strictEqual(s.rulesState.rows[cpu].threshold, 80, "read as it is typed, not only on a redraw");
+  form = [fakeRule(own, { on: true, name: "b", metric: "mem", op: "<=", threshold: "20", for: "0", clear: "30", severity: "info", scope: "" })];
+  els["#rules-body"].onchange({ target: { matches: (q) => q.includes("[data-f=metric]") && true, dataset: { f: "metric" }, closest: () => ({ dataset: { i: String(own) } }) } });
+  assert.deepStrictEqual(["metric", "op", "threshold", "clear", "sub"].map((k) => s.rulesState.rows[own][k]), ["mem", ">=", 90, null, ""],
+    "a new metric: its usual threshold, no clear value, no disk");
+  const rb = s.rulesState.rows.findIndex((r) => r.id === "reboot_required");
+  s.rulesAction("addov", rb);
+  assert.deepStrictEqual(s.rulesState.rows[rb].overrides, [{ who: "node:nodeaaaaaaaa", threshold: null, off: true }]);
+  assert.match(s.rulesHtml(s.rulesState.rows).split('<div class="rule')[rb + 1], /data-of="off" checked disabled/);
+  assert.doesNotMatch(s.rulesHtml(s.rulesState.rows).split('<div class="rule')[rb + 1], /data-of="threshold"/);
 });

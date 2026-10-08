@@ -122,9 +122,10 @@ function createAlerts(dir, { now = Date.now, onEvent = () => {}, warn = () => {}
   const quiet = (inst, r, t) => (muted(inst, t) ? "muted" : r.id !== "offline" && offline(inst.node) ? "offline" : "");
   // an event: always in the log (with why it stayed quiet); passed on unless quiet. The end
   // of an alert whose start was told is always told, mute or not (spec 8.1).
-  function tell(kind, inst, r, t) {
-    const e = { kind, rule: inst.rule, severity: r.severity, node: inst.node, nodeName: inst.nodeName,
-                ...(inst.sub ? { sub: inst.sub } : {}), value: inst.value, at: t, since: inst.since };
+  // (extra: { ended: "rule" } when it ends because its rule no longer holds there, not because it is fixed)
+  function tell(kind, inst, r, t, extra) {
+    const e = { kind, rule: inst.rule, ...(r.name ? { name: r.name } : {}), severity: r.severity, node: inst.node, nodeName: inst.nodeName,
+                ...(inst.sub ? { sub: inst.sub } : {}), value: inst.value, at: t, since: inst.since, ...extra };
     const why = kind === "resolved" ? (inst.notified ? "" : quiet(inst, r, t) || "untold") : quiet(inst, r, t);
     log(why ? { ...e, quiet: why } : e);
     if (!why) onEvent(e);
@@ -154,18 +155,36 @@ function createAlerts(dir, { now = Date.now, onEvent = () => {}, warn = () => {}
     if (!holds) { delete st.instances[key]; return; }
     if (inst.state === "ok") { inst.state = "pending"; inst.since = t; }
     if (t - inst.since >= r.for) {
-      inst.state = "firing"; inst.firedAt = t;
+      inst.state = "firing"; inst.firedAt = t; inst.severity = r.severity;
       inst.notified = tell("firing", inst, r, t);
       if (inst.notified) inst.lastNotified = t;
     }
   }
 
-  // a rule that no longer holds for a node: its alerts there end (a told one ends told)
-  function endAll(r, node, t) {
-    for (const inst of Object.values(st.instances)) {
-      if (inst.rule === r.id && inst.node === node.id) judge(r, node, inst.sub, null, t);
-    }
+  // an alert whose rule no longer holds: it ends (a told one ends told, saying why)
+  function end(k, r, t) {
+    const i = st.instances[k];
+    if (i.state === "firing") tell("resolved", i, r, t, { ended: "rule" });
+    delete st.instances[k];
   }
+  // a rule that no longer holds for a node: its alerts there end
+  function endAll(r, node, t) {
+    for (const [k, i] of Object.entries(st.instances)) if (i.rule === r.id && i.node === node.id) end(k, r, t);
+  }
+  // the alerts of a rule removed or turned off end; the mutes of a rule removed go. Also at a
+  // start, for a rules file that lost a rule while the hub was down.
+  function prune(old) {
+    const t = now();
+    for (const [k, i] of Object.entries(st.instances)) {
+      const r = rules.find((x) => x.id === i.rule);
+      if (r && !r.off) continue;
+      end(k, r || old.find((x) => x.id === i.rule) || { severity: i.severity || "warning" }, t);
+    }
+    for (const id of Object.keys(st.mutes.rules)) if (!rules.some((r) => r.id === id)) delete st.mutes.rules[id];
+  }
+
+  prune([]);
+  save();
 
   return {
     // a push from node ({ id, name, tags }): every rule on what it sends; a push ends "offline"
@@ -204,10 +223,16 @@ function createAlerts(dir, { now = Date.now, onEvent = () => {}, warn = () => {}
         const r = off && forNode(off, n);
         if (r) judge(r, n, "", t - n.lastPush >= limit ? 1 : 0, t);
         else if (off) endAll(off, n, t);
-        for (const inst of Object.values(st.instances)) {
+        // its other firing alerts: one whose rule no longer holds there ends; the rest repeat,
+        // unless the node stopped pushing (with offline off for it, nothing else says so)
+        const stale = t - n.lastPush >= limit;
+        for (const [k, inst] of Object.entries(st.instances)) {
           if (inst.node !== n.id || inst.state !== "firing" || inst.rule === "offline") continue;
           const rr = rules.find((x) => x.id === inst.rule);
-          if (rr) retell(inst, rr, t);
+          if (!rr) continue;
+          const eff = forNode(rr, n);
+          if (!eff) end(k, rr, t);
+          else if (!stale) retell(inst, eff, t);
         }
       }
       save();
@@ -217,7 +242,7 @@ function createAlerts(dir, { now = Date.now, onEvent = () => {}, warn = () => {}
       const t = now();
       return Object.values(st.instances).filter((i) => i.state === "firing").map((i) => {
         const r = rules.find((x) => x.id === i.rule) || {};
-        return { rule: i.rule, severity: r.severity, node: i.node, nodeName: i.nodeName, sub: i.sub, value: i.value,
+        return { rule: i.rule, ...(r.name ? { name: r.name } : {}), severity: r.severity, node: i.node, nodeName: i.nodeName, sub: i.sub, value: i.value,
                  since: i.since, firedAt: i.firedAt, muted: muted(i, t), quiet: quiet(i, r, t) };
       });
     },
@@ -250,18 +275,14 @@ function createAlerts(dir, { now = Date.now, onEvent = () => {}, warn = () => {}
     // new rules (from the editor): the alerts of a rule removed or turned off end now (a told
     // one ends told); a change of scope or override applies at each node's next push
     setRules(list) {
-      const t = now(), old = rules;
+      const old = rules;
       rules = list;
-      for (const [k, i] of Object.entries(st.instances)) {
-        const r = rules.find((x) => x.id === i.rule);
-        if (r && !r.off) continue;
-        const was = r || old.find((x) => x.id === i.rule);
-        if (was && i.state === "firing") tell("resolved", i, was, t);
-        delete st.instances[k];
-      }
+      prune(old);
       save();
     },
     ruleIds() { return rules.map((r) => r.id); },
+    // what the page needs to name an alert: { id: { name?, metric } }
+    ruleInfo() { return Object.fromEntries(rules.map((r) => [r.id, r.name ? { name: r.name, metric: r.metric } : { metric: r.metric }])); },
     // a revoked node: its told alerts end told
     forget(node) {
       const t = now();

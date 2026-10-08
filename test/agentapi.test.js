@@ -365,13 +365,19 @@ test("alert rules: the page reads and saves them; they apply at once, survive a 
     assert.deepStrictEqual((await get("/__ctl/alerts")).firing.map((f) => f.rule).sort(), ["c_upd", "security_updates"], "applied at once");
     assert.strictEqual((await ctlPost(a.port, cookie, "/__ctl/alerts/mute", JSON.stringify({ rule: "c_upd", for: 60000 }))).status, 200,
       "a rule of one's own can be muted");
+    const al = JSON.parse((await request(a.port, { path: "/__ctl/alerts", headers: { cookie } })).body);
+    assert.deepStrictEqual(al.rules.c_upd, { name: "any update", metric: "security_updates" }, "the page can name a rule of one's own");
+    assert.strictEqual(al.firing.find((f) => f.rule === "c_upd").name, "any update");
+    // a mute that outlives its rule can still be undone
+    assert.strictEqual((await save({ rules: [{ id: "reboot_required", off: true }] })).status, 200);
+    assert.strictEqual((await ctlPost(a.port, cookie, "/__ctl/alerts/mute", JSON.stringify({ rule: "c_upd", until: 0 }))).status, 200);
     assert.strictEqual((await request(a.port, { path: "/__ctl/alerts/rules" })).status, 401);
   } finally { await a.stop(); }
   const b = await startHub({}, { dataDir: dir });
   try {
     const cookie = cookieFrom(await login(b.port));
     const r1 = JSON.parse((await request(b.port, { path: "/__ctl/alerts/rules", headers: { cookie } })).body);
-    assert.deepStrictEqual(r1.saved.rules.map((r) => r.id), ["c_upd", "reboot_required"], "kept");
+    assert.deepStrictEqual(r1.saved.rules.map((r) => r.id), ["reboot_required"], "kept");
     assert.strictEqual((await signed(b, c, { body: snap({ ubuntu: { rebootRequired: true, security: 2 } }) })).status, 200);
     const f = JSON.parse((await request(b.port, { path: "/__ctl/alerts", headers: { cookie } })).body).firing;
     assert.ok(!f.some((x) => x.rule === "reboot_required"), "still off after the restart");
@@ -404,6 +410,6 @@ test("alert rules: a server revoked after it was named stays savable; a new name
     assert.strictEqual((await ctlPost(hub.port, cookie, `/__ctl/node/${other.id}/revoke`)).status, 200);
     assert.strictEqual((await save({ rules: [...rules.rules, { id: "memory", threshold: 80 }] })).status, 200, "the revoked server's override is kept");
     const fresh = await save({ rules: [{ id: "cpu", overrides: [{ node: "nodecccccccc", off: true }] }] });
-    assert.deepStrictEqual([fresh.status, JSON.parse(fresh.body).error], [400, "rules[0].overrides[0]: no such server"]);
+    assert.deepStrictEqual([fresh.status, JSON.parse(fresh.body).error], [400, "cpu: override 1: no such server"]);
   }, { CTL_LAN_ONLY: "0" });
 });

@@ -22,6 +22,7 @@ const METRICS = {
   "container.down": { sub: true }, failed_units: {}, reboot_required: {}, security_updates: {},
 };
 const OPS = [">=", "<=", "=="];
+const YESNO = ["reboot_required", "container.down"];   // true or false: an override only turns them off
 const SEVERITIES = ["critical", "warning", "info"];
 const NODE_ID = /^[a-z2-7]{12}$/;
 const TAG = /^[a-z0-9][a-z0-9._-]{0,31}$/;
@@ -37,9 +38,11 @@ function checkRules(input, { nodeIds = [] } = {}) {
   if (input.rules.length > MAX_RULES) throw new Error(`rules: at most ${MAX_RULES}`);
   const seen = new Set(), out = [];
   for (const [i, r] of input.rules.entries()) {
-    const at = `rules[${i}]`;
+    // an error names the rule as the page shows it: its name, or its id
+    let at = `rule ${i + 1}`;
     if (!isObj(r) || typeof r.id !== "string") throw new Error(`${at}: needs an id`);
-    if (seen.has(r.id)) throw new Error(`${at}: ${r.id} is listed twice`);
+    at = typeof r.name === "string" && r.name.trim() && !DEFAULT_RULES.some((d) => d.id === r.id) ? r.name.trim().slice(0, 60) : r.id;
+    if (seen.has(r.id)) throw new Error(`${at}: listed twice`);
     seen.add(r.id);
     const def = DEFAULT_RULES.find((d) => d.id === r.id);
     if (!def && !CUSTOM_ID.test(r.id)) throw new Error(`${at}: ${r.id} is no default rule, and a rule of one's own is c_ and up to 16 letters or digits`);
@@ -83,14 +86,19 @@ function checkRules(input, { nodeIds = [] } = {}) {
     if (r.off) c.off = true;
     if (r.overrides !== undefined) {
       if (!Array.isArray(r.overrides) || r.overrides.length > MAX_OVERRIDES) throw new Error(`${at}: overrides: a list of at most ${MAX_OVERRIDES}`);
+      const metric = def ? def.metric : c.metric, whos = new Set();
       c.overrides = r.overrides.map((o, k) => {
-        const oat = `${at}.overrides[${k}]`;
+        const oat = `${at}: override ${k + 1}`;
         if (!isObj(o) || (o.node === undefined) === (o.tag === undefined)) throw new Error(`${oat}: a server or a tag`);
         if (o.node !== undefined && !known(o.node)) throw new Error(`${oat}: no such server`);
         if (o.tag !== undefined && !(typeof o.tag === "string" && TAG.test(o.tag))) throw new Error(`${oat}: a tag is lowercase letters, digits, dot, dash, underscore`);
         const who = o.node !== undefined ? { node: o.node } : { tag: o.tag };
+        const key = o.node !== undefined ? "server " + o.node : "tag " + o.tag;
+        if (whos.has(key)) throw new Error(`${oat}: ${key} is listed twice`);
+        whos.add(key);
         if (o.off === true) return { ...who, off: true };
         if (r.id === "offline") throw new Error(`${oat}: offline can only be turned off`);
+        if (YESNO.includes(metric)) throw new Error(`${oat}: a true-or-false rule can only be turned off`);
         if (!num(o.threshold)) throw new Error(`${oat}: a threshold, or off`);
         return { ...who, threshold: o.threshold };
       });

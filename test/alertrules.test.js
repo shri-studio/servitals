@@ -26,7 +26,7 @@ test("a change to a default rule keeps only what it changes; a rule of one's own
 
 test("what is refused, and why", () => {
   bad({}, /rules: a list/);
-  bad([{ id: "disk_full" }, { id: "disk_full" }], /listed twice/);
+  bad([{ id: "disk_full" }, { id: "disk_full" }], /disk_full: listed twice/);
   bad([{ id: "nope" }], /no default rule/);
   bad([{ id: "cpu", threshold: "95" }], /threshold: a number/);
   bad([{ id: "cpu", for: -1 }], /whole minutes/);
@@ -65,4 +65,14 @@ test("built for the engine: every default rule with its changes, minutes in mill
     clear: null, severity: "critical", scope: { tag: "lab" }, repeat: 24 * 3600000 });
   assert.deepStrictEqual(buildRules({ rules: [] }), DEFAULT_RULES.map((r) => ({ ...r })), "nothing saved: the defaults");
   assert.strictEqual(defaultsForPage().find((r) => r.id === "cpu").for, 15, "the page sees minutes");
+});
+
+test("errors name the rule, not its place in the file; true-or-false rules only turn off; an override is listed once", () => {
+  bad([{ id: "cpu", severity: "page" }], /^Error: cpu: severity/);
+  bad([{ id: "c_x", name: "backup", metric: "mem", op: ">=", threshold: "a", severity: "info" }], /^Error: backup: threshold/);
+  bad([{ id: "cpu", overrides: [{ node: "nodecccccccc", threshold: 1 }] }], /^Error: cpu: override 1: no such server/);
+  bad([{ id: "reboot_required", overrides: [{ node: A, threshold: 0 }] }], /reboot_required: override 1: a true-or-false rule can only be turned off/);
+  bad([{ id: "c_c", name: "web", metric: "container.down", op: ">=", threshold: 1, severity: "info", overrides: [{ tag: "lab", threshold: 0 }] }], /only be turned off/);
+  bad([{ id: "cpu", overrides: [{ node: A, threshold: 90 }, { node: A, off: true }] }], /cpu: override 2: .* listed twice/);
+  assert.deepStrictEqual(ok([{ id: "reboot_required", overrides: [{ node: A, off: true }] }])[0].overrides, [{ node: A, off: true }]);
 });

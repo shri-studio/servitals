@@ -298,3 +298,40 @@ test("offline turned off for a server (a laptop, a phone): it is never offline, 
   c.at(40); a.check([{ ...N, tags: ["roaming"], lastPush: c.t - 35 * MIN, interval: 60 }]);
   assert.deepStrictEqual(kinds(events), ["firing:offline", "resolved:offline"]);
 });
+
+test("a rule gone at a restart (a torn rules file): its told alerts end told, its mutes go", () => {
+  const s = setupWith([{ id: "c_x", name: "x", metric: "security_updates", op: ">=", threshold: 1, for: 0, clear: null, severity: "critical" }]);
+  s.c.at(0); s.a.evaluate(N, view({ ubuntu: { security: 2 } }));
+  s.a.mute({ rule: "c_x", until: s.c.t - 1 + 60 * MIN });
+  s.a.mute({ rule: "cpu", until: s.c.t + 60 * MIN });
+  assert.deepStrictEqual(kinds(s.events).sort(), ["firing:c_x", "firing:security_updates"]);
+  const events = [];
+  const b = createAlerts(s.dir, { now: s.c.now, onEvent: (e) => events.push(e) });
+  assert.deepStrictEqual(events.map((e) => [e.kind, e.rule, e.severity, e.ended]), [["resolved", "c_x", "critical", "rule"]],
+    "ended, told, with the severity it fired with and why");
+  assert.deepStrictEqual(b.firing().map((f) => f.rule), ["security_updates"]);
+  assert.deepStrictEqual(Object.keys(b.mutes().rules), ["cpu"], "a mute of a rule there is no more goes");
+});
+
+test("a server that stopped pushing: no repeats of its alerts, also with offline off for it; a rule out of scope ends there", () => {
+  const { c, a, events } = setupWith([]);
+  c.at(0); a.evaluate(N, view({ ubuntu: { rebootRequired: true } }));
+  a.setRules(buildRules({ rules: [{ id: "offline", overrides: [{ node: N.id, off: true }] }] }));
+  c.at(3 * 24 * 60); a.check([{ ...N, lastPush: 0 + 1790000000000, interval: 60 }]);
+  assert.deepStrictEqual(kinds(events), ["firing:reboot_required"], "no offline, and no repeat for a server that is gone");
+  c.at(3 * 24 * 60 + 1); a.check([{ ...N, lastPush: c.t - 60000, interval: 60 }]);
+  assert.deepStrictEqual(kinds(events), ["firing:reboot_required", "repeat:reboot_required"], "back: it repeats again");
+  a.setRules(buildRules({ rules: [{ id: "reboot_required", overrides: [{ node: N.id, off: true }] }] }));
+  c.at(3 * 24 * 60 + 2); a.check([{ ...N, lastPush: c.t - 60000, interval: 60 }]);
+  assert.deepStrictEqual(kinds(events).slice(2), ["resolved:reboot_required"], "turned off there: it ends at the next check");
+  assert.strictEqual(events[2].ended, "rule", "and says why, so nobody reads it as fixed");
+});
+
+test("an alert's event names its rule of one's own, for the log and the channels", () => {
+  const { c, a, events } = setupWith([{ id: "c_ups", name: "ups battery", metric: "security_updates", op: ">=", threshold: 1, for: 0, clear: null, severity: "info" }]);
+  c.at(0); a.evaluate(N, view({ ubuntu: { security: 1 } }));
+  assert.strictEqual(events.find((e) => e.rule === "c_ups").name, "ups battery");
+  assert.strictEqual(events.find((e) => e.rule === "security_updates").name, undefined);
+  assert.deepStrictEqual(a.ruleInfo().c_ups, { name: "ups battery", metric: "security_updates" });
+  assert.deepStrictEqual(a.ruleInfo().disk_full, { metric: "disk.used" });
+});

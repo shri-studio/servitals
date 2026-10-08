@@ -237,7 +237,7 @@ const STRINGS = {
   "rules.saveFailed": "not saved: {error}",
   "rules.loadFailed": "could not load the rules",
   "alert.sev.critical": "critical", "alert.sev.warning": "warning", "alert.sev.info": "info",
-  "alert.kind.firing": "fired", "alert.kind.resolved": "resolved", "alert.kind.repeat": "still firing",
+  "alert.kind.firing": "fired", "alert.kind.resolved": "resolved", "alert.kind.repeat": "still firing", "alert.kind.ended": "no longer watched",
   "alert.quiet.muted": "muted", "alert.quiet.offline": "server offline", "alert.quiet.untold": "not told",
   "alert.rule.offline": "offline", "alert.rule.diskFull": "disk full", "alert.rule.diskCritical": "disk critical",
   "alert.rule.memory": "memory", "alert.rule.cpu": "cpu", "alert.rule.temperature": "temperature",
