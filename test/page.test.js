@@ -720,7 +720,7 @@ test("alerts view: firing worst first with mute buttons, running mutes with unmu
   assert.match(rows[1], /critical<\/span><span class="awhat">disk critical <span class="asub">\/srv&#60;x&#62;<\/span> <b>96%<\/b>/, "critical first, escaped");
   assert.match(rows[1], /<button data-mute="rule" data-id="disk_critical">mute rule<\/button><button data-mute="node" data-id="nodeaaaaaaaa">mute server<\/button>/);
   assert.match(rows[2], /^ amuted">.*reboot required.*<i>muted<\/i>/, "a muted alert is listed and marked");
-  assert.match(rows[3], /rule: cpu<\/span><span class="asince">until 12:00<\/span>.*data-unmute="rule" data-id="cpu">unmute/);
+  assert.match(rows[3], /rule: cpu<\/span><span class="asince">until (\w+ \d+ )?12:00<\/span>.*data-unmute="rule" data-id="cpu">unmute/);
   assert.match(rows[4], /server: pi<\/span>.*data-unmute="node" data-id="nodebbbbbbbb"/);
   assert.match(rows[5], /resolved: memory <b>80%<\/b><\/span><span class="anode">nas<\/span><span class="asince">12:00<\/span><span class="aacts"><i>muted<\/i>/);
   assert.match(rows[6], /fired: offline <b><\/b>.*<span class="anode">pi<\/span>/);
