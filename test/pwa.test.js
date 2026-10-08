@@ -186,6 +186,7 @@ test("the node view says when the hub cannot be reached or the session ended, no
     const s = pageScope(["hubStateOf", "hubText", "tick", "setStatus"], {
       $, fetch: fetchFn, navigator: { onLine }, view: "node", currentNode: null, lastData: null, cfg: {},
       renderMetrics() {}, loadNodes() {}, renderFleet() {}, fmtTime: () => "12:00", fmtDur: () => "1m",
+      nodesAt: Date.now(), loadAlertsIfOpen() {},
     });
     await s.tick();
     return [s.state(), el["#lastupdate"].textContent];
@@ -205,4 +206,21 @@ test("the node view says when the hub cannot be reached or the session ended, no
                                              json: async () => ({ error: "no snapshot" }) }));
   assert.strictEqual(st4, "ok", "the hub answered: the agent is the one missing");
   assert.match(t4, /^agent unreachable/);
+});
+
+test("the node view asks for the fleet (lamps, badges) at most every 30 s, and refreshes an open alerts view", async () => {
+  const run = async (nodesAt) => {
+    const calls = [];
+    const $ = () => ({ textContent: "", classList: { add() {}, remove() {} } });
+    const s = pageScope(["hubStateOf", "hubText", "tick", "setStatus"], {
+      $, fetch: async () => ({ ok: true, status: 200, headers: new Headers({ "content-type": "application/json" }), json: async () => ({ ts: Date.now() }) }),
+      navigator: { onLine: true }, view: "node", currentNode: null, lastData: null, cfg: {}, showHistory() {},
+      renderMetrics() {}, loadNodes() { calls.push("nodes"); }, renderFleet() {}, fmtTime: () => "12:00", fmtDur: () => "1m",
+      nodesAt, loadAlertsIfOpen() { calls.push("alerts"); },
+    });
+    await s.tick();
+    return calls;
+  };
+  assert.deepStrictEqual(await run(Date.now() - 31000), ["nodes", "alerts"]);
+  assert.deepStrictEqual(await run(Date.now() - 5000), ["alerts"]);
 });

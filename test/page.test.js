@@ -673,3 +673,120 @@ test("history: a series list that failed is asked again; a container past 24 h s
   const bad = historyHarness(async () => answer({ series: [] }), { "hist.range": "2h" });
   assert.strictEqual(bad.histState.range, "24h", "a stored range it does not know: 24h");
 });
+
+// alerts (spec 8, 10.1): badges on the header, tabs and cards, and the alerts view
+const escA = (x) => String(x).replace(/[&<>"']/g, (m) => "&#" + m.charCodeAt(0) + ";");
+test("alert badge: a count coloured by the worst severity, words for a screen reader, nothing when none", () => {
+  const alertBadge = pageFn("alertBadge", { esc: escA });
+  assert.strictEqual(alertBadge(null), "");
+  assert.strictEqual(alertBadge({ count: 0, worst: "critical" }), "");
+  assert.strictEqual(alertBadge({ count: 3, worst: "critical" }), '<span class="abadge critical" title="3 alerts, worst critical">3</span>');
+  assert.match(alertBadge({ count: 1, worst: "<odd>" }), /^<span class="abadge info" title="1 alerts, worst info">1<\/span>$/, "a severity the page does not know: info");
+});
+
+test("the header adds up every node's badge and takes the worst colour", () => {
+  const el = { className: "", textContent: "" };
+  const run = (fleetNodes) => { pageFn("renderAlertCount", { $: () => el, fleetNodes })(); return [el.className, el.textContent]; };
+  assert.deepStrictEqual(run([{ alerts: { count: 2, worst: "info" } }, { alerts: { count: 1, worst: "warning" } }, { alerts: null }]),
+    ["abadge warning", "3"]);
+  assert.deepStrictEqual(run([{ alerts: null }, {}]), ["abadge info hidden", ""], "none: hidden");
+});
+
+test("the tabs and the fleet cards carry each node's alert badge", () => {
+  assert.match(JS, /\$\{esc\(n\.name\)\}\$\{alertBadge\(n\.alerts\)\}<\/button>/);
+  assert.match(JS, /\$\{esc\(n\.name\)\}\$\{alertBadge\(n\.alerts\)\}<\/div>/);
+});
+
+test("alerts view: firing worst first with mute buttons, running mutes with unmute, recent events with why they were quiet", () => {
+  const { STRINGS } = require("../hub/lib/i18n");
+  const env = { esc: escA, STRINGS, fmtShare: (v) => v + "%", fmtTemp: (v) => v + "°C", fmtDur: () => "5m",
+    fmtTime: () => "12:00", Date };
+  const scope = new Function(...Object.keys(env), "tr", `${fs.readFileSync(path.join(__dirname, "..", "www", "js", "alerts.js"), "utf8")};
+    return { alertsHtml, ruleLabel, alertValue };`)(...Object.values(env), tr);
+  assert.deepStrictEqual(["disk_full", "security_updates", "my_rule"].map(scope.ruleLabel), ["disk full", "security updates", "my_rule"]);
+  assert.deepStrictEqual([["disk_full", 92], ["temperature", 86], ["failed_units", 2], ["reboot_required", 1], ["cpu", null]]
+    .map(([r, v]) => scope.alertValue(r, v)), ["92%", "86°C", "2", "", ""]);
+  const now = Date.now();
+  const html = scope.alertsHtml({
+    firing: [
+      { rule: "reboot_required", severity: "info", node: "nodeaaaaaaaa", nodeName: "nas", value: 1, since: now, firedAt: now, muted: true },
+      { rule: "disk_critical", severity: "critical", node: "nodeaaaaaaaa", nodeName: "nas", sub: "/srv<x>", value: 96, since: now, firedAt: now },
+    ],
+    mutes: { rules: { cpu: now + 3600000 }, nodes: { nodebbbbbbbb: now + 3600000 } },
+    recent: [{ kind: "resolved", rule: "memory", severity: "warning", node: "nodeaaaaaaaa", nodeName: "nas", value: 80, at: now, quiet: "muted" },
+             { kind: "firing", rule: "offline", severity: "critical", node: "nodebbbbbbbb", nodeName: "pi", at: now }],
+  }, { nodebbbbbbbb: "pi" });
+  const rows = html.split('<div class="arow');
+  assert.match(rows[1], /critical<\/span><span class="awhat">disk critical <span class="asub">\/srv&#60;x&#62;<\/span> <b>96%<\/b>/, "critical first, escaped");
+  assert.match(rows[1], /<button data-mute="rule" data-id="disk_critical">mute rule<\/button><button data-mute="node" data-id="nodeaaaaaaaa">mute server<\/button>/);
+  assert.match(rows[2], /^ amuted">.*reboot required.*<i>muted<\/i>/, "a muted alert is listed and marked");
+  assert.match(rows[3], /rule: cpu<\/span><span class="asince">until 12:00<\/span>.*data-unmute="rule" data-id="cpu">unmute/);
+  assert.match(rows[4], /server: pi<\/span>.*data-unmute="node" data-id="nodebbbbbbbb"/);
+  assert.match(rows[5], /resolved: memory <b>80%<\/b><\/span><span class="anode">nas<\/span><span class="asince">12:00<\/span><span class="aacts"><i>muted<\/i>/);
+  assert.match(rows[6], /fired: offline <b><\/b>.*<span class="anode">pi<\/span>/);
+  assert.doesNotMatch(html, /style=/, "the strict CSP: no style attributes");
+  const empty = scope.alertsHtml({ firing: [], recent: [], mutes: { rules: {}, nodes: {} } }, {});
+  assert.match(empty, /nothing is firing/);
+  assert.match(empty, /no alerts yet/);
+  assert.doesNotMatch(empty, /unmute/, "no mutes: no mute list");
+});
+
+// alerts.js run with stubbed DOM and fetch
+function alertsHarness(fetchImpl) {
+  const els = {}, toasts = [], calls = { loadNodes: 0, renderFleetIfShown: 0 };
+  const el = (sel) => (els[sel] = els[sel] || { innerHTML: "", value: "86400000" });
+  const env = { $: el, fetch: fetchImpl, esc: (x) => String(x), tr: (k) => k, STRINGS: {}, fmtShare: String, fmtTemp: String,
+    fmtDur: String, fmtTime: () => "", fleetNodes: [], toast: (m, err) => toasts.push([m, !!err]),
+    loadNodes: async () => { calls.loadNodes++; }, renderFleetIfShown: () => { calls.renderFleetIfShown++; } };
+  const src = fs.readFileSync(path.join(__dirname, "..", "www", "js", "alerts.js"), "utf8");
+  const api = new Function(...Object.keys(env), `${src}; return { loadAlerts, muteAlert, initAlerts };`)(...Object.values(env));
+  return { ...api, els, toasts, calls };
+}
+
+test("alerts view: a late answer never draws over a newer one; a failed load says so", async () => {
+  const pending = [];
+  const h = alertsHarness(() => { const l = later(); pending.push(l); return l.p; });
+  const first = h.loadAlerts(), second = h.loadAlerts();
+  pending[1].done(answer({ firing: [], recent: [], mutes: {} }));
+  await second;
+  pending[0].done(answer({ firing: [{ rule: "cpu", severity: "warning", node: "x", since: 0 }], recent: [], mutes: {} }));
+  await first;
+  assert.match(h.els["#alerts-body"].innerHTML, /alerts\.none/, "the newer answer stays");
+  const bad = alertsHarness(async () => ({ ok: false, json: async () => ({}) }));
+  await bad.loadAlerts();
+  assert.match(bad.els["#alerts-body"].innerHTML, /alerts\.failed/);
+});
+
+test("alerts view: mute sends the rule or node and the chosen time, unmute sends now; the badges follow", async () => {
+  const sent = [];
+  const h = alertsHarness(async (url, opt) => {
+    if (opt && opt.method === "POST") { sent.push([url, JSON.parse(opt.body)]); return { ok: true, json: async () => ({ ok: true }) }; }
+    return answer({ firing: [], recent: [], mutes: {} });
+  });
+  const t = Date.now();
+  await h.muteAlert("rule", "disk_full", t + 86400000);
+  await h.muteAlert("node", "nodeaaaaaaaa", t);
+  assert.deepStrictEqual(sent, [["/__ctl/alerts/mute", { rule: "disk_full", until: t + 86400000 }], ["/__ctl/alerts/mute", { node: "nodeaaaaaaaa", until: t }]]);
+  assert.deepStrictEqual(h.toasts, [["alerts.muted", false], ["alerts.unmuted", false]]);
+  assert.deepStrictEqual(h.calls, { loadNodes: 2, renderFleetIfShown: 2 });
+  const no = alertsHarness(async (url, opt) => (opt ? { ok: false, status: 400 } : answer({})));
+  await no.muteAlert("rule", "cpu", t + 1);
+  assert.deepStrictEqual(no.toasts, [["alerts.muteFailed", true]]);
+  // the buttons: a click mutes for the time chosen above the list
+  h.initAlerts();
+  const btn = { dataset: { mute: "node", id: "nodebbbbbbbb" }, disabled: false };
+  h.els["#alerts-for"] = { value: "3600000" };
+  h.els["#alerts-body"].onclick({ target: { closest: () => btn } });
+  await new Promise((r) => setImmediate(r));
+  assert.strictEqual(btn.disabled, true, "one click, one request");
+  assert.strictEqual(sent[2][1].node, "nodebbbbbbbb");
+  assert.ok(Math.abs(sent[2][1].until - (Date.now() + 3600000)) < 5000);
+});
+
+test("the alerts view is a dialog loaded on first use: [a], its button, esc; kept for the offline copy", () => {
+  for (const id of ["alerts-overlay", "alerts-body", "alerts-for", "btn-alerts", "alerts-count", "alerts-close"]) assert.ok(HTML.includes(`id="${id}"`), id);
+  assert.match(JS, /s\.src = "js\/alerts\.js";/);
+  assert.match(JS, /if \(e\.key === "a"\)/);
+  assert.match(JS, /if \(e\.key === "Escape"\) \{ closeSettings\(\); closeAlerts\(\);/);
+  assert.match(fs.readFileSync(path.join(__dirname, "..", "www", "sw.js"), "utf8"), /"\/js\/alerts\.js"/);
+});

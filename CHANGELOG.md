@@ -7,6 +7,12 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- Alerts on the page (spec 10.1): the header, the node tabs and the fleet
+  cards carry a badge with each server's firing alerts, coloured by the
+  worst. `[a]` opens the alerts view: what is firing, the mutes still
+  running and the last 50 events, with why an event stayed quiet. A rule or
+  a server is muted from there for an hour, a day or a week, and unmuted.
+  The node view now refreshes the tabs' lamps every 30 seconds.
 - Alerts (spec 8.1, 8.2): the hub judges the default rules on each push and
   once a minute: node offline, disk full and critical, memory, cpu,
   temperature, a container that stopped, failed units, a needed reboot and

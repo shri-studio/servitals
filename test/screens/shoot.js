@@ -62,6 +62,16 @@ const STYLES = ["classic", "8bit", "phosphor", "eink", "contrast", "nord", "gruv
   await page.locator("#cfg-style").scrollIntoViewIfNeeded();
   await page.screenshot({ path: `${out}/settings.png` });
 
+  // the alerts view on a desktop and a phone (the nas waits for a reboot and has security updates)
+  for (const width of [1280, 390]) {
+    await page.setViewportSize({ width, height: 900 });
+    await page.goto(`${base}/?shot=alerts-${width}#fleet`);
+    await page.waitForTimeout(1200);
+    await page.keyboard.press("a");
+    await page.waitForSelector("#alerts-body .arow");
+    await page.screenshot({ path: `${out}/alerts-${width}.png` });
+  }
+
   // the settings panel on a desktop and a phone: styled controls, none squeezed or sticking out
   for (const width of [1280, 390]) {
     await page.setViewportSize({ width, height: 2600 });

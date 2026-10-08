@@ -33,7 +33,7 @@
     <div class="right">
       <div class="hclock" id="headclock">--:--:--</div>
       <div class="hdate" id="headdate">&mdash;</div>
-      <div class="keyhint"><b id="btn-refresh" data-i18n="key.refresh">[r] refresh</b> &nbsp; <b id="btn-settings" data-i18n="key.settings">[s] settings</b> &nbsp; <b id="btn-theme" data-i18n="key.theme">[t] theme</b> &nbsp; <b id="btn-style" data-i18n="key.style">[y] style</b> &nbsp; <form method="post" action="/__auth/logout" class="logout-form"><button type="submit" class="linkbtn" data-i18n="key.logout">[logout]</button></form></div>
+      <div class="keyhint"><b id="btn-refresh" data-i18n="key.refresh">[r] refresh</b> &nbsp; <b id="btn-settings" data-i18n="key.settings">[s] settings</b> &nbsp; <b id="btn-alerts"><span data-i18n="key.alerts">[a] alerts</span> <span id="alerts-count" class="abadge hidden"></span></b> &nbsp; <b id="btn-theme" data-i18n="key.theme">[t] theme</b> &nbsp; <b id="btn-style" data-i18n="key.style">[y] style</b> &nbsp; <form method="post" action="/__auth/logout" class="logout-form"><button type="submit" class="linkbtn" data-i18n="key.logout">[logout]</button></form></div>
     </div>
   </div>
 
@@ -304,6 +304,22 @@
   <div class="modal m860">
     <h3><span id="logs-title" data-i18n="logs.title">logs</span> <span class="x" id="logs-close" data-i18n="dlg.close">[esc]</span></h3>
     <pre id="logs-body" data-i18n="logs.loading">loading&hellip;</pre>
+  </div>
+</div>
+
+<!-- alerts -->
+<div class="overlay" id="alerts-overlay">
+  <div class="modal m860">
+    <h3><span data-i18n="alerts.title">alerts</span> <span class="x" id="alerts-close" data-i18n="dlg.close">[esc]</span></h3>
+    <div class="body">
+      <div class="amutefor"><span data-i18n="alerts.muteFor">mute for</span>
+        <select id="alerts-for" aria-label="mute for" data-i18n-aria-label="alerts.muteFor">
+          <option value="3600000" data-i18n="alerts.for1h">1 hour</option>
+          <option value="86400000" selected data-i18n="alerts.for1d">1 day</option>
+          <option value="604800000" data-i18n="alerts.for7d">7 days</option>
+        </select></div>
+      <div id="alerts-body"><div class="muted" data-i18n="logs.loading">loading&hellip;</div></div>
+    </div>
   </div>
 </div>
 

@@ -15,7 +15,7 @@ const MARKUP = read("index.html");
 const CSS = read("app.css");
 const BOOT = read("boot.js");
 const I18N = fs.readFileSync(path.join(__dirname, "..", "..", "hub", "lib", "i18n.js"), "utf8");
-const JS = I18N + "\n" + read("js/app.js") + "\n" + read("js/settings.js") + "\n" + read("js/history.js");
+const JS = I18N + "\n" + read("js/app.js") + "\n" + read("js/settings.js") + "\n" + read("js/history.js") + "\n" + read("js/alerts.js");
 const PAGE = [MARKUP, CSS, BOOT, JS].join("\n");
 
 module.exports = { WWW, MARKUP, CSS, BOOT, I18N, JS, PAGE };

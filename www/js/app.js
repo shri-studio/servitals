@@ -462,7 +462,9 @@ function hubText() {
   return hubState === "login" ? tr("status.loggedOut")
     : tr("status.hubDown") + (navigator.onLine === false ? " " + tr("status.deviceOffline") : "");
 }
+let nodesAt = 0;
 async function loadNodes() {
+  nodesAt = Date.now();
   try {
     const r = await fetch("/__ctl/nodes?t=" + Date.now());
     if (!r.ok) { hubState = r.status === 401 ? "login" : "down"; return; }
@@ -472,7 +474,25 @@ async function loadNodes() {
   const local = fleetNodes.find(n => n.local);
   localNode = local ? local.id : null;
   renderTabs();
+  renderAlertCount();
 }
+
+/* alert badges (spec 10.1): per node the firing alerts that were told, their worst
+   severity as the colour; the header adds them up */
+function alertBadge(a) {
+  if (!a || !(a.count > 0)) return "";
+  const sev = ["critical", "warning", "info"].includes(a.worst) ? a.worst : "info";
+  return `<span class="abadge ${sev}" title="${esc(tr("alerts.badge", { n: a.count, severity: tr("alert.sev." + sev) }))}">${a.count}</span>`;
+}
+function renderAlertCount() {
+  const all = fleetNodes.map(n => n.alerts).filter(a => a && a.count > 0);
+  const sev = ["critical", "warning", "info"].find(s => all.some(a => a.worst === s));
+  const n = all.reduce((t, a) => t + a.count, 0);
+  const el = $("#alerts-count");
+  el.className = "abadge " + (sev || "info") + (n ? "" : " hidden");
+  el.textContent = n ? String(n) : "";
+}
+function renderFleetIfShown() { if (view === "fleet") renderFleet(); }
 
 function route() {
   const m = /^#node=([a-z2-7]{12})$/.exec(location.hash);
@@ -497,7 +517,7 @@ function renderTabs() {
   const shown = view === "fleet" ? "fleet" : (currentNode || localNode);
   tabs.innerHTML = `<button data-go="fleet" class="${shown === "fleet" ? "on" : ""}">${esc(tr("tabs.fleet"))}</button>`
     + fleetNodes.map(n => `<button data-go="${esc(n.id)}" class="${shown === n.id ? "on" : ""}">`
-      + `<span class="lamp ${esc(n.status)}"></span>${esc(n.name)}</button>`).join("");
+      + `<span class="lamp ${esc(n.status)}"></span>${esc(n.name)}${alertBadge(n.alerts)}</button>`).join("");
 }
 
 function fmtVal(v, unit) { return v == null ? "–" : Math.round(v) + unit; }
@@ -572,7 +592,7 @@ function fleetCard(n) {
     : n.status === "waiting" ? esc(tr("fleet.waiting")) : `${esc(tr("fleet.state." + n.status))} · ${esc(ago)}`;
   const cont = s.containers ? esc(tr("svc.up", { running: s.running, total: s.containers })) : "";
   return `<div class="panel ncard ${esc(n.status)}" data-node="${esc(n.id)}">`
-    + `<div class="nhead" data-state="${esc(tr("fleet.state." + n.status))}"><span class="lamp ${esc(n.status)}"></span>${esc(n.name)}</div>`
+    + `<div class="nhead" data-state="${esc(tr("fleet.state." + n.status))}"><span class="lamp ${esc(n.status)}"></span>${esc(n.name)}${alertBadge(n.alerts)}</div>`
     + `<div class="kv">${cardNumbers().map(k => `<span><small>${esc(tr("card." + k))}</small>${cardValue(k, s)}</span>`).join("")}</div>`
     + `<div class="sparkmini">${sparkSvg(s.trend || [])}</div>`
     + (disk ? meter(disk.pct, dcls) : "")
@@ -597,7 +617,10 @@ function fleetStatus() {
 }
 
 async function tick() {
-  if (view === "fleet") { await loadNodes(); renderFleet(); return; }
+  if (view === "fleet") { await loadNodes(); renderFleet(); loadAlertsIfOpen(); return; }
+  // the tabs' lamps and badges and the header's alert count: at most every 30 s here
+  if (Date.now() - nodesAt > 30000) await loadNodes();
+  loadAlertsIfOpen();
   try {
     let r;
     try { r = await fetch((currentNode ? `/__ctl/node/${currentNode}` : "data.json") + "?t=" + Date.now()); }
@@ -1132,6 +1155,24 @@ function showHistory() {
   historyReady.then(() => loadHistory(), () => {});
 }
 
+/* ------------------------------------------------------------------ alerts, loaded on first use (spec 10.5) */
+let alertsReady = null;
+function openAlerts() {
+  alertsReady = alertsReady || new Promise((ok, fail) => {
+    const s = document.createElement("script");
+    s.src = "js/alerts.js";
+    s.onload = () => (typeof initAlerts === "function" ? (initAlerts(), ok()) : fail(new Error("alerts.js")));
+    s.onerror = () => { alertsReady = null; fail(new Error("alerts.js")); };
+    document.head.appendChild(s);
+  });
+  $("#alerts-overlay").classList.add("open");
+  return alertsReady.then(() => loadAlerts(), () => toast(tr("alerts.openFailed"), true));
+}
+function closeAlerts() { $("#alerts-overlay").classList.remove("open"); }
+function loadAlertsIfOpen() {
+  if ($("#alerts-overlay").classList.contains("open") && typeof loadAlerts === "function") loadAlerts();
+}
+
 let settingsReady = null;
 function openSettings() {
   settingsReady = settingsReady || new Promise((ok, fail) => {
@@ -1179,6 +1220,8 @@ function openSettings() {
   refreshNow(true);       // a fresh sample for the first view, not a stale data.json
 
   $("#btn-settings").onclick = openSettings;
+  $("#btn-alerts").onclick = openAlerts;
+  $("#alerts-close").onclick = closeAlerts;
   $("#settings-close").onclick = closeSettings;
   $("#btn-theme").onclick = toggleTheme;
   $("#btn-style").onclick = toggleStyle;
@@ -1258,6 +1301,7 @@ function openSettings() {
     if (e.key === "y") toggleStyle();
     if (e.key === "r") { e.preventDefault(); refreshNow(); }
     if (e.key === "f" && fleetNodes.length > 1) location.hash = "#fleet";
-    if (e.key === "Escape") { closeSettings(); $("#logs-overlay").classList.remove("open"); }
+    if (e.key === "a") { e.preventDefault(); $("#alerts-overlay").classList.contains("open") ? closeAlerts() : openAlerts(); }
+    if (e.key === "Escape") { closeSettings(); closeAlerts(); $("#logs-overlay").classList.remove("open"); }
   });
 })();

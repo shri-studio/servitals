@@ -6,7 +6,7 @@
    cache name carries the version, so an upgrade replaces the old shell. */
 const VERSION = "0.1.0";   // keep equal to the VERSION file (test/pwa.test.js checks)
 const CACHE = "servitals-" + VERSION;
-const SHELL = ["/", "/app.css", "/boot.js", "/js/i18n.js", "/js/app.js", "/js/settings.js", "/js/history.js", "/manifest.webmanifest", "/icons/icon-192.png"];
+const SHELL = ["/", "/app.css", "/boot.js", "/js/i18n.js", "/js/app.js", "/js/settings.js", "/js/history.js", "/js/alerts.js", "/manifest.webmanifest", "/icons/icon-192.png"];
 
 // "shell": network first, the cache when offline; "network": as if there were no worker
 function route(request) {
