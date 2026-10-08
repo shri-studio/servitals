@@ -519,3 +519,32 @@ test("temp_json: a label that cannot be read falls back to the chip's name, as b
   const d = json(runGroup(host, "temp_json"));
   assert.deepStrictEqual(d.sensors.find((s) => s.value === 45), { label: "coretemp", value: 45 });
 });
+
+test("hardware_json: fans that spin or have a name, voltages in volts, and the battery", () => {
+  const host = fakeHost({ ...BASE,
+    "sys/class/hwmon/hwmon1/name": "nct6798\n",
+    "sys/class/hwmon/hwmon1/fan1_input": "1200\n", "sys/class/hwmon/hwmon1/fan1_label": "CPU fan\n",
+    "sys/class/hwmon/hwmon1/fan2_input": "0\n",                                       // an empty header: left out
+    "sys/class/hwmon/hwmon1/fan3_input": "0\n", "sys/class/hwmon/hwmon1/fan3_label": "Pump\n", // named and stopped: kept
+    "sys/class/hwmon/hwmon1/fan4_input": "860\n",
+    "sys/class/hwmon/hwmon1/in0_input": "1216\n", "sys/class/hwmon/hwmon1/in0_label": "Vcore\n",
+    "sys/class/hwmon/hwmon1/in1_input": "12096\n",
+    "sys/class/power_supply/BAT0/type": "Battery\n", "sys/class/power_supply/BAT0/capacity": "87\n",
+    "sys/class/power_supply/BAT0/status": "Discharging\n",
+    "sys/class/power_supply/AC/type": "Mains\n", "sys/class/power_supply/AC/capacity": "50\n" });   // not a battery
+  assert.deepStrictEqual(json(runGroup(host, "hardware_json")), {
+    fans: [{ label: "CPU fan", rpm: 1200 }, { label: "Pump", rpm: 0 }, { label: "nct6798 fan4", rpm: 860 }],
+    voltages: [{ label: "Vcore", value: 1.216 }, { label: "nct6798 in1", value: 12.096 }],
+    battery: { capacity: 87, status: "Discharging" },
+  });
+});
+
+test("hardware_json: nothing to read gives nulls; an odd reading is skipped, not a failed tick", () => {
+  assert.deepStrictEqual(json(runGroup(fakeHost(BASE), "hardware_json")), { fans: null, voltages: null, battery: null });
+  const host = fakeHost({ ...BASE, "sys/class/hwmon/hwmon1/name": "it87\n",
+    "sys/class/hwmon/hwmon1/fan1_input": "abc\n", "sys/class/hwmon/hwmon1/in0_input": "\n",
+    "sys/class/hwmon/hwmon1/fan2_input": "900\n",
+    "sys/class/power_supply/BAT1/capacity": "140\n", "sys/class/power_supply/BAT1/status": "Full\n" });
+  assert.deepStrictEqual(json(runGroup(host, "hardware_json")),
+    { fans: [{ label: "it87 fan2", rpm: 900 }], voltages: null, battery: { capacity: 100, status: "Full" } }, "capacity at most 100");
+});

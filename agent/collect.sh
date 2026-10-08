@@ -50,7 +50,7 @@ group() {
 }
 
 collect() {  # $1 = destination file
-  local host mem=null cpu=null temp=null disks=null io=null net=null docker=null pressure=null processes=null ubuntu=null
+  local host mem=null cpu=null temp=null disks=null io=null net=null docker=null pressure=null processes=null ubuntu=null hardware=null
   host=$(host_json)
   if on "${COLLECT_MEM:-1}"; then group mem mem_json; fi
   if on "${COLLECT_CPU:-1}"; then group cpu cpu_json; fi
@@ -64,14 +64,16 @@ collect() {  # $1 = destination file
   if on "${COLLECT_DOCKER:-1}"; then group docker docker_json; fi
   if on "${COLLECT_PROCESSES:-1}"; then group processes processes_json; fi
   if on "${COLLECT_UBUNTU:-1}"; then group ubuntu ubuntu_json; fi
+  if on "${COLLECT_HARDWARE:-1}"; then group hardware hardware_json; fi
 
   jq -cn \
     --argjson host "$host" --argjson mem "$mem" --argjson cpu "$cpu" \
     --argjson temp "$temp" --argjson disks "$disks" --argjson io "$io" --argjson net "${net:-null}" \
-    --argjson docker "$docker" --argjson processes "$processes" --argjson ubuntu "$ubuntu" --argjson pressure "$pressure" --argjson interval "$INTERVAL" --arg agent "$AGENT_NAME" \
+    --argjson docker "$docker" --argjson processes "$processes" --argjson ubuntu "$ubuntu" --argjson hardware "$hardware" --argjson pressure "$pressure" --argjson interval "$INTERVAL" --arg agent "$AGENT_NAME" \
     '{schema: 1, ts: (now * 1000 | floor), interval: $interval, agent: $agent,
       host: ($host + {os: "linux"}), mem: $mem, cpu: $cpu, pressure: $pressure, temp: $temp,
-      disks: $disks, io: $io, net: $net, docker: $docker, processes: $processes, ubuntu: $ubuntu}' \
+      disks: $disks, io: $io, net: $net, docker: $docker, processes: $processes, ubuntu: $ubuntu}
+      + ($hardware // {fans: null, voltages: null, battery: null})' \
     > "$1.tmp" 2>/dev/null && mv "$1.tmp" "$1"
 }
 
