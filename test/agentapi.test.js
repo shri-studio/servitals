@@ -306,3 +306,20 @@ test("alerts: after a hub restart, a node is offline only once its own limit pas
   assert.match(src, /lastPush: rec \? Math\.max\(rec\.at, HUB_START\) : null/);
   assert.match(src, /^const HUB_START = Date\.now\(\);/m);
 });
+
+test("alerts: the page gets the running mutes, can unmute, and sees each node's count on the fleet", async () => {
+  await withHub(async (hub, c) => {
+    const cookie = cookieFrom(await login(hub.port));
+    const get = async (p) => JSON.parse((await request(hub.port, { path: p, headers: { cookie } })).body);
+    assert.strictEqual((await signed(hub, c, { body: snap({ ubuntu: { rebootRequired: true, security: 2 } }) })).status, 200);
+    const card = async () => (await get("/__ctl/nodes")).find((n) => n.id === c.id).alerts;
+    assert.deepStrictEqual(await card(), { count: 2, worst: "info" });
+    const until = Date.now() + 3600000;
+    assert.strictEqual((await ctlPost(hub.port, cookie, "/__ctl/alerts/mute", JSON.stringify({ node: c.id, until }))).status, 200);
+    assert.deepStrictEqual((await get("/__ctl/alerts")).mutes, { rules: {}, nodes: { [c.id]: until } });
+    assert.strictEqual(await card(), null, "nothing told: no badge");
+    assert.strictEqual((await ctlPost(hub.port, cookie, "/__ctl/alerts/mute", JSON.stringify({ node: c.id, until: Date.now() }))).status, 200);
+    assert.deepStrictEqual((await get("/__ctl/alerts")).mutes, { rules: {}, nodes: {} }, "unmuted");
+    assert.deepStrictEqual(await card(), { count: 2, worst: "info" });
+  });
+});

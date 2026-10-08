@@ -201,3 +201,24 @@ test("the alert log survives a torn line and a failed append; state is written o
   assert.deepStrictEqual(b.firing().map((f) => f.rule), ["security_updates"], "judged and kept all the same");
   assert.ok(warned.includes("alerts.log_failed"));
 });
+
+test("the page's view of the alerts: running mutes, an unmute, and per node a count and the worst severity", () => {
+  const { c, a } = setup();
+  const M = { id: "nodebbbbbbbb", name: "pi", tags: [] };
+  c.at(0);
+  a.evaluate(N, view({ ubuntu: { rebootRequired: true, security: 3 }, disks: [{ mount: "/srv", pct: 96 }] }));
+  c.at(5); a.evaluate(N, view({ ubuntu: { rebootRequired: true, security: 3 }, disks: [{ mount: "/srv", pct: 96 }] }));
+  a.evaluate(M, view({ ubuntu: { rebootRequired: true } }));
+  assert.deepStrictEqual(a.badges(), { [N.id]: { count: 4, worst: "critical" }, [M.id]: { count: 1, worst: "info" } });
+  a.mute({ rule: "disk_critical", until: c.t + 60 * MIN });
+  a.mute({ node: M.id, until: c.t + 30 * MIN });
+  a.mute({ rule: "cpu", until: c.t - 1 });
+  assert.deepStrictEqual(a.mutes(), { rules: { disk_critical: c.t + 60 * MIN }, nodes: { [M.id]: c.t + 30 * MIN } }, "only mutes still running");
+  assert.deepStrictEqual(a.badges(), { [N.id]: { count: 3, worst: "warning" } }, "muted alerts are not counted");
+  a.mute({ node: M.id, until: c.t });
+  assert.deepStrictEqual(a.mutes().nodes, {}, "a mute until now is an unmute");
+  assert.deepStrictEqual(a.badges()[M.id], { count: 1, worst: "info" });
+  c.at(40);
+  a.check([{ id: N.id, name: "nas", lastPush: c.t - 30 * MIN, interval: 60 }]);
+  assert.deepStrictEqual(a.badges()[N.id], { count: 1, worst: "critical" }, "an offline node: only the offline alert counts");
+});

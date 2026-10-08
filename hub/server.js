@@ -740,9 +740,9 @@ async function handle(req, res) {
 
     // alerts (spec 8): what is firing, and the last events
     if (req.method === "GET" && pathname === "/__ctl/alerts") {
-      return json(200, { firing: alerts.firing(), recent: alerts.recent(50) });
+      return json(200, { firing: alerts.firing(), recent: alerts.recent(50), mutes: alerts.mutes() });
     }
-    // mute a rule or a node until a time (ms since 1970; at most a year ahead)
+    // mute a rule or a node until a time (ms since 1970; at most a year ahead); now or earlier unmutes
     if (req.method === "POST" && pathname === "/__ctl/alerts/mute") {
       let body = null;
       try { body = JSON.parse(await readBodyN(req, 1024)); } catch (_) { /* answered below */ }
@@ -774,10 +774,12 @@ async function handle(req, res) {
 
     // the fleet: every node with its status and the numbers a card shows
     if (req.method === "GET" && pathname === "/__ctl/nodes") {
+      const badges = alerts.badges();
       const list = nodes.list().map(withFile).map((n) => {
         const rec = latest.get(n.id);
         return { ...n, status: nodeStatus(n.id), lastSeen: rec ? rec.at : null,
-                 interval: rec ? rec.snap.interval : null, summary: rec ? fleet.summary(rec.view) : null };
+                 interval: rec ? rec.snap.interval : null, summary: rec ? fleet.summary(rec.view) : null,
+                 alerts: badges[n.id] || null };
       }).sort((a, b) => (b.local - a.local) || a.name.localeCompare(b.name));
       res.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" });
       return res.end(JSON.stringify(list));

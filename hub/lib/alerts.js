@@ -13,7 +13,7 @@
  * State and mutes live in <dir>/state.json, every event in <dir>/events.jsonl (the
  * alert log, the last 1000).
  *   createAlerts(dir, { now, onEvent, warn }) → { evaluate(node, view), check(nodes),
- *     firing(), recent(n), mute({ rule | node, until }), forget(node), log(event) }
+ *     firing(), recent(n), mute({ rule | node, until }), mutes(), badges(), forget(node), log(event) }
  */
 const fs = require("fs");
 const path = require("path");
@@ -36,6 +36,7 @@ const DEFAULT_RULES = [
   rule("reboot_required", "reboot_required", 1, 0, "info"),
   rule("security_updates", "security_updates", 1, 0, "info"),
 ];
+const SEVERITY = ["critical", "warning", "info"];
 const OPS = { ">=": (a, b) => a >= b, "<=": (a, b) => a <= b, "==": (a, b) => a === b };
 const num = (v) => (typeof v === "number" && Number.isFinite(v) ? v : null);
 
@@ -194,10 +195,30 @@ function createAlerts(dir, { now = Date.now, onEvent = () => {}, warn = () => {}
       });
     },
     recent(n = 50) { return events.slice(-n).reverse(); },
+    // a mute until now or earlier is an unmute
     mute({ rule: id, node, until }) {
       if (!id && !node) throw new Error("mute needs a rule or a node");
-      if (id) st.mutes.rules[id] = until; else st.mutes.nodes[node] = until;
+      const m = id ? st.mutes.rules : st.mutes.nodes, k = id || node;
+      if (until > now()) m[k] = until; else delete m[k];
       save();
+    },
+    // the mutes still running: { rules: { id: until }, nodes: { id: until } }
+    mutes() {
+      const t = now(), live = (o) => Object.fromEntries(Object.entries(o).filter(([, u]) => u > t));
+      return { rules: live(st.mutes.rules), nodes: live(st.mutes.nodes) };
+    },
+    // per node, the firing alerts that are told (not muted, not held back by an offline
+    // node): { id: { count, worst } }, for the page's badges
+    badges() {
+      const t = now(), out = {};
+      for (const i of Object.values(st.instances)) {
+        const r = rules.find((x) => x.id === i.rule);
+        if (i.state !== "firing" || !r || quiet(i, r, t)) continue;
+        const b = out[i.node] = out[i.node] || { count: 0, worst: r.severity };
+        b.count++;
+        if (SEVERITY.indexOf(r.severity) < SEVERITY.indexOf(b.worst)) b.worst = r.severity;
+      }
+      return out;
     },
     // a revoked node: its told alerts end told
     forget(node) {
