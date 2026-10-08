@@ -34,11 +34,13 @@ function alertsHtml(d, names) {
     .sort((a, b) => (ALERT_SEV.indexOf(a.severity) - ALERT_SEV.indexOf(b.severity)) || (b.firedAt || 0) - (a.firedAt || 0));
   const now = Date.now();
   let h = `<section><label>${esc(tr("alerts.firing"))}</label>`;
-  h += firing.length ? firing.map(a => `<div class="arow${a.muted ? " amuted" : ""}">${sevTag(a.severity)}`
+  // why an alert is not told: muted, or held back while its server is offline
+  const why = a => (["muted", "offline"].includes(a.quiet) ? a.quiet : a.muted ? "muted" : "");
+  h += firing.length ? firing.map(a => `<div class="arow${why(a) ? " amuted" : ""}">${sevTag(a.severity)}`
     + `<span class="awhat">${alertWhat(a)} <b>${esc(alertValue(a.rule, a.value))}</b></span>`
     + `<span class="anode">${esc(a.nodeName || a.node)}</span>`
     + `<span class="asince">${esc(tr("alerts.for", { time: fmtDur((now - (a.since || now)) / 1000) }))}</span>`
-    + `<span class="aacts">${a.muted ? `<i>${esc(tr("alerts.mutedTag"))}</i>` : ""}`
+    + `<span class="aacts">${why(a) ? `<i>${esc(tr("alert.quiet." + why(a)))}</i>` : ""}`
     + `<button data-mute="rule" data-id="${esc(a.rule)}">${esc(tr("alerts.muteRule"))}</button>`
     + `<button data-mute="node" data-id="${esc(a.node)}">${esc(tr("alerts.muteNode"))}</button></span></div>`).join("")
     : `<div class="muted">${esc(tr("alerts.none"))}</div>`;
@@ -47,7 +49,7 @@ function alertsHtml(d, names) {
   const mutes = [...Object.entries(m.rules || {}).map(([id, until]) => ["rule", id, ruleLabel(id), until]),
                  ...Object.entries(m.nodes || {}).map(([id, until]) => ["node", id, names[id] || id, until])];
   if (mutes.length) {
-    h += `<section><label>${esc(tr("alerts.mutes"))}</label>` + mutes.map(([kind, id, label, until]) => `<div class="arow">`
+    h += `<section><label>${esc(tr("alerts.mutes"))}</label>` + mutes.map(([kind, id, label, until]) => `<div class="arow amrow">`
       + `<span class="awhat">${esc(tr("alerts.mute." + kind, { name: label }))}</span>`
       + `<span class="asince">${esc(tr("alerts.until", { time: alertWhen(until) }))}</span>`
       + `<span class="aacts"><button data-unmute="${esc(kind)}" data-id="${esc(id)}">${esc(tr("alerts.unmute"))}</button></span></div>`).join("")
@@ -79,13 +81,14 @@ async function loadAlerts() {
   $("#alerts-body").innerHTML = alertsHtml(d, names);
 }
 
-// mute (for the chosen time) or unmute a rule or a node, then show the new state
-async function muteAlert(kind, id, until) {
+// mute a rule or a node for ms (the hub counts it from its own clock), or unmute it (0),
+// then show the new state
+async function muteAlert(kind, id, ms) {
   try {
     const r = await fetch("/__ctl/alerts/mute", { method: "POST", headers: { "content-type": "application/json" },
-      body: JSON.stringify({ [kind]: id, until }) });
+      body: JSON.stringify(ms > 0 ? { [kind]: id, for: ms } : { [kind]: id, until: 0 }) });
     if (!r.ok) throw new Error(String(r.status));
-    toast(until > Date.now() ? tr("alerts.muted") : tr("alerts.unmuted"));
+    toast(ms > 0 ? tr("alerts.muted") : tr("alerts.unmuted"));
   } catch (e) { toast(tr("alerts.muteFailed"), true); }
   await loadAlerts();
   await loadNodes();
@@ -98,7 +101,7 @@ function initAlerts() {
     const b = e.target.closest("button[data-mute], button[data-unmute]");
     if (!b) return;
     b.disabled = true;
-    if (b.dataset.mute) muteAlert(b.dataset.mute, b.dataset.id, Date.now() + Number($("#alerts-for").value));
-    else muteAlert(b.dataset.unmute, b.dataset.id, Date.now());
+    if (b.dataset.mute) muteAlert(b.dataset.mute, b.dataset.id, Number($("#alerts-for").value));
+    else muteAlert(b.dataset.unmute, b.dataset.id, 0);
   };
 }

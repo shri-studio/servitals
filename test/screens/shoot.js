@@ -69,8 +69,12 @@ const STYLES = ["classic", "8bit", "phosphor", "eink", "contrast", "nord", "gruv
     await page.waitForTimeout(1200);
     await page.keyboard.press("a");
     await page.waitForSelector("#alerts-body .arow");
+    // a running mute, so its row shows too; undone after the shots
+    if (width === 1280) { await page.click("#alerts-body button[data-mute=rule]"); await page.waitForSelector("#alerts-body .amrow"); }
     await page.screenshot({ path: `${out}/alerts-${width}.png` });
   }
+  await page.click("#alerts-body button[data-unmute]");
+  await page.waitForTimeout(500);
 
   // the settings panel on a desktop and a phone: styled controls, none squeezed or sticking out
   for (const width of [1280, 390]) {

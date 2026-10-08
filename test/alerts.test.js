@@ -222,3 +222,13 @@ test("the page's view of the alerts: running mutes, an unmute, and per node a co
   a.check([{ id: N.id, name: "nas", lastPush: c.t - 30 * MIN, interval: 60 }]);
   assert.deepStrictEqual(a.badges()[N.id], { count: 1, worst: "critical" }, "an offline node: only the offline alert counts");
 });
+
+test("the firing list says why an alert is not told: muted, or held back by its offline node", () => {
+  const { c, a } = setup();
+  c.at(0); a.evaluate(N, view({ ubuntu: { rebootRequired: true } }));
+  assert.strictEqual(a.firing()[0].quiet, "");
+  c.at(20); a.check([{ id: N.id, name: "nas", lastPush: c.t - 15 * MIN, interval: 60 }]);
+  assert.deepStrictEqual(a.firing().map((f) => [f.rule, f.quiet]).sort(), [["offline", ""], ["reboot_required", "offline"]]);
+  a.mute({ node: N.id, until: c.t + MIN });
+  assert.deepStrictEqual(a.firing().map((f) => f.quiet), ["muted", "muted"]);
+});

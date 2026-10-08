@@ -186,12 +186,13 @@ function createAlerts(dir, { now = Date.now, onEvent = () => {}, warn = () => {}
       }
       save();
     },
+    // with why each is not told now: "muted", "offline" (held back by its node) or ""
     firing() {
       const t = now();
       return Object.values(st.instances).filter((i) => i.state === "firing").map((i) => {
         const r = rules.find((x) => x.id === i.rule) || {};
         return { rule: i.rule, severity: r.severity, node: i.node, nodeName: i.nodeName, sub: i.sub, value: i.value,
-                 since: i.since, firedAt: i.firedAt, muted: muted(i, t) };
+                 since: i.since, firedAt: i.firedAt, muted: muted(i, t), quiet: quiet(i, r, t) };
       });
     },
     recent(n = 50) { return events.slice(-n).reverse(); },

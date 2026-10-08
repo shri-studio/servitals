@@ -763,14 +763,14 @@ test("alerts view: mute sends the rule or node and the chosen time, unmute sends
     if (opt && opt.method === "POST") { sent.push([url, JSON.parse(opt.body)]); return { ok: true, json: async () => ({ ok: true }) }; }
     return answer({ firing: [], recent: [], mutes: {} });
   });
-  const t = Date.now();
-  await h.muteAlert("rule", "disk_full", t + 86400000);
-  await h.muteAlert("node", "nodeaaaaaaaa", t);
-  assert.deepStrictEqual(sent, [["/__ctl/alerts/mute", { rule: "disk_full", until: t + 86400000 }], ["/__ctl/alerts/mute", { node: "nodeaaaaaaaa", until: t }]]);
+  // the hub counts the time from its own clock, and an unmute is until 0: a browser whose clock is off changes nothing
+  await h.muteAlert("rule", "disk_full", 86400000);
+  await h.muteAlert("node", "nodeaaaaaaaa", 0);
+  assert.deepStrictEqual(sent, [["/__ctl/alerts/mute", { rule: "disk_full", for: 86400000 }], ["/__ctl/alerts/mute", { node: "nodeaaaaaaaa", until: 0 }]]);
   assert.deepStrictEqual(h.toasts, [["alerts.muted", false], ["alerts.unmuted", false]]);
   assert.deepStrictEqual(h.calls, { loadNodes: 2, renderFleetIfShown: 2 });
   const no = alertsHarness(async (url, opt) => (opt ? { ok: false, status: 400 } : answer({})));
-  await no.muteAlert("rule", "cpu", t + 1);
+  await no.muteAlert("rule", "cpu", 3600000);
   assert.deepStrictEqual(no.toasts, [["alerts.muteFailed", true]]);
   // the buttons: a click mutes for the time chosen above the list
   h.initAlerts();
@@ -779,8 +779,7 @@ test("alerts view: mute sends the rule or node and the chosen time, unmute sends
   h.els["#alerts-body"].onclick({ target: { closest: () => btn } });
   await new Promise((r) => setImmediate(r));
   assert.strictEqual(btn.disabled, true, "one click, one request");
-  assert.strictEqual(sent[2][1].node, "nodebbbbbbbb");
-  assert.ok(Math.abs(sent[2][1].until - (Date.now() + 3600000)) < 5000);
+  assert.deepStrictEqual(sent[2][1], { node: "nodebbbbbbbb", for: 3600000 });
 });
 
 test("the alerts view is a dialog loaded on first use: [a], its button, esc; kept for the offline copy", () => {
@@ -789,4 +788,22 @@ test("the alerts view is a dialog loaded on first use: [a], its button, esc; kep
   assert.match(JS, /if \(e\.key === "a"\)/);
   assert.match(JS, /if \(e\.key === "Escape"\) \{ closeSettings\(\); closeAlerts\(\);/);
   assert.match(fs.readFileSync(path.join(__dirname, "..", "www", "sw.js"), "utf8"), /"\/js\/alerts\.js"/);
+});
+
+test("alerts view: an alert held back by its offline server says so; a mute row has its own columns", () => {
+  const { STRINGS } = require("../hub/lib/i18n");
+  const env = { esc: escA, STRINGS, fmtShare: (v) => v + "%", fmtTemp: String, fmtDur: () => "5m", fmtTime: () => "12:00", Date };
+  const { alertsHtml } = new Function(...Object.keys(env), "tr", `${fs.readFileSync(path.join(__dirname, "..", "www", "js", "alerts.js"), "utf8")};
+    return { alertsHtml };`)(...Object.values(env), tr);
+  const now = Date.now();
+  const html = alertsHtml({ firing: [{ rule: "reboot_required", severity: "info", node: "n", nodeName: "nas", since: now, quiet: "offline" }],
+    mutes: { rules: { cpu: now + 1 }, nodes: {} }, recent: [] }, {});
+  assert.match(html, /<div class="arow amuted">.*<i>server offline<\/i>/, "held back: dimmed and named");
+  assert.match(html, /<div class="arow amrow"><span class="awhat">rule: cpu/);
+  assert.match(require("./helpers/page").CSS, /\.arow\.amrow \{ grid-template-columns: minmax\(0, 1fr\) max-content 200px; \}/);
+});
+
+test("keys typed into the alerts dialog's choice stay there; behind an open dialog only [a] and esc act", () => {
+  assert.match(JS, /if \(\["INPUT", "TEXTAREA", "SELECT"\]\.includes\(e\.target\.tagName\)\) return;/);
+  assert.match(JS, /if \(\$\("#alerts-overlay"\)\.classList\.contains\("open"\)\) \{\n\s+if \(e\.key === "a" \|\| e\.key === "Escape"\) closeAlerts\(\);\n\s+return;\n\s+\}/);
 });

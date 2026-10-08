@@ -742,17 +742,21 @@ async function handle(req, res) {
     if (req.method === "GET" && pathname === "/__ctl/alerts") {
       return json(200, { firing: alerts.firing(), recent: alerts.recent(50), mutes: alerts.mutes() });
     }
-    // mute a rule or a node until a time (ms since 1970; at most a year ahead); now or earlier unmutes
+    // mute a rule or a node for a time (ms, counted from the hub's clock, at most a year), or
+    // until a time (ms since 1970; at most a year ahead); now or earlier (0) unmutes
     if (req.method === "POST" && pathname === "/__ctl/alerts/mute") {
       let body = null;
       try { body = JSON.parse(await readBodyN(req, 1024)); } catch (_) { /* answered below */ }
       const b = body && typeof body === "object" ? body : {};
       const okRule = typeof b.rule === "string" && DEFAULT_RULES.some((r) => r.id === b.rule);
       const okNode = typeof b.node === "string" && !!nodes.get(b.node);
-      const until = Number(b.until);
+      const YEAR = 366 * 86400000;
+      const okFor = b.for === undefined || (typeof b.for === "number" && b.for > 0 && b.for <= YEAR);
+      const until = b.for !== undefined ? Date.now() + b.for : Number(b.until);
       if ((!okRule && !okNode) || (b.rule !== undefined && !okRule) || (b.node !== undefined && !okNode)
-          || !Number.isFinite(until) || until > Date.now() + 366 * 86400000) {
-        return json(400, { error: "mute needs a known rule or node, and until (ms, at most a year ahead)" });
+          || !okFor || (b.for !== undefined && b.until !== undefined)
+          || !Number.isFinite(until) || until > Date.now() + YEAR) {
+        return json(400, { error: "mute needs a known rule or node, and for (ms, at most a year) or until (ms, at most a year ahead)" });
       }
       alerts.mute(okRule ? { rule: b.rule, until } : { node: b.node, until });
       log.audit("alert.muted", { ip, ...(okRule ? { rule: b.rule } : { node: b.node }), until });

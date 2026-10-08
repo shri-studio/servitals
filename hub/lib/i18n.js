@@ -193,7 +193,6 @@ const STRINGS = {
   "alerts.mute.node": "server: {name}",
   "alerts.until": "until {time}",
   "alerts.for": "for {time}",
-  "alerts.mutedTag": "muted",
   "alerts.muteRule": "mute rule",
   "alerts.muteNode": "mute server",
   "alerts.unmute": "unmute",

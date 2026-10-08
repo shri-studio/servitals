@@ -553,6 +553,7 @@ a:hover { text-decoration: underline; }
 .arow { display: grid; grid-template-columns: 70px minmax(0, 1fr) minmax(0, 140px) 120px 200px; gap: 4px 10px; align-items: center;
   padding: 5px 0; border-bottom: 1px solid var(--border); font-size: 12.5px; }
 .arow.amuted { opacity: .6; }
+.arow.amrow { grid-template-columns: minmax(0, 1fr) max-content 200px; }
 .arow .awhat { color: var(--fg-bright); overflow-wrap: anywhere; }
 .arow .asub, .arow .anode, .arow .asince { color: var(--dim); }
 .arow .aacts { display: flex; gap: 6px; justify-content: flex-end; align-items: center; color: var(--dim); }

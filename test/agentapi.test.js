@@ -323,3 +323,21 @@ test("alerts: the page gets the running mutes, can unmute, and sees each node's 
     assert.deepStrictEqual(await card(), { count: 2, worst: "info" });
   });
 });
+
+test("alerts: a mute runs for a time the hub counts from its own clock; until 0 unmutes; a bad time is refused", async () => {
+  await withHub(async (hub, c) => {
+    const cookie = cookieFrom(await login(hub.port));
+    const mutes = async () => JSON.parse((await request(hub.port, { path: "/__ctl/alerts", headers: { cookie } })).body).mutes;
+    const post = (b) => ctlPost(hub.port, cookie, "/__ctl/alerts/mute", JSON.stringify(b));
+    const before = Date.now();
+    assert.strictEqual((await post({ node: c.id, for: 3600000 })).status, 200);
+    const until = (await mutes()).nodes[c.id];
+    assert.ok(until >= before + 3600000 && until <= Date.now() + 3600000, "the hub's now plus the time");
+    assert.strictEqual((await post({ node: c.id, until: 0 })).status, 200);
+    assert.deepStrictEqual((await mutes()).nodes, {}, "until 0: unmuted, whatever the browser's clock says");
+    for (const bad of [-1, 0, 367 * 86400000, "1h", null]) {
+      assert.strictEqual((await post({ node: c.id, for: bad })).status, 400, `for: ${bad}`);
+    }
+    assert.strictEqual((await post({ node: c.id, for: 3600000, until: 0 })).status, 400, "one of the two");
+  });
+});

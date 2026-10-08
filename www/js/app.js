@@ -1290,10 +1290,14 @@ function openSettings() {
   $(".logout-form").addEventListener("submit", () => { if (window.caches) caches.keys().then(keys => keys.forEach(k => caches.delete(k))); });
 
   document.addEventListener("keydown", e => {
-    if (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA") return;
+    if (["INPUT", "TEXTAREA", "SELECT"].includes(e.target.tagName)) return;
     if ($("#confirm-overlay").classList.contains("open")) {
       if (e.key === "Escape") closeConfirm(false);
       if (e.key === "Enter") { e.preventDefault(); closeConfirm(true); }
+      return;
+    }
+    if ($("#alerts-overlay").classList.contains("open")) {
+      if (e.key === "a" || e.key === "Escape") closeAlerts();
       return;
     }
     if (e.key === "s") { e.preventDefault(); $("#overlay").classList.contains("open") ? closeSettings() : openSettings(); }
