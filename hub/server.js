@@ -179,7 +179,7 @@ for (const n of nodes.list()) {
   } catch (_) { /* no snapshot yet */ }
 }
 // history (spec 7): ring files per node and series; the current minute in memory
-const history = createHistory(path.join(DATA, "history"));
+const history = createHistory(path.join(DATA, "history"), { log });   // logs a failing series or a full node once
 const historyFlush = () => {
   try { history.flush(); } catch (e) { log.warn("history.flush_failed", { error: e.code || String(e) }); }
 };

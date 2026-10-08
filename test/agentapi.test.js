@@ -264,8 +264,10 @@ test("history: a push becomes series the page can ask for, and they outlive a re
     assert.strictEqual(r.status, 200);
     const h = JSON.parse(r.body);
     assert.strictEqual(h.step, 60);
-    assert.deepStrictEqual(h.points.at(-1).slice(1), [12, 12, 12]);
-    assert.deepStrictEqual(JSON.parse((await get(`node=${c.id}&series=mem&range=24h`)).body).points.at(-1).slice(1), [25, 25, 25]);
+    // the last point with data: the push's minute (a later minute may have begun meanwhile)
+    const lastData = (points) => points.filter((p) => p[1] !== null).at(-1).slice(1);
+    assert.deepStrictEqual(lastData(h.points), [12, 12, 12]);
+    assert.deepStrictEqual(lastData(JSON.parse((await get(`node=${c.id}&series=mem&range=24h`)).body).points), [25, 25, 25]);
     assert.strictEqual((await get("series=load1&range=1h")).status, 404);
     assert.strictEqual((await get("series=cpu&range=2h")).status, 400);
     assert.strictEqual((await get("node=bbbbbbbbbbbb&series=cpu&range=1h")).status, 404);
@@ -275,7 +277,7 @@ test("history: a push becomes series the page can ask for, and they outlive a re
     try {
       const cookie2 = cookieFrom(await login(again.port));
       const back = JSON.parse((await request(again.port, { path: "/__ctl/history?series=cpu&range=1h", headers: { cookie: cookie2 } })).body);
-      assert.deepStrictEqual(back.points.at(-1).slice(1), [12, 12, 12], "flushed on SIGTERM");
+      assert.deepStrictEqual(back.points.filter((p) => p[1] !== null).at(-1).slice(1), [12, 12, 12], "flushed on SIGTERM");
     } finally { await again.stop(); }
   } finally { await hub.stop().catch(() => {}); fs.rmSync(dataDir, { recursive: true, force: true }); }
 });

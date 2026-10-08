@@ -124,3 +124,69 @@ test("the minute in progress shows in a query before it is written", () => {
   c.at(2); fresh.add("nodeaaaaaaaa", { mem: 1 });
   assert.deepStrictEqual(pts(fresh.query("nodeaaaaaaaa", "mem", "1h")).at(-1), [1, 1, 1], "a series with no file yet");
 });
+
+test("names a file system cannot take: long ones and broken characters are stored, listed and read by their real name", () => {
+  const c = clock(), h = createHistory(dir(), { now: c.now });
+  const long = "disk./media/u/" + "Диск".repeat(15) + ".used";   // 6 bytes a letter once encoded: past 255
+  const broken = "disk./mnt/" + "x".repeat(10) + "\ud83d.used";       // a lone surrogate (a cut emoji)
+  c.at(0); h.add("nodeaaaaaaaa", { [long]: 40, [broken]: 7, cpu: 1 }); h.flush();
+  assert.deepStrictEqual(h.series("nodeaaaaaaaa").sort(), [broken, "cpu", long].sort());
+  assert.deepStrictEqual(pts(h.query("nodeaaaaaaaa", long, "1h")).at(-1), [40, 40, 40]);
+  assert.deepStrictEqual(pts(h.query("nodeaaaaaaaa", broken, "1h")).at(-1), [7, 7, 7]);
+});
+
+test("one series that cannot be written never stops the others, in a push or a flush", () => {
+  const c = clock(), h = createHistory(dir(), { now: c.now });
+  c.at(0); h.add("nodeaaaaaaaa", { cpu: 1, mem: 1 }); h.add("nodebbbbbbbb", { cpu: 1 }); h.flush();
+  const bad = path.join(h.dir, "nodeaaaaaaaa", "cpu.ring");
+  fs.rmSync(bad); fs.mkdirSync(bad);                                // the write fails (EISDIR)
+  c.at(1); h.add("nodeaaaaaaaa", { cpu: 2, mem: 2 }); h.add("nodebbbbbbbb", { cpu: 2 });
+  c.at(2); h.add("nodeaaaaaaaa", { cpu: 3, mem: 3 }); h.add("nodebbbbbbbb", { cpu: 3 });
+  assert.doesNotThrow(() => h.flush());
+  assert.deepStrictEqual(pts(h.query("nodeaaaaaaaa", "mem", "1h")).slice(-2), [[2, 2, 2], [3, 3, 3]]);
+  assert.deepStrictEqual(pts(h.query("nodebbbbbbbb", "cpu", "1h")).slice(-2), [[2, 2, 2], [3, 3, 3]]);
+});
+
+test("a node gets at most so many series: new names past the cap are left out and logged once", () => {
+  const c = clock(), logged = [];
+  const h = createHistory(dir(), { now: c.now, maxSeries: 3, log: { warn: (e, f) => logged.push([e, f]) } });
+  c.at(0); h.add("nodeaaaaaaaa", { cpu: 1, mem: 1, temp: 1 }); h.flush();
+  for (let i = 0; i < 5; i++) { c.at(1 + i); h.add("nodeaaaaaaaa", { cpu: 2, ["ctr.run" + i + ".cpu"]: 1 }); }
+  h.flush();
+  assert.deepStrictEqual(h.series("nodeaaaaaaaa").sort(), ["cpu", "mem", "temp"]);
+  assert.deepStrictEqual(pts(h.query("nodeaaaaaaaa", "cpu", "1h")).at(-1), [2, 2, 2], "the known ones carry on");
+  assert.deepStrictEqual(logged, [["history.series_cap", { node: "nodeaaaaaaaa", max: 3 }]]);
+});
+
+test("a clock that jumped ahead and came back: history carries on from the right time", () => {
+  const c = clock(), h = createHistory(dir(), { now: c.now });
+  c.at(0); h.add("nodeaaaaaaaa", { cpu: 1 }); h.flush();
+  c.at(3 * 1440); h.add("nodeaaaaaaaa", { cpu: 99 }); h.flush();     // three days ahead (a bad RTC)
+  c.at(5); h.add("nodeaaaaaaaa", { cpu: 5 }); c.at(6); h.add("nodeaaaaaaaa", { cpu: 6 }); h.flush();   // corrected
+  const day = pts(h.query("nodeaaaaaaaa", "cpu", "1h"));
+  assert.deepStrictEqual(day.slice(-2), [[5, 5, 5], [6, 6, 6]]);
+  assert.ok(day.flat().every((x) => x !== 99), "the future minute is gone");
+});
+
+test("a truncated or empty ring file is made again, never read as zeros or a crash", () => {
+  const c = clock(), h = createHistory(dir(), { now: c.now });
+  c.at(0); h.add("nodeaaaaaaaa", { cpu: 1, mem: 1 }); c.at(1); h.flush();   // minute 0 written and closed
+  const f = (n) => path.join(h.dir, "nodeaaaaaaaa", n + ".ring");
+  fs.truncateSync(f("cpu"), 100); fs.writeFileSync(f("mem"), "");
+  assert.strictEqual(h.query("nodeaaaaaaaa", "cpu", "1h"), null, "a short file: no answer, no throw");
+  c.at(2); h.add("nodeaaaaaaaa", { cpu: 2, mem: 2 }); h.flush();
+  for (const n of ["cpu", "mem"]) {
+    const p = pts(h.query("nodeaaaaaaaa", n, "1h"));
+    assert.deepStrictEqual(p.at(-1), [2, 2, 2], n);
+    assert.ok(p.slice(0, -1).every(([a]) => a === null), `${n}: the rest is a gap, not zeros`);
+  }
+});
+
+test("filling a long gap writes in runs, not a point at a time (no long stall after an outage)", () => {
+  const c = clock(), h = createHistory(dir(), { now: c.now });
+  c.at(0); h.add("nodeaaaaaaaa", { cpu: 1 }); h.flush();
+  const orig = fs.writeSync; let writes = 0;
+  fs.writeSync = (...a) => { writes++; return orig.apply(fs, a); };
+  try { c.at(2 * 1440); h.add("nodeaaaaaaaa", { cpu: 2 }); h.flush(); } finally { fs.writeSync = orig; }
+  assert.ok(writes < 40, `${writes} writes for two days of gap`);
+});
