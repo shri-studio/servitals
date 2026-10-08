@@ -53,7 +53,7 @@ Plain-HTTP hubs on a LAN keep using `join`.
 | hub behind a Cloudflare tunnel | agents use the tunnel hostname; turn off Bot Fight Mode for it; Cloudflare Access needs a service token in `HUB_HEADERS` |
 | hub behind a reverse proxy | TLS at the proxy; set `TRUSTED_PROXIES` in `hub.env` to the proxy's address |
 | server with no outbound internet except one allowed destination | allow outbound 443 to the hub hostname only |
-| server that reaches the internet through an HTTP proxy | `HTTPS_PROXY` in `agent.env`; lower `WAIT_SECONDS` if the proxy drops idle connections |
+| server that reaches the internet through an HTTP proxy | `HTTPS_PROXY` in `agent.env` (and in `hub.env` for a hub that sends alerts); lower `WAIT_SECONDS` if the proxy drops idle connections |
 | many private servers in a closed network | run a self-hosted hub inside it (relaying chosen nodes to the hosted service comes later) |
 | phone notifications (Web Push, later) | the hub must be served over HTTPS (tunnel, Tailscale certificate, or reverse proxy) |
 
@@ -105,7 +105,15 @@ NO_PROXY=.internal.example
 
 `curl` tunnels HTTPS through the proxy with `CONNECT`. The agent always adds
 `localhost,127.0.0.1,::1` to `NO_PROXY`, so the hub's own agent never uses
-the proxy. Proxies and firewalls often cut idle connections before the
+the proxy.
+
+A hub that sends alerts (ntfy, webhooks) reads the same `HTTPS_PROXY`,
+`HTTP_PROXY` and `NO_PROXY` from `/etc/servitals/hub.env`. Only `http://`
+proxy URLs work; HTTPS goes through a `CONNECT` tunnel, so the proxy never
+sees the message and the destination's certificate is checked as usual.
+`NO_PROXY` takes host names, domain suffixes (`.example.com`), IPv4 CIDRs
+(`10.0.0.0/8`), IPv6 addresses and `*`; `localhost` is always direct. The
+hub's log names the proxy host at start, never its credentials. Proxies and firewalls often cut idle connections before the
 55-second long poll ends: set `WAIT_SECONDS=25` (5 to 55) if waits keep
 failing.
 
