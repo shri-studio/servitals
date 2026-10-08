@@ -548,3 +548,22 @@ test("hardware_json: nothing to read gives nulls; an odd reading is skipped, not
   assert.deepStrictEqual(json(runGroup(host, "hardware_json")),
     { fans: [{ label: "it87 fan2", rpm: 900 }], voltages: null, battery: { capacity: 100, status: "Full" } }, "capacity at most 100");
 });
+
+test("hardware_json: a reading the hub would refuse is skipped, never a refused snapshot; unused 0 V inputs and device batteries left out", () => {
+  const host = fakeHost({ ...BASE, "sys/class/hwmon/hwmon1/name": "nct6798\n",
+    "sys/class/hwmon/hwmon1/fan1_input": "-5\n", "sys/class/hwmon/hwmon1/fan1_label": "CPU fan\n",
+    "sys/class/hwmon/hwmon1/fan2_input": "1350000\n",     // a glitched count on it87/nct
+    "sys/class/hwmon/hwmon1/fan3_input": "700\n",
+    "sys/class/hwmon/hwmon1/in1_input": "4294967295\n",  // a driver's error value
+    "sys/class/hwmon/hwmon1/in5_input": "0\n",           // an unused input
+    "sys/class/hwmon/hwmon1/in6_input": "0\n", "sys/class/hwmon/hwmon1/in6_label": "VBAT\n",   // named: kept
+    "sys/class/hwmon/hwmon1/in7_input": "3312\n",
+    // a wireless mouse: type Battery, but the device's own
+    "sys/class/power_supply/hid-aa:bb-battery/type": "Battery\n", "sys/class/power_supply/hid-aa:bb-battery/scope": "Device\n",
+    "sys/class/power_supply/hid-aa:bb-battery/capacity": "30\n", "sys/class/power_supply/hid-aa:bb-battery/status": "Discharging\n" });
+  const { validate } = require("../hub/lib/snapshot");
+  const d = json(runGroup(host, "hardware_json"));
+  assert.deepStrictEqual(d, { fans: [{ label: "nct6798 fan3", rpm: 700 }],
+    voltages: [{ label: "VBAT", value: 0 }, { label: "nct6798 in7", value: 3.312 }], battery: null });
+  assert.ok(validate({ schema: 1, ts: 1, interval: 60, host: { name: "x" }, ...d }).ok, "the hub accepts it");
+});

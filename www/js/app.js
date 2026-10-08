@@ -127,13 +127,14 @@ function systemHtml(u) {
 function hardwareHtml(d) {
   const row = (k, v) => `<div class="row"><span class="k">${esc(k)}</span><span class="v">${v}</span></div>`;
   let h = "";
-  if (d.battery) {
-    const b = d.battery, draining = b.status === "Discharging";
-    const cls = draining && b.capacity < 20 ? "hl-red" : draining && b.capacity < 40 ? "hl-amber" : "";
+  const b = d.battery;
+  if (b && (typeof b.capacity === "number" || b.status)) {
+    const draining = b.status === "Discharging", known = typeof b.capacity === "number";
+    const cls = known && draining && b.capacity < 20 ? "hl-red" : known && draining && b.capacity < 40 ? "hl-amber" : "";
     // the kernel's words (Charging, Not charging...) in the dictionary; others as sent
     const word = String(b.status || "").toLowerCase().replace(/ /g, "");
     const status = b.status ? " · " + esc(STRINGS["hw.bat." + word] ? tr("hw.bat." + word) : b.status) : "";
-    h += row(tr("hw.battery"), `<span class="${cls}">${b.capacity}%</span>${status}`);
+    h += row(tr("hw.battery"), `<span class="${cls}">${known ? b.capacity + "%" : "–"}</span>${status}`);
   }
   if (d.fans && d.fans.length) {
     h += `<div class="plbl">${esc(tr("hw.fans"))}</div>` + d.fans.map(f => row(f.label,
@@ -787,7 +788,8 @@ function renderMetrics(d) {
   }
 
   // hardware: fans, voltages, the battery (most servers have some of these, many none)
-  $("#hw-body").innerHTML = hardwareHtml(d);
+  const hw = hardwareHtml(d);
+  $("#hw-body").innerHTML = hw;
 
   // docker — stash and render (sort / expand handled separately)
   if (d.docker) { dockerData = d.docker; renderDocker(); } else dockerData = null;
@@ -797,7 +799,7 @@ function renderMetrics(d) {
     const el = $(`[data-panel=${panel}]`);
     if (el) el.classList.toggle("hidden", !d[group] || shown[panel] === false);
   }
-  $("[data-panel=hw]").classList.toggle("hidden", !(d.fans || d.voltages || d.battery) || shown.hw === false);
+  $("[data-panel=hw]").classList.toggle("hidden", !hw || shown.hw === false);
 }
 
 /* ------------------------------------------------------------------ network bars */

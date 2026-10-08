@@ -4,7 +4,10 @@
 # (globals such as HOST are set by collect.sh)
 # hardware: fan speeds and voltages from every hwmon chip, and the battery. One
 # grep over the chips' files (a file that cannot be read is skipped) and one awk.
-# A fan is reported when it spins or has a name: boards list empty headers at 0 rpm.
+# A fan or a voltage is reported when it reads something or has a name: boards list
+# empty headers at 0 rpm and unused inputs at 0 V. A reading the hub would refuse
+# (rpm outside 0..1e6, a voltage outside ±1000 V: a glitched count, a driver's error
+# value) is skipped, so one bad sensor never costs the whole snapshot.
 # Each part is null when the host has none (most servers have no battery; many
 # chips need a driver that sensors-detect loads).
 
@@ -31,10 +34,12 @@ hardware_json() {
           kind = kind_i == 1 ? "fan" : "in"
           for (k = 0; k <= top[dir, kind]; k++) {
             if (!((dir, kind, k) in value) || value[dir, kind, k] !~ /^-?[0-9]+$/) continue
-            l = ((dir, kind, k) in label) ? label[dir, kind, k] : name[dir] " " kind k
+            v = value[dir, kind, k] + 0; named = ((dir, kind, k) in label)
+            if (v == 0 && !named) continue
+            l = named ? label[dir, kind, k] : name[dir] " " kind k
             gsub(/\t/, " ", l)
-            if (kind == "fan") { if (value[dir, kind, k] > 0 || ((dir, kind, k) in label)) print "fan\t" l "\t" value[dir, kind, k] + 0 }
-            else printf "volt\t%s\t%.3f\n", l, value[dir, kind, k] / 1000
+            if (kind == "fan") { if (v >= 0 && v <= 1000000) print "fan\t" l "\t" v }
+            else if (v >= -1000000 && v <= 1000000) printf "volt\t%s\t%.3f\n", l, v / 1000
           }
         }
       }
@@ -44,6 +49,8 @@ hardware_json() {
     [ -r "$b/capacity" ] || continue
     line_of "$b/type"   # line_of: agent/lib/temp.sh
     case ${b##*/} in BAT*) ;; *) [ "$REPLY" = Battery ] || continue ;; esac
+    # a wireless mouse or game pad is a Battery too, of the device's own scope
+    line_of "$b/scope"; [ "$REPLY" = Device ] && continue
     line_of "$b/capacity"; cap=$REPLY; line_of "$b/status"; st=$REPLY
     [[ $cap =~ ^[0-9]+$ ]] && { bat=1; break; }
   done

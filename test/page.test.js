@@ -360,8 +360,11 @@ test("the hardware panel: the battery, fans (a named one stopped is red) and vol
   assert.match(hardwareHtml({ battery: { capacity: 30, status: "Charging" } }), /<span class="">30%<\/span> · charging/, "charging: never red");
   assert.match(hardwareHtml({ battery: { capacity: 80, status: "<Odd>" } }), /80%<\/span> · &#60;Odd&#62;/, "a status the dictionary lacks: as sent, escaped");
   assert.strictEqual(hardwareHtml({}), "");
+  // what a third-party agent may send, which the hub accepts: nothing to show, so no panel
+  for (const d of [{ fans: [] }, { voltages: [] }, { battery: {} }]) assert.strictEqual(hardwareHtml(d), "", JSON.stringify(d));
+  assert.match(hardwareHtml({ battery: { status: "Full" } }), /<span class="">–<\/span> · full/, "no capacity: a dash, never undefined%");
   assert.match(HTML, /data-panel="hw"/);
-  assert.match(HTML, /\$\("\[data-panel=hw\]"\)\.classList\.toggle\("hidden", !\(d\.fans \|\| d\.voltages \|\| d\.battery\) \|\| shown\.hw === false\);/);
+  assert.match(HTML, /\$\("\[data-panel=hw\]"\)\.classList\.toggle\("hidden", !hw \|\| shown\.hw === false\);/, "hidden when there is nothing to show");
 });
 
 test("fleet cards show the numbers chosen in settings", () => {
