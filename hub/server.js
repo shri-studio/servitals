@@ -29,6 +29,7 @@ const os = require("os");
 const { createNodeStore, localAgentEnv } = require("./lib/nodes");
 const { createAgentApi } = require("./lib/agentapi");
 const { view: snapshotView } = require("./lib/snapshot");
+const { createHistory, seriesOf } = require("./lib/history");
 const fleet = require("./lib/fleet");
 const { createAdminStore, USER_RE } = require("./lib/admin");
 const { createLinks } = require("./lib/link");
@@ -177,6 +178,17 @@ for (const n of nodes.list()) {
     if (rec && rec.snap && rec.view && rec.at) latest.set(n.id, rec);   // older formats: wait for a push
   } catch (_) { /* no snapshot yet */ }
 }
+// history (spec 7): ring files per node and series; the current minute in memory
+const history = createHistory(path.join(DATA, "history"));
+const historyFlush = () => {
+  try { history.flush(); } catch (e) { log.warn("history.flush_failed", { error: e.code || String(e) }); }
+};
+const historySweep = () => {
+  try { history.sweep(new Set(nodes.list().map((n) => n.id))); } catch (e) { log.warn("history.sweep_failed", { error: e.code || String(e) }); }
+};
+setInterval(historyFlush, 60000).unref();
+setInterval(historySweep, 86400000).unref();
+historySweep();
 const agentApi = createAgentApi({
   nodes, log,
   replayFile: path.join(DATA, "replay.json"),
@@ -185,6 +197,7 @@ const agentApi = createAgentApi({
     const prev = latest.get(id);
     const rec = { snap, view: snapshotView(snap, prev && prev.snap, prev ? prev.view.trend : []), at: Date.now() };
     latest.set(id, rec);
+    try { history.add(id, seriesOf(rec.view)); } catch (e) { log.warn("history.add_failed", { node: id, error: e.code || String(e) }); }
     try { writeFileAtomic(path.join(SNAP_DIR, id + ".json"), JSON.stringify(rec)); }
     catch (e) { log.warn("api.snapshot_write_failed", { node: id, error: e.code || String(e) }); }
   },
@@ -707,6 +720,19 @@ async function handle(req, res) {
       return json(200, { ok: true, woke: r.woke, fresh: r.fresh });
     }
 
+    // history (spec 7): ?node=<id>&series=<name>&range=1h|24h|7d|30d|90d, or series=list
+    if (req.method === "GET" && pathname === "/__ctl/history") {
+      const q = new URL(req.url, "http://x").searchParams;
+      const id = q.get("node") || nodes.localId();
+      if (!id || !nodes.get(id)) return json(404, { error: "no such node" });
+      const series = q.get("series") || "";
+      if (series === "list") return json(200, { series: history.series(id) });
+      const range = q.get("range") || "24h";
+      if (!/^(1h|24h|7d|30d|90d)$/.test(range)) return json(400, { error: "range is 1h, 24h, 7d, 30d or 90d" });
+      const r = history.query(id, series, range);
+      return r ? json(200, r) : json(404, { error: "no such series" });
+    }
+
     // the fleet: every node with its status and the numbers a card shows
     if (req.method === "GET" && pathname === "/__ctl/nodes") {
       const list = nodes.list().map(withFile).map((n) => {
@@ -739,6 +765,7 @@ async function handle(req, res) {
         try { nodes.revoke(id); } catch (e) { return json(400, { error: e.message }); }
         latest.delete(id);
         try { fs.unlinkSync(path.join(SNAP_DIR, id + ".json")); } catch (_) { /* never pushed */ }
+        try { history.remove(id); } catch (_) { /* swept later */ }
         log.audit("node.revoked", { ip, node: id });
         return json(200, { ok: true });
       }
@@ -871,6 +898,7 @@ async function handle(req, res) {
 process.on("unhandledRejection", (e) => log.error("process.unhandled_rejection", { error: String(e && e.stack || e) }));
 process.on("uncaughtException",  (e) => log.error("process.uncaught_exception", { error: String(e && e.stack || e) }));
 process.on("SIGTERM", () => {
+  historyFlush();     // a clean restart loses no minute (spec 7)
   agentApi.close();   // answer open long polls so close() is not held up by them
   server.close(() => process.exit(0));
   setTimeout(() => process.exit(0), 3000).unref();

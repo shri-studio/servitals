@@ -7,6 +7,15 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- History (spec 7): the hub keeps every node's series (cpu, memory, swap,
+  temperature, load, iowait, pressure, network, each disk's use and I/O,
+  each container) in ring files under the state directory's `history/`:
+  1-minute points for 24 h, 10-minute for 7 days and hourly for 90 days,
+  each with average, low and high (containers: 1-minute averages). About
+  2 MB per node; written every minute and on stop, so a restart loses
+  nothing. `GET /__ctl/history?node=&series=&range=1h|24h|7d|30d|90d`
+  answers the page; `series=list` names a node's series. A revoked node's
+  history goes, and a series silent for 90 days is swept.
 - Hardware (spec 9): a new panel shows fan speeds (a named fan that stopped
   in red), voltages and the battery, from hwmon and
   `/sys/class/power_supply`; it hides on hosts with none. Fleet cards can

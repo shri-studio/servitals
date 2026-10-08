@@ -248,3 +248,34 @@ test("a push with a bad optional group is stored without it, says what was dropp
     assert.strictEqual(count(), 2, "after a clean push, it is news again");
   });
 });
+
+test("history: a push becomes series the page can ask for, and they outlive a restart", async () => {
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "sv-hub-"));   // kept across the restart
+  const hub = await startHub({}, { dataDir });
+  const c = creds(hub);
+  try {
+    const cookie = cookieFrom(await login(hub.port));
+    const get = async (q) => request(hub.port, { path: "/__ctl/history?" + q, headers: { cookie } });
+    assert.strictEqual((await signed(hub, c, { body: snap({ cpu: { usage: 12, cores: 2 }, mem: { total: 200, used: 50 },
+      disks: [{ mount: "/", pct: 40 }] }) })).status, 200);
+    const list = JSON.parse((await get("series=list")).body);
+    assert.deepStrictEqual(list.series.sort(), ["cpu", "disk./.used", "mem"]);
+    const r = await get("series=cpu&range=1h");
+    assert.strictEqual(r.status, 200);
+    const h = JSON.parse(r.body);
+    assert.strictEqual(h.step, 60);
+    assert.deepStrictEqual(h.points.at(-1).slice(1), [12, 12, 12]);
+    assert.deepStrictEqual(JSON.parse((await get(`node=${c.id}&series=mem&range=24h`)).body).points.at(-1).slice(1), [25, 25, 25]);
+    assert.strictEqual((await get("series=load1&range=1h")).status, 404);
+    assert.strictEqual((await get("series=cpu&range=2h")).status, 400);
+    assert.strictEqual((await get("node=bbbbbbbbbbbb&series=cpu&range=1h")).status, 404);
+    assert.strictEqual((await request(hub.port, { path: "/__ctl/history?series=cpu&range=1h" })).status, 401, "logged in only");
+    await hub.stop();
+    const again = await startHub({}, { dataDir });
+    try {
+      const cookie2 = cookieFrom(await login(again.port));
+      const back = JSON.parse((await request(again.port, { path: "/__ctl/history?series=cpu&range=1h", headers: { cookie: cookie2 } })).body);
+      assert.deepStrictEqual(back.points.at(-1).slice(1), [12, 12, 12], "flushed on SIGTERM");
+    } finally { await again.stop(); }
+  } finally { await hub.stop().catch(() => {}); fs.rmSync(dataDir, { recursive: true, force: true }); }
+});
