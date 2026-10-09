@@ -211,19 +211,19 @@ test("Gotify, Telegram, Discord, Slack, Teams, Pushover and Matrix: each gets th
   assert.deepStrictEqual([t.url, t.json.chat_id, t.json.text], [`https://api.telegram.org/bot${TG}/sendMessage`, "-100123", MSG.title + "\n" + MSG.text]);
   const d = b("discord", { url: "https://discord.test/api/webhooks/1/x" });
   assert.deepStrictEqual(d.json.allowed_mentions, { parse: [] }, "@everyone in a name pings nobody");
-  assert.deepStrictEqual([d.json.embeds[0].title, d.json.embeds[0].color], [MSG.title, 0xd03030]);
+  assert.deepStrictEqual([d.json.embeds[0].title, d.json.embeds[0].color], ["critical: <b\\>disk</b\\> & @everyone on nas", 0xd03030], "Markdown shown as text");
   const s = b("slack", { url: "https://hooks.slack.test/x" });
   assert.strictEqual(s.json.text, "*critical: &lt;b&gt;disk&lt;/b&gt; &amp; @everyone on nas*\nvalue 96%\nsince 03:10");
   const m = b("teams", { url: "https://teams.test/x" });
   assert.strictEqual(m.json.attachments[0].contentType, "application/vnd.microsoft.card.adaptive");
-  assert.deepStrictEqual(m.json.attachments[0].content.body.map((x) => [x.text, x.weight]), [[MSG.title, "Bolder"], [MSG.text, undefined]]);
+  assert.deepStrictEqual(m.json.attachments[0].content.body.map((x) => [x.text, x.weight]), [["critical: <b\\>disk</b\\> & @everyone on nas", "Bolder"], [MSG.text, undefined]]);
   const p = b("pushover", { token: PO, user: PU });
   assert.deepStrictEqual([p.url, p.json.token, p.json.user, p.json.priority], ["https://api.pushover.net/1/messages.json", PO, PU, 1]);
   const x = b("matrix", { server: "https://m.test", room: "!abc:m.test", token: "mtk" });
   assert.deepStrictEqual([x.method, x.url, x.headers.authorization, x.json.msgtype],
     ["PUT", "https://m.test/_matrix/client/v3/rooms/!abc%3Am.test/send/m.room.message/svtx1", "Bearer mtk", "m.text"]);
   const long = ADAPTERS.discord.build({ url: "https://d.test/x" }, { ...MSG, text: "x".repeat(5000) });
-  assert.strictEqual(JSON.parse(long.body).embeds[0].description.length, 3500, "a long digest is cut to what the service takes");
+  assert.strictEqual(JSON.parse(long.body).embeds[0].description.length, 3000, "one long line is cut to what the service takes");
 });
 
 test("their settings are checked: a token that would change the URL path, a chat, a room, Pushover's keys", () => {
@@ -246,4 +246,33 @@ test("Matrix: a retry sends the same transaction id, so the room gets one messag
   assert.strictEqual(s.sent.length, 2);
   assert.strictEqual(s.sent[0].url, s.sent[1].url);
   assert.deepStrictEqual(s.sent.map((r) => r.method), ["PUT", "PUT"]);
+});
+
+test("a saved secret goes only where it went: change the server or URL, and the secret must be typed again", () => {
+  const was = { channels: [{ id: "ch_g", type: "gotify", name: "g", min: "warning", on: true, config: { server: "https://g.test", token: "gtk" } },
+                           { id: "ch_t", type: "telegram", name: "t", min: "warning", on: true, config: { token: TG, chat: "1" } }] };
+  const save = (chs) => checkChannels({ channels: chs }, was);
+  assert.strictEqual(save([{ ...was.channels[0], name: "renamed", config: { server: "https://g.test", token: SECRET } }]).channels[0].config.token, "gtk");
+  assert.throws(() => save([{ ...was.channels[0], config: { server: "https://evil.test", token: SECRET } }]), /g: token: type it again/);
+  assert.throws(() => save([{ ...was.channels[1], config: { token: SECRET, chat: "1", server: "https://evil.test" } }]), /t: token: type it again/,
+    "an optional server added counts too");
+});
+
+test("a long digest is cut at a line, saying how many more; a cut never splits a character; Discord and Teams show names as text", () => {
+  const lines = Array.from({ length: 300 }, (_, i) => `fired: security updates on server-${i} · 3`);
+  const p = JSON.parse(ADAPTERS.pushover.build({ token: PO, user: PU }, { ...MSG, severity: "info", text: lines.join("\n") }).body).message;
+  assert.ok(p.length <= 1000, String(p.length));
+  const kept = p.split("\n");
+  assert.match(kept[kept.length - 1], /^\+\d+ more in the alert log$/);
+  assert.strictEqual(kept.length - 1 + Number(/\+(\d+)/.exec(kept[kept.length - 1])[1]), 300, "every line counted");
+  assert.deepStrictEqual(kept.slice(0, -1), lines.slice(0, kept.length - 1), "whole lines only");
+  const emoji = "x".repeat(3498) + "🔥🔥🔥";
+  const t = JSON.parse(ADAPTERS.telegram.build({ token: TG, chat: "1" }, { ...MSG, title: "", text: emoji }).body).text;
+  assert.ok(!/[\ud800-\udbff]$|^[\udc00-\udfff]/.test(t.replace(/…$/, "")), "no lone half of a pair");
+  const name = { ...MSG, title: "fired: [fix here](https://evil.test) on my_data_disk", text: "*x*" };
+  const d = JSON.parse(ADAPTERS.discord.build({ url: "https://d.test/x" }, name).body).embeds[0];
+  assert.strictEqual(d.title, "fired: \\[fix here\\]\\(https://evil.test\\) on my\\_data\\_disk");
+  assert.strictEqual(d.description, "\\*x\\*");
+  const tm = JSON.parse(ADAPTERS.teams.build({ url: "https://t.test/x" }, name).body).attachments[0].content.body[0].text;
+  assert.match(tm, /\\\[fix here\\\]\\\(/);
 });

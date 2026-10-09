@@ -40,7 +40,25 @@ const isObj = (o) => o !== null && typeof o === "object" && !Array.isArray(o);
 const httpUrl = (s) => { try { return /^https?:$/.test(new URL(s).protocol); } catch (_) { return false; } };
 
 const base = (u) => String(u).replace(/\/+$/, "");
-const cut = (s, n) => (s.length > n ? s.slice(0, n - 1) + "…" : s);
+// cut to n characters (code points: never half an emoji)
+const cut = (s, n) => { const a = Array.from(s); return a.length > n ? a.slice(0, n - 1).join("") + "…" : s; };
+// a text cut at a line, saying how many lines more (a digest has every event)
+function fit(text, n) {
+  const lines = text.split("\n");
+  if (Array.from(text).length <= n) return text;
+  const out = [];
+  let len = 0;
+  for (const l of lines) {
+    const more = tr("notify.more", { n: lines.length - out.length });
+    if (len + Array.from(l).length + 1 + Array.from(more).length + 1 > n) break;
+    out.push(l);
+    len += Array.from(l).length + 1;
+  }
+  if (!out.length) return cut(text, n);
+  return out.join("\n") + "\n" + tr("notify.more", { n: lines.length - out.length });
+}
+// Markdown as plain text (Discord, Teams): a name cannot make a link or a heading
+const md = (s) => s.replace(/[\\*_~`[\]()>#|]/g, "\\$&");
 const pri = (m, crit, warn, info) => (m.severity === "critical" ? crit : m.severity === "warning" ? warn : info);
 const COLOR = { critical: 0xd03030, warning: 0xe0a020, info: 0x3070d0 };
 
@@ -70,7 +88,7 @@ const ADAPTERS = {
     fields: { server: { url: true }, token: { secret: true, header: true } },
     build(c, m) {
       return { url: base(c.server) + "/message", headers: { "content-type": "application/json", "x-gotify-key": c.token },
-        body: JSON.stringify({ title: cut(m.title, 250), message: cut(m.text, 3500), priority: pri(m, 8, 5, 2) }) };
+        body: JSON.stringify({ title: cut(m.title, 250), message: fit(m.text, 3500), priority: pri(m, 8, 5, 2) }) };
     },
   },
   // the bot token is part of the URL path: its form is checked, so it cannot change the path
@@ -78,7 +96,7 @@ const ADAPTERS = {
     fields: { token: { secret: true, re: /^[0-9]{1,20}:[A-Za-z0-9_-]{20,100}$/ }, chat: { re: /^(-?[0-9]{1,20}|@[A-Za-z0-9_]{5,32})$/ }, server: { optional: true, url: true } },
     build(c, m) {
       return { url: base(c.server || "https://api.telegram.org") + "/bot" + c.token + "/sendMessage", headers: { "content-type": "application/json" },
-        body: JSON.stringify({ chat_id: c.chat, text: cut(m.title + "\n" + m.text, 3500), disable_web_page_preview: true }) };
+        body: JSON.stringify({ chat_id: c.chat, text: cut(m.title, 250) + "\n" + fit(m.text, 3200), disable_web_page_preview: true }) };
     },
   },
   // an embed, and no mentions: a rule or server name with @everyone pings nobody
@@ -86,7 +104,7 @@ const ADAPTERS = {
     fields: { url: { url: true, secret: true } },
     build(c, m) {
       return { url: c.url, headers: { "content-type": "application/json" },
-        body: JSON.stringify({ allowed_mentions: { parse: [] }, embeds: [{ title: cut(m.title, 250), description: cut(m.text, 3500), color: COLOR[m.severity] || COLOR.info }] }) };
+        body: JSON.stringify({ allowed_mentions: { parse: [] }, embeds: [{ title: md(cut(m.title, 200)), description: md(fit(m.text, 3000)), color: COLOR[m.severity] || COLOR.info }] }) };
     },
   },
   // Slack's markup: &, < and > escaped, so a name cannot make a link or a mention
@@ -94,24 +112,24 @@ const ADAPTERS = {
     fields: { url: { url: true, secret: true } },
     build(c, m) {
       const esc = (x) => x.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-      return { url: c.url, headers: { "content-type": "application/json" }, body: JSON.stringify({ text: cut("*" + esc(m.title) + "*\n" + esc(m.text), 3500) }) };
+      return { url: c.url, headers: { "content-type": "application/json" }, body: JSON.stringify({ text: "*" + esc(cut(m.title, 250)) + "*\n" + esc(fit(m.text, 3200)) }) };
     },
   },
   // a Teams Workflows webhook takes an Adaptive Card
   teams: {
     fields: { url: { url: true, secret: true } },
     build(c, m) {
-      const block = (text, bold) => ({ type: "TextBlock", text: cut(text, 3500), wrap: true, ...(bold ? { weight: "Bolder" } : {}) });
+      const block = (text, bold) => ({ type: "TextBlock", text: md(text), wrap: true, ...(bold ? { weight: "Bolder" } : {}) });
       return { url: c.url, headers: { "content-type": "application/json" }, body: JSON.stringify({ type: "message", attachments: [{
         contentType: "application/vnd.microsoft.card.adaptive",
-        content: { type: "AdaptiveCard", $schema: "http://adaptivecards.io/schemas/adaptive-card.json", version: "1.4", body: [block(m.title, true), block(m.text)] } }] }) };
+        content: { type: "AdaptiveCard", $schema: "http://adaptivecards.io/schemas/adaptive-card.json", version: "1.4", body: [block(cut(m.title, 250), true), block(fit(m.text, 3200))] } }] }) };
     },
   },
   pushover: {
     fields: { token: { secret: true, re: /^[A-Za-z0-9]{30}$/ }, user: { secret: true, re: /^[A-Za-z0-9]{30}$/ }, server: { optional: true, url: true } },
     build(c, m) {
       return { url: base(c.server || "https://api.pushover.net") + "/1/messages.json", headers: { "content-type": "application/json" },
-        body: JSON.stringify({ token: c.token, user: c.user, title: cut(m.title, 250), message: cut(m.text, 1000), priority: pri(m, 1, 0, -1) }) };
+        body: JSON.stringify({ token: c.token, user: c.user, title: cut(m.title, 250), message: fit(m.text, 1000), priority: pri(m, 1, 0, -1) }) };
     },
   },
   // a room message: PUT with a transaction id, so a retry is not a second message
@@ -120,7 +138,7 @@ const ADAPTERS = {
     build(c, m) {
       return { method: "PUT", url: `${base(c.server)}/_matrix/client/v3/rooms/${encodeURIComponent(c.room)}/send/m.room.message/${m.txn}`,
         headers: { "content-type": "application/json", authorization: "Bearer " + c.token },
-        body: JSON.stringify({ msgtype: "m.text", body: cut(m.title + "\n" + m.text, 3500) }) };
+        body: JSON.stringify({ msgtype: "m.text", body: cut(m.title, 250) + "\n" + fit(m.text, 3200) }) };
     },
   },
 };
@@ -155,8 +173,11 @@ function checkChannels(input, old = { channels: [] }) {
     const config = {};
     for (const [k, f] of Object.entries(ad.fields)) {
       let v = cfg[k];
+      // a saved secret goes only where it went: an address changed, and it must be typed again
       if (v === SECRET && f.secret) {
-        if (!was || was.config[k] === undefined) throw new Error(`${at}: ${k}: type it again`);
+        const same = (x, y) => (x || "") === (y || "");
+        const moved = was && Object.entries(ad.fields).some(([k2, f2]) => f2.url && !f2.secret && !same(cfg[k2], was.config[k2]));
+        if (!was || was.config[k] === undefined || moved) throw new Error(`${at}: ${k}: type it again`);
         v = was.config[k];
       }
       if (v === undefined || v === "") {

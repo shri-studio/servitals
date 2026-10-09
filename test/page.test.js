@@ -984,7 +984,8 @@ test("channels: rows and back; secrets stay masked, empty fields go; the form es
   const html = s.chHtml();
   assert.doesNotMatch(html, /phone <1>|style=/);
   assert.match(html, /value="phone &#60;1&#62;"/);
-  assert.match(html, /token \(optional\) <input type="password" class="cval" data-k="token" autocomplete="off" value="\*\*\*\*\*\*\*\*">/);
+  assert.match(html, /token \(optional\) <input type="password" class="cval" data-k="token" autocomplete="new-password" data-saved="1" value="" placeholder="saved">/,
+    "a saved secret: an empty box a password manager will not fill, and the page never holds it");
   assert.match(html, /webhook URL <input type="password"[^>]*data-k="url"/, "a webhook URL is a secret");
   assert.match(html, /last error HTTP_500 at \S/, "an error newer than the last success shows");
   assert.match(html, /last sent \S/);
@@ -1038,4 +1039,27 @@ test("channels: the form read back, quiet hours on and off; a test waits for a s
 test("the alerts view has a channels tab", () => {
   for (const id of ["alerts-tab-channels", "channels-body"]) assert.ok(HTML.includes(`id="${id}"`), id);
   assert.match(JS, /\$\("#alerts-tab-channels"\)\.onclick = \(\) => showTab\("channels"\);/);
+});
+
+test("channels: an untouched saved secret is sent back masked, a typed one replaces it; a test or a save never drops edits made meanwhile", async () => {
+  let form = [];
+  const s = rulesScope({ $$: (sel) => (sel === "#channels-body .chan" ? form : []), $: () => ({ innerHTML: "" }) });
+  Object.assign(s.chState, { types: CH_VIEW.types, rows: s.chRows(CH_VIEW) });
+  const secret = (k, v) => ({ dataset: { k, saved: "1" }, value: v });
+  form = [{ dataset: { i: "0" }, querySelectorAll: (sel) => (sel === "[data-f]" ? [] : [{ dataset: { k: "topic" }, value: "sv" }, secret("token", "")]) }];
+  s.readChannels();
+  assert.strictEqual(s.chState.rows[0].config.token, "********", "left empty: kept");
+  form = [{ dataset: { i: "0" }, querySelectorAll: (sel) => (sel === "[data-f]" ? [] : [{ dataset: { k: "topic" }, value: "sv" }, secret("token", "newtk")]) }];
+  s.readChannels();
+  assert.strictEqual(s.chState.rows[0].config.token, "newtk");
+  // a test that takes a while; the person renames a channel meanwhile
+  let release;
+  const slow = new Promise((r) => { release = r; });
+  const t = rulesScope({ $$: () => [], $: () => ({ innerHTML: "" }), toast() {},
+    fetch: async (url, opt) => { if (opt) { await slow; return { ok: true, json: async () => ({ ok: true }) }; } return answer({ ...CH_VIEW, status: { ch_n: { lastOk: 99 } } }); } });
+  Object.assign(t.chState, { types: CH_VIEW.types, rows: t.chRows(CH_VIEW) });
+  const run = t.testChannel(0);
+  t.chState.rows[1].name = "renamed"; t.chState.dirty = true;
+  release(); await run;
+  assert.deepStrictEqual([t.chState.rows[1].name, t.chState.dirty, t.chState.status.ch_n.lastOk], ["renamed", true, 99], "the status is new, the edit stays");
 });

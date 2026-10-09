@@ -213,7 +213,7 @@ const STRINGS = {
   "ch.digestAt": "daily digest at",
   "ch.name": "name",
   "ch.type": "type",
-  "ch.min": "from",
+  "ch.min": "at least",
   "ch.digest": "digest",
   "ch.test": "send test",
   "ch.add": "+ channel",
@@ -229,7 +229,8 @@ const STRINGS = {
   "ch.lastOk": "last sent {time}",
   "ch.lastError": "last error {error} at {time}",
   "ch.never": "nothing sent yet",
-  "ch.saved": "channels saved",
+  "ch.saved": "saved",
+  "ch.savedAll": "channels saved",
   "ch.saveFailed": "not saved: {error}",
   "ch.loadFailed": "could not load the channels",
   "ch.saveFirst": "save first, then send a test",
@@ -283,6 +284,7 @@ const STRINGS = {
   "notify.digestTitle": "daily digest: {n} events",
   "notify.testTitle": "servitals test",
   "notify.testText": "This channel works.",
+  "notify.more": "+{n} more in the alert log",
 
   // dialogs
   "dlg.close": "[esc]",

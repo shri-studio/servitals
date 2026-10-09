@@ -335,7 +335,11 @@ function chHtml() {
       + `<label><input type="checkbox" data-f="digest"${r.digest ? " checked" : ""}> ${esc(tr("ch.digest"))}</label>`
       + `<span class="grow"></span><button data-act="test">${esc(tr("ch.test"))}</button><button data-act="remove">${esc(tr("rules.remove"))}</button></div>`
       + `<div class="rov cfields">` + fields.map(f => `<label>${esc(tr("ch.field." + f.key))}${f.optional ? " " + esc(tr("ch.optional")) : ""} `
-        + `<input type="${f.secret ? "password" : "text"}" class="cval" data-k="${esc(f.key)}" autocomplete="off" value="${esc(r.config[f.key] || "")}"></label>`).join("")
+        + (f.secret && r.config[f.key] === "********"
+          // a saved secret: an empty box (the page never holds it) that a password manager will not fill
+          ? `<input type="password" class="cval" data-k="${esc(f.key)}" autocomplete="new-password" data-saved="1" value="" placeholder="${esc(tr("ch.saved"))}">`
+          : `<input type="${f.secret ? "password" : "text"}" class="cval" data-k="${esc(f.key)}" autocomplete="${f.secret ? "new-password" : "off"}" value="${esc(r.config[f.key] || "")}">`)
+        + `</label>`).join("")
       + `</div><div class="rov cstat">${esc(chStatus(chState.status[r.id]))}</div></div>`;
   }).join("");
   h += `<div class="rbtns"><select data-f="newtype" aria-label="${esc(tr("ch.type"))}">${opts(Object.keys(chState.types).map(t => [t, t]), "ntfy")}</select>`
@@ -351,7 +355,8 @@ function readChannels() {
     const r = chState.rows[Number(el.dataset.i)];
     if (!r) continue;
     for (const f of el.querySelectorAll("[data-f]")) r[f.dataset.f] = f.type === "checkbox" ? f.checked : f.value;
-    for (const f of el.querySelectorAll("[data-k]")) r.config[f.dataset.k] = f.value;
+    // a saved secret left empty stays as it is
+    for (const f of el.querySelectorAll("[data-k]")) r.config[f.dataset.k] = f.value === "" && f.dataset.saved ? "********" : f.value;
   }
   const qv = k => { const el = $$("#channels-body [data-q=" + k + "]")[0]; return el ? (el.type === "checkbox" ? el.checked : el.value) : null; };
   if (qv("on") !== null) {
@@ -374,15 +379,25 @@ async function loadChannels(force) {
 
 async function saveChannels() {
   readChannels();
+  chState.dirty = false;   // set again by any change made while it saves
   try {
     const r = await fetch("/__ctl/alerts/channels", { method: "POST", headers: { "content-type": "application/json" },
       body: JSON.stringify(chFile(chState.rows, chState.quiet, chState.digestAt)) });
     const j = await r.json().catch(() => ({}));
     if (!r.ok) throw new Error(j.error || String(r.status));
-    chState.dirty = false;
-    toast(tr("ch.saved"));
-    await loadChannels(true);
-  } catch (e) { toast(tr("ch.saveFailed", { error: e.message }), true); }
+    toast(tr("ch.savedAll"));
+    // edits made while it saved stay; the next save sends them
+    if (chState.dirty) await refreshStatus(); else await loadChannels(true);
+  } catch (e) { chState.dirty = true; toast(tr("ch.saveFailed", { error: e.message }), true); }
+}
+// the channels' last sends, drawn without touching what is being edited
+async function refreshStatus() {
+  try {
+    const r = await fetch("/__ctl/alerts/channels?t=" + Date.now());
+    const d = r.ok ? await r.json() : null;
+    if (d && d.status) chState.status = d.status;
+  } catch (e) { /* the old status stays */ }
+  if (chState.dirty) drawChannels(); else loadChannels(true);
 }
 
 // a test goes out with what is saved: changes first
@@ -398,7 +413,7 @@ async function testChannel(i) {
   } catch (e) { j = null; }
   if (j && j.ok) toast(tr("ch.testOk"));
   else toast(tr("ch.testFailed", { error: j && j.error ? j.error : "–" }), true);
-  await loadChannels(true);
+  await refreshStatus();
 }
 
 function chAction(act, i) {
