@@ -197,3 +197,53 @@ test("after quiet hours, the summary goes before anything new, even before the m
   s.make();
   assert.strictEqual(fs.statSync(path.join(s.dir, "channels.json")).mode & 0o777, 0o600, "tightened at start");
 });
+
+// every adapter: what one message becomes
+const { ADAPTERS } = require("../hub/lib/notify");
+const MSG = { kind: "alert", severity: "critical", title: "critical: <b>disk</b> & @everyone on nas", text: "value 96%\nsince 03:10", txn: "svtx1" };
+const TG = "123456:" + "A".repeat(35), PO = "a".repeat(30), PU = "u".repeat(30);
+
+test("Gotify, Telegram, Discord, Slack, Teams, Pushover and Matrix: each gets the message in its own form, names cannot ping or link", () => {
+  const b = (type, c) => { const r = ADAPTERS[type].build(c, MSG); return { ...r, json: JSON.parse(r.body) }; };
+  const g = b("gotify", { server: "https://g.test/", token: "gtk" });
+  assert.deepStrictEqual([g.url, g.headers["x-gotify-key"], g.json.priority, g.json.message], ["https://g.test/message", "gtk", 8, "value 96%\nsince 03:10"]);
+  const t = b("telegram", { token: TG, chat: "-100123" });
+  assert.deepStrictEqual([t.url, t.json.chat_id, t.json.text], [`https://api.telegram.org/bot${TG}/sendMessage`, "-100123", MSG.title + "\n" + MSG.text]);
+  const d = b("discord", { url: "https://discord.test/api/webhooks/1/x" });
+  assert.deepStrictEqual(d.json.allowed_mentions, { parse: [] }, "@everyone in a name pings nobody");
+  assert.deepStrictEqual([d.json.embeds[0].title, d.json.embeds[0].color], [MSG.title, 0xd03030]);
+  const s = b("slack", { url: "https://hooks.slack.test/x" });
+  assert.strictEqual(s.json.text, "*critical: &lt;b&gt;disk&lt;/b&gt; &amp; @everyone on nas*\nvalue 96%\nsince 03:10");
+  const m = b("teams", { url: "https://teams.test/x" });
+  assert.strictEqual(m.json.attachments[0].contentType, "application/vnd.microsoft.card.adaptive");
+  assert.deepStrictEqual(m.json.attachments[0].content.body.map((x) => [x.text, x.weight]), [[MSG.title, "Bolder"], [MSG.text, undefined]]);
+  const p = b("pushover", { token: PO, user: PU });
+  assert.deepStrictEqual([p.url, p.json.token, p.json.user, p.json.priority], ["https://api.pushover.net/1/messages.json", PO, PU, 1]);
+  const x = b("matrix", { server: "https://m.test", room: "!abc:m.test", token: "mtk" });
+  assert.deepStrictEqual([x.method, x.url, x.headers.authorization, x.json.msgtype],
+    ["PUT", "https://m.test/_matrix/client/v3/rooms/!abc%3Am.test/send/m.room.message/svtx1", "Bearer mtk", "m.text"]);
+  const long = ADAPTERS.discord.build({ url: "https://d.test/x" }, { ...MSG, text: "x".repeat(5000) });
+  assert.strictEqual(JSON.parse(long.body).embeds[0].description.length, 3500, "a long digest is cut to what the service takes");
+});
+
+test("their settings are checked: a token that would change the URL path, a chat, a room, Pushover's keys", () => {
+  const one = (type, config, re) => assert.throws(() => checkChannels({ channels: [{ id: "ch_a", type, name: "x", min: "warning", on: true, config }] }), re);
+  one("telegram", { token: "1:../../evil", chat: "1" }, /token: not valid/);
+  one("telegram", { token: TG, chat: "me" }, /chat: not valid/);
+  one("matrix", { server: "https://m.test", room: "#alias:m.test", token: "t" }, /room: not valid/);
+  one("pushover", { token: "short", user: PU }, /token: not valid/);
+  one("gotify", { server: "https://g.test", token: "té" }, /token: printable ASCII/);
+  one("gotify", { token: "t" }, /server: needed/);
+  const ok = checkChannels({ channels: [{ id: "ch_a", type: "telegram", name: "tg", min: "critical", on: true, config: { token: TG, chat: "@ops_room" } }] });
+  assert.deepStrictEqual(ok.channels[0].config, { token: TG, chat: "@ops_room" });
+});
+
+test("Matrix: a retry sends the same transaction id, so the room gets one message", async () => {
+  const s = setup({ channels: [{ id: "ch_m", type: "matrix", name: "room", min: "warning", on: true, config: { server: "https://m.test", room: "!r:m.test", token: "t" } }] },
+    { fail: (url, n) => (n === 1 ? 502 : 0) });
+  s.n.onEvent(ev("firing", "warning"));
+  await s.n.flush();
+  assert.strictEqual(s.sent.length, 2);
+  assert.strictEqual(s.sent[0].url, s.sent[1].url);
+  assert.deepStrictEqual(s.sent.map((r) => r.method), ["PUT", "PUT"]);
+});

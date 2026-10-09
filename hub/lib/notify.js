@@ -39,6 +39,11 @@ const MAX_HELD = 500, MAX_DIGEST = 500;
 const isObj = (o) => o !== null && typeof o === "object" && !Array.isArray(o);
 const httpUrl = (s) => { try { return /^https?:$/.test(new URL(s).protocol); } catch (_) { return false; } };
 
+const base = (u) => String(u).replace(/\/+$/, "");
+const cut = (s, n) => (s.length > n ? s.slice(0, n - 1) + "…" : s);
+const pri = (m, crit, warn, info) => (m.severity === "critical" ? crit : m.severity === "warning" ? warn : info);
+const COLOR = { critical: 0xd03030, warning: 0xe0a020, info: 0x3070d0 };
+
 /* ------------------------------------------------------------------ channels
    fields: { name: { secret?, optional?, url?, re? } }; build(config, message) → the request */
 const ADAPTERS = {
@@ -59,6 +64,63 @@ const ADAPTERS = {
       const body = JSON.stringify({ kind: m.kind, severity: m.severity, title: m.title, text: m.text, ...(m.event ? { event: m.event } : {}) });
       const sig = c.secret ? { "x-servitals-signature": "sha256=" + crypto.createHmac("sha256", c.secret).update(body).digest("hex") } : {};
       return { url: c.url, headers: { "content-type": "application/json", ...sig }, body };
+    },
+  },
+  gotify: {
+    fields: { server: { url: true }, token: { secret: true, header: true } },
+    build(c, m) {
+      return { url: base(c.server) + "/message", headers: { "content-type": "application/json", "x-gotify-key": c.token },
+        body: JSON.stringify({ title: cut(m.title, 250), message: cut(m.text, 3500), priority: pri(m, 8, 5, 2) }) };
+    },
+  },
+  // the bot token is part of the URL path: its form is checked, so it cannot change the path
+  telegram: {
+    fields: { token: { secret: true, re: /^[0-9]{1,20}:[A-Za-z0-9_-]{20,100}$/ }, chat: { re: /^(-?[0-9]{1,20}|@[A-Za-z0-9_]{5,32})$/ }, server: { optional: true, url: true } },
+    build(c, m) {
+      return { url: base(c.server || "https://api.telegram.org") + "/bot" + c.token + "/sendMessage", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ chat_id: c.chat, text: cut(m.title + "\n" + m.text, 3500), disable_web_page_preview: true }) };
+    },
+  },
+  // an embed, and no mentions: a rule or server name with @everyone pings nobody
+  discord: {
+    fields: { url: { url: true, secret: true } },
+    build(c, m) {
+      return { url: c.url, headers: { "content-type": "application/json" },
+        body: JSON.stringify({ allowed_mentions: { parse: [] }, embeds: [{ title: cut(m.title, 250), description: cut(m.text, 3500), color: COLOR[m.severity] || COLOR.info }] }) };
+    },
+  },
+  // Slack's markup: &, < and > escaped, so a name cannot make a link or a mention
+  slack: {
+    fields: { url: { url: true, secret: true } },
+    build(c, m) {
+      const esc = (x) => x.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+      return { url: c.url, headers: { "content-type": "application/json" }, body: JSON.stringify({ text: cut("*" + esc(m.title) + "*\n" + esc(m.text), 3500) }) };
+    },
+  },
+  // a Teams Workflows webhook takes an Adaptive Card
+  teams: {
+    fields: { url: { url: true, secret: true } },
+    build(c, m) {
+      const block = (text, bold) => ({ type: "TextBlock", text: cut(text, 3500), wrap: true, ...(bold ? { weight: "Bolder" } : {}) });
+      return { url: c.url, headers: { "content-type": "application/json" }, body: JSON.stringify({ type: "message", attachments: [{
+        contentType: "application/vnd.microsoft.card.adaptive",
+        content: { type: "AdaptiveCard", $schema: "http://adaptivecards.io/schemas/adaptive-card.json", version: "1.4", body: [block(m.title, true), block(m.text)] } }] }) };
+    },
+  },
+  pushover: {
+    fields: { token: { secret: true, re: /^[A-Za-z0-9]{30}$/ }, user: { secret: true, re: /^[A-Za-z0-9]{30}$/ }, server: { optional: true, url: true } },
+    build(c, m) {
+      return { url: base(c.server || "https://api.pushover.net") + "/1/messages.json", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ token: c.token, user: c.user, title: cut(m.title, 250), message: cut(m.text, 1000), priority: pri(m, 1, 0, -1) }) };
+    },
+  },
+  // a room message: PUT with a transaction id, so a retry is not a second message
+  matrix: {
+    fields: { server: { url: true }, room: { re: /^![A-Za-z0-9._=-]{1,255}:[A-Za-z0-9.-]{1,253}(:[0-9]{1,5})?$/ }, token: { secret: true, header: true } },
+    build(c, m) {
+      return { method: "PUT", url: `${base(c.server)}/_matrix/client/v3/rooms/${encodeURIComponent(c.room)}/send/m.room.message/${m.txn}`,
+        headers: { "content-type": "application/json", authorization: "Bearer " + c.token },
+        body: JSON.stringify({ msgtype: "m.text", body: cut(m.title + "\n" + m.text, 3500) }) };
     },
   },
 };
@@ -198,7 +260,7 @@ function createNotifier({ dir, outbound, now = Date.now, log = { info() {}, warn
   }
   async function sendOnce(ch, m) {
     const req = ADAPTERS[ch.type].build(resolved(ch), m);
-    const r = await outbound.request(req.url, { method: "POST", headers: req.headers, body: req.body, timeoutMs: 15000 });
+    const r = await outbound.request(req.url, { method: req.method || "POST", headers: req.headers, body: req.body, timeoutMs: 15000 });
     if (r.status < 200 || r.status >= 300) { const e = new Error(`HTTP ${r.status}`); e.code = "HTTP_" + r.status; throw e; }
   }
   const errText = (e) => (e && e.code ? String(e.code) : "failed");
@@ -222,7 +284,7 @@ function createNotifier({ dir, outbound, now = Date.now, log = { info() {}, warn
   function deliver(m, to) {
     for (const ch of cfg.channels.filter((c) => c.on && to(c))) {
       const q = queues[ch.id] = queues[ch.id] || { items: [], running: null };
-      q.items.push(m);
+      q.items.push({ txn: "sv" + now().toString(36) + crypto.randomBytes(4).toString("hex"), ...m });
       if (q.items.length > MAX_QUEUE) { q.items.shift(); log.warn("alert.notify_dropped", { channel: ch.id }); }
       if (!q.running) {
         const run = (async () => {
@@ -298,7 +360,7 @@ function createNotifier({ dir, outbound, now = Date.now, log = { info() {}, warn
       const ch = cfg.channels.find((c) => c.id === id);
       if (!ch) return { ok: false, error: "no such channel" };
       try {
-        await sendOnce(ch, { kind: "test", severity: "info", title: tr("notify.testTitle"), text: tr("notify.testText") });
+        await sendOnce(ch, { kind: "test", severity: "info", title: tr("notify.testTitle"), text: tr("notify.testText"), txn: "svt" + crypto.randomBytes(6).toString("hex") });
         status[id] = { ...status[id], lastOk: now() };
         return { ok: true };
       } catch (e) {
