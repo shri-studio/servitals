@@ -593,3 +593,18 @@ a:hover { text-decoration: underline; }
 .rline .unit, .rline .rop { color: var(--dim); }
 .rbtns { display: flex; gap: 8px; margin-top: 12px; }
 .rbtns .grow { flex: 1; }
+
+/* the channels, the alerts view's third tab */
+.cglobal { margin-bottom: 8px; padding-bottom: 8px; border-bottom: 1px solid var(--border); }
+.chan .ctype { color: var(--dim); min-width: 60px; }
+.chan .grow { flex: 1; }
+.cfields label { display: flex; align-items: center; gap: 6px; }
+#alerts-overlay #channels-body input.cval { width: 220px; }
+#alerts-overlay #channels-body input.rname { width: 150px; }
+#alerts-overlay #channels-body select, #alerts-overlay #channels-body input[type=time] { width: auto; }
+#channels-body button { background: var(--bg); border: var(--border-w, 1px) solid var(--border); color: var(--cyan);
+  font-family: inherit; font-size: 12px; padding: 2px 8px; cursor: pointer; white-space: nowrap; }
+#channels-body button.primary { border-color: var(--cyan); }
+#channels-body .hint { color: var(--dim); font-size: 11.5px; margin: 0 0 10px; }
+.cstat { font-size: 11.5px; }
+@media (max-width: 640px) { #alerts-overlay #channels-body input.cval { width: 100%; } .cfields label { flex-wrap: wrap; } }

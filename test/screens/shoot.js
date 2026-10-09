@@ -87,6 +87,20 @@ const STYLES = ["classic", "8bit", "phosphor", "eink", "contrast", "nord", "gruv
     await page.click("#rules-body button[data-act=add]");
     await page.screenshot({ path: `${out}/rules-${width}.png`, fullPage: true });
   }
+  // the channels, with quiet hours on and two new channels, on a desktop and a phone
+  for (const width of [1280, 390]) {
+    await page.setViewportSize({ width, height: 900 });
+    await page.goto(`${base}/?shot=channels-${width}#fleet`);
+    await page.waitForTimeout(1200);
+    await page.keyboard.press("a");
+    await page.click("#alerts-tab-channels");
+    await page.waitForSelector("#channels-body [data-act=add]");
+    await page.click("#channels-body [data-q=on]");
+    await page.click("#channels-body [data-act=add]");
+    await page.selectOption("#channels-body [data-f=newtype]", "webhook");
+    await page.click("#channels-body [data-act=add]");
+    await page.screenshot({ path: `${out}/channels-${width}.png`, fullPage: true });
+  }
 
   // the settings panel on a desktop and a phone: styled controls, none squeezed or sticking out
   for (const width of [1280, 390]) {

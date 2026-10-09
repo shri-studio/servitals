@@ -817,6 +817,7 @@ function rulesScope(extra = {}) {
     loadNodes: async () => {}, renderFleetIfShown() {}, ...extra };
   const src = fs.readFileSync(path.join(__dirname, "..", "www", "js", "alerts.js"), "utf8");
   const api = new Function(...Object.keys(env), "tr", `${src}; return { rulesRows, rulesFile, rulesHtml, readRules, saveRules, rulesAction, rulesState, shown, typed, initAlerts,
+    chState, chRows, chFile, chHtml, readChannels, testChannel, saveChannels, chAction,
     alertsHtmlWith: (info, d) => { alertRuleInfo = info; return alertsHtml(d, {}); } };`)(...Object.values(env), tr);
   api.rulesState.defaults = JSON.parse(JSON.stringify(defaultsForPage()));
   api.rulesState.metrics = require("../hub/lib/alertrules").METRICS;
@@ -922,7 +923,7 @@ test("rule editor: save sends the file and shows what the hub refused; add, remo
 
 test("the alerts view has a rules tab", () => {
   for (const id of ["alerts-tab-list", "alerts-tab-rules", "alerts-list", "rules-body"]) assert.ok(HTML.includes(`id="${id}"`), id);
-  assert.match(JS, /\$\("#alerts-tab-rules"\)\.onclick = \(\) => showRulesTab\(true\);/);
+  assert.match(JS, /\$\("#alerts-tab-rules"\)\.onclick = \(\) => showTab\("rules"\);/);
 });
 
 test("alerts view: a rule of one's own shows by its name and its metric's unit; an alert ended by a rule change says so", () => {
@@ -958,4 +959,83 @@ test("rule editor: what is typed survives a tab change; a metric change resets w
   assert.deepStrictEqual(s.rulesState.rows[rb].overrides, [{ who: "node:nodeaaaaaaaa", threshold: null, off: true }]);
   assert.match(s.rulesHtml(s.rulesState.rows).split('<div class="rule')[rb + 1], /data-of="off" checked disabled/);
   assert.doesNotMatch(s.rulesHtml(s.rulesState.rows).split('<div class="rule')[rb + 1], /data-of="threshold"/);
+});
+
+// the channels tab (spec 8.3, 8.4)
+const CH_VIEW = {
+  channels: [{ id: "ch_n", type: "ntfy", name: "phone <1>", min: "warning", on: true, config: { topic: "sv", token: "********" } },
+             { id: "ch_w", type: "webhook", name: "pager", min: "critical", on: false, digest: false, config: { url: "********" } }],
+  quiet: { from: "23:00", to: "07:00" }, digestAt: "07:00",
+  status: { ch_n: { lastOk: 5, lastError: "HTTP_500", at: 9 }, ch_w: { lastOk: 9 } },
+  types: { ntfy: [{ key: "server", secret: false, optional: true }, { key: "topic", secret: false, optional: false }, { key: "token", secret: true, optional: true }],
+           webhook: [{ key: "url", secret: true, optional: false }, { key: "secret", secret: true, optional: true }] },
+};
+
+test("channels: rows and back; secrets stay masked, empty fields go; the form escapes names and hides secrets", () => {
+  const s = rulesScope({ alertWhen: () => "12:00" });
+  const rows = s.chRows(CH_VIEW);
+  assert.deepStrictEqual(rows[1], { id: "ch_w", type: "webhook", name: "pager", min: "critical", on: false, digest: false, config: { url: "********" } });
+  rows[0].config.server = "";
+  assert.deepStrictEqual(s.chFile(rows, CH_VIEW.quiet, "07:30"), { channels: [
+    { id: "ch_n", type: "ntfy", name: "phone <1>", min: "warning", on: true, config: { topic: "sv", token: "********" } },
+    { id: "ch_w", type: "webhook", name: "pager", min: "critical", on: false, digest: false, config: { url: "********" } }],
+    quiet: { from: "23:00", to: "07:00" }, digestAt: "07:30" });
+  Object.assign(s.chState, { types: CH_VIEW.types, status: CH_VIEW.status, rows, quiet: null, digestAt: "07:00" });
+  const html = s.chHtml();
+  assert.doesNotMatch(html, /phone <1>|style=/);
+  assert.match(html, /value="phone &#60;1&#62;"/);
+  assert.match(html, /token \(optional\) <input type="password" class="cval" data-k="token" autocomplete="off" value="\*\*\*\*\*\*\*\*">/);
+  assert.match(html, /webhook URL <input type="password"[^>]*data-k="url"/, "a webhook URL is a secret");
+  assert.match(html, /last error HTTP_500 at \S/, "an error newer than the last success shows");
+  assert.match(html, /last sent \S/);
+  assert.match(html, /data-q="from" value="23:00" disabled/, "no quiet hours: their times wait");
+  assert.match(html, /<option value="webhook">webhook<\/option>/, "a channel of each type can be added");
+});
+
+// a fake channels form
+function fakeChan(i, fields, config) {
+  const f = (attr, k, v) => ({ dataset: { [attr]: k }, type: typeof v === "boolean" ? "checkbox" : "text", value: typeof v === "boolean" ? "" : v, checked: v === true });
+  return { dataset: { i: String(i) }, querySelectorAll: (sel) => (sel === "[data-f]" ? Object.entries(fields).map(([k, v]) => f("f", k, v))
+    : Object.entries(config).map(([k, v]) => f("k", k, v))) };
+}
+
+test("channels: the form read back, quiet hours on and off; a test waits for a save, then sends the channel's id", async () => {
+  let form = [], quiet = {};
+  const sent = [], toasts = [];
+  const qel = (k) => (quiet[k] === undefined ? [] : [{ type: typeof quiet[k] === "boolean" ? "checkbox" : "time", checked: quiet[k] === true, value: quiet[k] }]);
+  const s = rulesScope({ $$: (sel) => (sel === "#channels-body .chan" ? form : /data-q=(\w+)/.test(sel) ? qel(/data-q=(\w+)/.exec(sel)[1]) : []),
+    $: () => ({ innerHTML: "" }), alertWhen: () => "",
+    toast: (m, err) => toasts.push([m, !!err]),
+    fetch: async (url, opt) => { if (opt) { sent.push([url, JSON.parse(opt.body)]); return { ok: url.endsWith("/test"), json: async () => (url.endsWith("/test") ? { ok: false, error: "HTTP_404" } : { error: "phone: topic: not valid" }) }; }
+      return answer(CH_VIEW); } });
+  Object.assign(s.chState, { types: CH_VIEW.types, rows: s.chRows(CH_VIEW) });
+  form = [fakeChan(0, { on: false, name: "phone", min: "critical", digest: false }, { server: "https://n.test", topic: "a b", token: "********" })];
+  quiet = { on: true, from: "22:00", to: "06:30", digestAt: "08:00" };
+  s.readChannels();
+  assert.deepStrictEqual(s.chState.rows[0], { id: "ch_n", type: "ntfy", name: "phone", min: "critical", on: false, digest: false,
+    config: { server: "https://n.test", topic: "a b", token: "********" } });
+  assert.deepStrictEqual([s.chState.quiet, s.chState.digestAt], [{ from: "22:00", to: "06:30" }, "08:00"]);
+  quiet = { on: false, from: "22:00", to: "06:30", digestAt: "08:00" };
+  s.readChannels();
+  assert.strictEqual(s.chState.quiet, null);
+  s.chState.dirty = true;
+  await s.testChannel(0);
+  assert.deepStrictEqual([sent, toasts], [[], [["save first, then send a test", true]]]);
+  await s.saveChannels();
+  assert.deepStrictEqual(toasts[1], ["not saved: phone: topic: not valid", true]);
+  assert.strictEqual(sent[0][0], "/__ctl/alerts/channels");
+  assert.strictEqual(s.chState.dirty, true, "what was typed stays");
+  s.chState.dirty = false;
+  await s.testChannel(0);
+  assert.deepStrictEqual(sent[1], ["/__ctl/alerts/channels/test", { id: "ch_n" }]);
+  assert.deepStrictEqual(toasts[2], ["test failed: HTTP_404", true]);
+  form = [];
+  s.chAction("remove", 0);
+  assert.deepStrictEqual(s.chState.rows.map((r) => r.id), ["ch_w"]);
+  assert.strictEqual(s.chState.dirty, true);
+});
+
+test("the alerts view has a channels tab", () => {
+  for (const id of ["alerts-tab-channels", "channels-body"]) assert.ok(HTML.includes(`id="${id}"`), id);
+  assert.match(JS, /\$\("#alerts-tab-channels"\)\.onclick = \(\) => showTab\("channels"\);/);
 });

@@ -4,7 +4,9 @@
    events, from GET /__ctl/alerts; a rule or a node is muted (and unmuted) with POST
    /__ctl/alerts/mute. Its second tab edits the rules (spec 8.1): the defaults' thresholds,
    times and severities, rules of one's own, and per-server or per-tag overrides, from GET
-   and POST /__ctl/alerts/rules. Loaded by openAlerts() in app.js on first use. */
+   and POST /__ctl/alerts/rules. Its third tab sets where alerts go (spec 8.3, 8.4): the
+   channels, quiet hours and the digest's time, from GET and POST /__ctl/alerts/channels,
+   with a test per channel. Loaded by openAlerts() in app.js on first use. */
 const ALERT_SEV = ["critical", "warning", "info"];
 let alertsSeq = 0;
 // each rule's name (a rule of one's own) and metric, from GET /__ctl/alerts: { id: { name?, metric } }
@@ -295,18 +297,153 @@ function rulesAction(act, i, j) {
   drawRules();
 }
 
-function showRulesTab(on) {
-  $("#alerts-tab-list").classList.toggle("on", !on);
-  $("#alerts-tab-rules").classList.toggle("on", on);
-  $("#alerts-list").classList.toggle("hidden", on);
-  $("#rules-body").classList.toggle("hidden", !on);
-  if (on) loadRules();
+/* ------------------------------------------------------------------ the channels */
+// rows: { id, type, name, min, on, digest, config: { key: value } }; secrets come as ********
+const chState = { types: {}, status: {}, rows: [], quiet: null, digestAt: "07:00", dirty: false };
+
+function chRows(v) {
+  return (Array.isArray(v.channels) ? v.channels : []).map(c => ({ id: c.id, type: c.type, name: c.name, min: c.min, on: c.on !== false,
+    digest: c.digest !== false, config: { ...(c.config || {}) } }));
+}
+// rows back to what the hub keeps: empty fields left out
+function chFile(rows, quiet, digestAt) {
+  return { channels: rows.map(r => ({ id: r.id, type: r.type, name: r.name, min: r.min, on: r.on, ...(r.digest ? {} : { digest: false }),
+    config: Object.fromEntries(Object.entries(r.config).filter(([, v]) => v !== "" && v != null)) })), quiet, digestAt };
+}
+// a channel's last send, in words
+function chStatus(s) {
+  const t = x => alertWhen(x);
+  if (s && s.lastError && (!s.lastOk || s.at > s.lastOk)) return tr("ch.lastError", { error: s.lastError, time: t(s.at) });
+  return s && s.lastOk ? tr("ch.lastOk", { time: t(s.lastOk) }) : tr("ch.never");
+}
+
+function chHtml() {
+  const sevs = ["critical", "warning", "info"].map(s => [s, tr("alert.sev." + s)]);
+  const q = chState.quiet;
+  let h = `<p class="hint">${esc(tr("ch.intro"))}</p><div class="rline cglobal">`
+    + `<label><input type="checkbox" data-q="on"${q ? " checked" : ""}> ${esc(tr("ch.quiet"))}</label>`
+    + `<label>${esc(tr("ch.quietFrom"))} <input type="time" data-q="from" value="${esc(q ? q.from : "23:00")}"${q ? "" : " disabled"}></label>`
+    + `<label>${esc(tr("ch.quietTo"))} <input type="time" data-q="to" value="${esc(q ? q.to : "07:00")}"${q ? "" : " disabled"}></label>`
+    + `<label>${esc(tr("ch.digestAt"))} <input type="time" data-q="digestAt" value="${esc(chState.digestAt)}"></label></div>`;
+  h += chState.rows.map((r, i) => {
+    const fields = chState.types[r.type] || [];
+    return `<div class="chan rule${r.on ? "" : " roff"}" data-i="${i}"><div class="rline">`
+      + `<input type="checkbox" data-f="on" aria-label="${esc(tr("rules.on"))}"${r.on ? " checked" : ""}>`
+      + `<input type="text" class="rname" data-f="name" maxlength="60" value="${esc(r.name)}" aria-label="${esc(tr("ch.name"))}">`
+      + `<span class="ctype">${esc(r.type)}</span>`
+      + `<label>${esc(tr("ch.min"))} <select data-f="min">${opts(sevs, r.min)}</select></label>`
+      + `<label><input type="checkbox" data-f="digest"${r.digest ? " checked" : ""}> ${esc(tr("ch.digest"))}</label>`
+      + `<span class="grow"></span><button data-act="test">${esc(tr("ch.test"))}</button><button data-act="remove">${esc(tr("rules.remove"))}</button></div>`
+      + `<div class="rov cfields">` + fields.map(f => `<label>${esc(tr("ch.field." + f.key))}${f.optional ? " " + esc(tr("ch.optional")) : ""} `
+        + `<input type="${f.secret ? "password" : "text"}" class="cval" data-k="${esc(f.key)}" autocomplete="off" value="${esc(r.config[f.key] || "")}"></label>`).join("")
+      + `</div><div class="rov cstat">${esc(chStatus(chState.status[r.id]))}</div></div>`;
+  }).join("");
+  h += `<div class="rbtns"><select data-f="newtype" aria-label="${esc(tr("ch.type"))}">${opts(Object.keys(chState.types).map(t => [t, t]), "ntfy")}</select>`
+    + `<button data-act="add">${esc(tr("ch.add"))}</button><span class="grow"></span>`
+    + `<button data-act="revert">${esc(tr("rules.revert"))}</button><button data-act="save" class="primary">${esc(tr("rules.save"))}</button></div>`;
+  return h;
+}
+function drawChannels() { $("#channels-body").innerHTML = chHtml(); }
+
+// what the form says now, into the rows and the quiet hours
+function readChannels() {
+  for (const el of $$("#channels-body .chan")) {
+    const r = chState.rows[Number(el.dataset.i)];
+    if (!r) continue;
+    for (const f of el.querySelectorAll("[data-f]")) r[f.dataset.f] = f.type === "checkbox" ? f.checked : f.value;
+    for (const f of el.querySelectorAll("[data-k]")) r.config[f.dataset.k] = f.value;
+  }
+  const qv = k => { const el = $$("#channels-body [data-q=" + k + "]")[0]; return el ? (el.type === "checkbox" ? el.checked : el.value) : null; };
+  if (qv("on") !== null) {
+    chState.quiet = qv("on") ? { from: qv("from"), to: qv("to") } : null;
+    chState.digestAt = qv("digestAt") || "07:00";
+  }
+}
+
+async function loadChannels(force) {
+  if (chState.dirty && !force) { drawChannels(); return; }
+  let d = null;
+  try {
+    const r = await fetch("/__ctl/alerts/channels?t=" + Date.now());
+    d = r.ok ? await r.json() : null;
+  } catch (e) { d = null; }
+  if (!d || !Array.isArray(d.channels)) { $("#channels-body").innerHTML = `<div class="muted">${esc(tr("ch.loadFailed"))}</div>`; return; }
+  Object.assign(chState, { types: d.types || {}, status: d.status || {}, rows: chRows(d), quiet: d.quiet || null, digestAt: d.digestAt || "07:00", dirty: false });
+  drawChannels();
+}
+
+async function saveChannels() {
+  readChannels();
+  try {
+    const r = await fetch("/__ctl/alerts/channels", { method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify(chFile(chState.rows, chState.quiet, chState.digestAt)) });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(j.error || String(r.status));
+    chState.dirty = false;
+    toast(tr("ch.saved"));
+    await loadChannels(true);
+  } catch (e) { toast(tr("ch.saveFailed", { error: e.message }), true); }
+}
+
+// a test goes out with what is saved: changes first
+async function testChannel(i) {
+  readChannels();
+  const r = chState.rows[i];
+  if (!r) return;
+  if (chState.dirty) { toast(tr("ch.saveFirst"), true); return; }
+  let j = null;
+  try {
+    const res = await fetch("/__ctl/alerts/channels/test", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ id: r.id }) });
+    j = res.ok ? await res.json() : null;
+  } catch (e) { j = null; }
+  if (j && j.ok) toast(tr("ch.testOk"));
+  else toast(tr("ch.testFailed", { error: j && j.error ? j.error : "–" }), true);
+  await loadChannels(true);
+}
+
+function chAction(act, i) {
+  readChannels();
+  if (act === "test") { testChannel(i); return; }
+  if (act === "save") { saveChannels(); return; }
+  if (act === "revert") { chState.dirty = false; loadChannels(true); return; }
+  if (act === "add") {
+    const el = $$("#channels-body [data-f=newtype]")[0];
+    const type = el && chState.types[el.value] ? el.value : Object.keys(chState.types)[0];
+    if (!type) return;
+    chState.rows.push({ id: "ch_" + Date.now().toString(36), type, name: type, min: "warning", on: true, digest: true, config: {} });
+  }
+  if (act === "remove") chState.rows.splice(i, 1);
+  chState.dirty = true;
+  drawChannels();
+}
+
+function showTab(which) {
+  for (const [t, body] of [["list", "#alerts-list"], ["rules", "#rules-body"], ["channels", "#channels-body"]]) {
+    $("#alerts-tab-" + t).classList.toggle("on", which === t);
+    $(body).classList.toggle("hidden", which !== t);
+  }
+  if (which === "rules") loadRules();
+  if (which === "channels") loadChannels();
 }
 
 // wiring, once, when this file has loaded
 function initAlerts() {
-  $("#alerts-tab-list").onclick = () => showRulesTab(false);
-  $("#alerts-tab-rules").onclick = () => showRulesTab(true);
+  $("#alerts-tab-list").onclick = () => showTab("list");
+  $("#alerts-tab-rules").onclick = () => showTab("rules");
+  $("#alerts-tab-channels").onclick = () => showTab("channels");
+  $("#channels-body").onclick = e => {
+    const b = e.target.closest("button[data-act]");
+    if (!b) return;
+    const row = b.closest(".chan");
+    chAction(b.dataset.act, row ? Number(row.dataset.i) : -1);
+  };
+  // every change is read at once; quiet hours on or off draws the form again
+  $("#channels-body").onchange = e => {
+    if (e.target.matches("[data-f=newtype]")) return;
+    chState.dirty = true;
+    readChannels();
+    if (e.target.matches("[data-q=on], [data-f=on]")) drawChannels();
+  };
   $("#rules-body").onclick = e => {
     const b = e.target.closest("button[data-act]");
     if (!b) return;

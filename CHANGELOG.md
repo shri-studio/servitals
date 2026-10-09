@@ -7,6 +7,13 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- More alert channels and their settings (spec 8.4): Gotify, Telegram,
+  Discord, Slack, Microsoft Teams (a Workflows webhook), Pushover and Matrix
+  join ntfy and webhooks. The alerts view's "channels" tab adds, edits and
+  removes them, sets each one's level and whether it gets the digest, quiet
+  hours and the digest's time, sends a test, and shows each channel's last
+  send or error. Secrets stay masked; a name in a message cannot ping
+  (Discord) or link (Slack); a Matrix retry is never a second message.
 - Alert channels (spec 8.3, 8.4): ntfy and webhooks (JSON, signed with
   `X-Servitals-Signature` when a secret is set) get each alert at or above
   their minimum severity. Quiet hours hold warnings (critical always goes
