@@ -40,6 +40,24 @@ function lastCopy(request) {
   return caches.match(request).then((hit) => hit || (request.mode === "navigate" ? caches.match("/") : undefined));
 }
 
+// Web Push (spec 8.5): show the alert, one per alert (tag); a tap opens its node's view
+self.addEventListener("push", (e) => {
+  let d = {};
+  try { d = e.data ? e.data.json() : {}; } catch (_) { d = { title: e.data ? e.data.text() : "" }; }
+  const url = typeof d.url === "string" && /^\/(#node=[a-z2-7]{12})?$/.test(d.url) ? d.url : "/";
+  e.waitUntil(self.registration.showNotification(String(d.title || "servitals").slice(0, 200), {
+    body: String(d.body || "").slice(0, 2000), tag: String(d.tag || "servitals").slice(0, 200), renotify: true, data: { url }, icon: "/icons/icon-192.png" }));
+});
+self.addEventListener("notificationclick", (e) => {
+  e.notification.close();
+  const url = (e.notification.data && e.notification.data.url) || "/";
+  e.waitUntil(self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((list) => {
+    const w = list.find((c) => new URL(c.url).origin === self.location.origin);
+    if (!w) return self.clients.openWindow(url);
+    return (w.navigate ? w.navigate(url) : Promise.resolve()).then(() => w.focus());
+  }));
+});
+
 self.addEventListener("fetch", (e) => {
   if (route(e.request) !== "shell") return;
   e.respondWith(fetch(e.request).then((res) => {

@@ -272,6 +272,16 @@
       </section>
 
       <section>
+        <label data-i18n="push.title">notifications on this device</label>
+        <p class="hint" id="push-msg"></p>
+        <p class="hint hidden" id="push-guide"><a href="https://github.com/shri-studio/servitals/blob/main/docs/networking.md#https-for-phone-notifications" target="_blank" rel="noopener" data-i18n="push.guide">how to serve servitals over HTTPS</a></p>
+        <div class="addrow">
+          <button id="push-on" class="hidden" data-i18n="push.enable">enable notifications</button>
+          <button id="push-off" class="hidden" data-i18n="push.disable">turn them off here</button>
+        </div>
+      </section>
+
+      <section>
         <label data-i18n="set.login">login</label>
         <div class="fields">
           <label class="field"><span data-i18n="set.loginName">name</span><input type="text" id="acct-user" autocomplete="username"></label>

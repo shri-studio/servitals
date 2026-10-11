@@ -18,13 +18,13 @@ const at = (hhmm, dayOffset = 0) => Date.UTC(2026, 9, 9 + dayOffset, Number(hhmm
 const ntfy = (extra = {}) => ({ id: "ch_n", type: "ntfy", name: "phone", min: "warning", on: true, config: { topic: "sv-home", token: "tk_secret" }, ...extra });
 const hook = (extra = {}) => ({ id: "ch_w", type: "webhook", name: "pager", min: "critical", on: true, config: { url: "https://hooks.test/T0K3N", secret: "s3" }, ...extra });
 
-function setup(config, { fail = () => 0, sleep, sendMail, execFile } = {}) {
+function setup(config, { fail = () => 0, sleep, sendMail, execFile, push } = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sv-notify-"));
   const sent = [], logs = [], slept = [];
   const clock = { t: at("12:00") };
   const outbound = { request: async (url, o) => { sent.push({ url, ...o }); const s = fail(url, sent.length); return { status: s || 200, headers: {}, body: "" }; } };
   const make = () => createNotifier({ dir, outbound, now: () => clock.t, env: { SERVITALS_NOTIFY_NTFY: "from_env", SERVITALS_NOTIFY_HOOK: "https://hooks.test/env", SERVITALS_NOTIFY_BAD: "ftp://x", AUTH_PASS: "pw" },
-    log: { info() {}, warn: (event, f) => logs.push([event, f]) }, sleep: sleep || (async (ms) => { slept.push(ms); }), sendMail, execFile });
+    log: { info() {}, warn: (event, f) => logs.push([event, f]) }, sleep: sleep || (async (ms) => { slept.push(ms); }), sendMail, execFile, push });
   const n = make();
   if (config) n.setConfig(config);
   return { n, dir, sent, logs, slept, clock, make };
@@ -343,4 +343,23 @@ test("email: a saved password follows only the same server; settings that cannot
   assert.strictEqual(mails.length, 1, "a certificate for another name stays wrong");
   const { STRINGS } = require("../hub/lib/i18n");
   assert.deepStrictEqual([STRINGS["ch.field.user"], STRINGS["ch.field.login"]], ["user key", "login"], "Pushover keeps its label");
+});
+
+test("Web Push: one payload for the service worker, per alert a tag and its node's view; no device is not retried", async () => {
+  const pushed = [];
+  let fail = null;
+  const s = setup(null, { push: { sendAll: async (p) => { pushed.push(JSON.parse(p)); if (fail) throw Object.assign(new Error("x"), { code: fail }); } } });
+  assert.strictEqual(s.n.ensureWebPush("phone notifications"), true);
+  assert.strictEqual(s.n.ensureWebPush("phone notifications"), false, "once");
+  assert.deepStrictEqual(s.n.view().channels, [{ id: "ch_webpush", type: "webpush", name: "phone notifications", min: "warning", on: true, config: {} }]);
+  s.n.onEvent(ev("firing", "warning"));
+  await s.n.flush();
+  assert.deepStrictEqual(pushed[0], { title: "warning: disk full /srv on nas", body: "value 92%\nsince 11:55", severity: "warning",
+    tag: "disk_full|nodeaaaaaaaa|/srv", url: "/#node=nodeaaaaaaaa" });
+  fail = "EPUSH_NONE";
+  s.n.onEvent(ev("firing", "critical"));
+  await s.n.flush();
+  assert.strictEqual(pushed.length, 2, "no device subscribed: nothing to try again");
+  const off = setup({ channels: [{ id: "ch_webpush", type: "webpush", name: "p", min: "warning", on: true, config: {} }] });
+  assert.deepStrictEqual(await off.n.test("ch_webpush"), { ok: false, error: "EPUSH_OFF" });
 });

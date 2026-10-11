@@ -455,3 +455,54 @@ test("alert channels: saved from the page with secrets masked; an alert reaches 
     });
   } finally { dest.close(); }
 });
+
+test("Web Push: a browser subscribes, gets a channel, receives an alert it can decrypt; a gone subscription is removed", async () => {
+  const { decrypt, UA } = require("./helpers/push");
+  const { execFileSync } = require("node:child_process");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sv-push-"));
+  execFileSync("openssl", ["req", "-x509", "-newkey", "rsa:2048", "-nodes", "-days", "1", "-keyout", path.join(dir, "k"), "-out", path.join(dir, "c"),
+    "-subj", "/CN=127.0.0.1", "-addext", "subjectAltName=IP:127.0.0.1"], { stdio: "ignore" });
+  const got = [];
+  let answer = 201;
+  const service = require("node:https").createServer({ key: fs.readFileSync(path.join(dir, "k")), cert: fs.readFileSync(path.join(dir, "c")) }, (req, res) => {
+    const chunks = [];
+    req.on("data", (c) => chunks.push(c));
+    req.on("end", () => { got.push({ url: req.url, headers: req.headers, body: Buffer.concat(chunks) }); res.writeHead(answer); res.end(); });
+  });
+  await new Promise((r) => service.listen(0, "127.0.0.1", r));
+  const endpoint = `https://127.0.0.1:${service.address().port}/push/abc`;
+  try {
+    await withHub(async (hub, c) => {
+      const cookie = cookieFrom(await login(hub.port));
+      const get = async (p) => JSON.parse((await request(hub.port, { path: p, headers: { cookie } })).body);
+      const p0 = await get("/__ctl/push");
+      assert.strictEqual(Buffer.from(p0.publicKey, "base64url").length, 65);
+      assert.deepStrictEqual([p0.devices, p0.https], [[], false]);
+      const sub = (b) => ctlPost(hub.port, cookie, "/__ctl/push/subscribe", JSON.stringify(b));
+      assert.strictEqual((await sub({ subscription: { endpoint: endpoint.replace("https", "http"), keys: { p256dh: UA.public, auth: UA.auth } } })).status, 400, "https only");
+      const r = JSON.parse((await sub({ subscription: { endpoint, keys: { p256dh: UA.public, auth: UA.auth } }, label: "Android Chrome" })).body);
+      assert.deepStrictEqual([r.ok, r.channelAdded], [true, true]);
+      const devs = (await get("/__ctl/push")).devices;
+      assert.deepStrictEqual(devs.map((d) => [d.label, d.service]), [["Android Chrome", `127.0.0.1:${service.address().port}`]]);
+      assert.doesNotMatch(JSON.stringify(devs), /push\/abc/, "the page never sees an endpoint");
+      assert.strictEqual(fs.statSync(path.join(hub.dataDir, "push-subscriptions.json")).mode & 0o777, 0o600);
+      assert.strictEqual(fs.statSync(path.join(hub.dataDir, "vapid.json")).mode & 0o777, 0o600);
+      assert.strictEqual((await get("/__ctl/alerts/channels")).channels[0].type, "webpush");
+      assert.strictEqual((await ctlPost(hub.port, cookie, "/__ctl/alerts/rules", JSON.stringify({ rules: [{ id: "reboot_required", severity: "warning" }] }))).status, 200);
+      assert.strictEqual((await signed(hub, c, { body: snap({ ubuntu: { rebootRequired: true } }) })).status, 200);
+      for (let i = 0; i < 100 && !got.length; i++) await new Promise((res) => setTimeout(res, 20));
+      assert.strictEqual(got[0].headers["content-encoding"], "aes128gcm");
+      assert.match(got[0].headers.authorization, new RegExp(`^vapid t=.+, k=${p0.publicKey}$`));
+      const msg = JSON.parse(decrypt(got[0].body));
+      assert.match(msg.title, /^warning: reboot required on /);
+      assert.deepStrictEqual([msg.url, msg.tag], [`/#node=${c.id}`, `reboot_required|${c.id}|`]);
+      answer = 410;
+      assert.deepStrictEqual(JSON.parse((await ctlPost(hub.port, cookie, "/__ctl/alerts/channels/test", JSON.stringify({ id: "ch_webpush" }))).body),
+        { ok: false, error: "EPUSH_NONE" }, "the only device was gone");
+      assert.deepStrictEqual((await get("/__ctl/push")).devices, [], "410: the subscription is gone");
+      assert.match(hub.logs(), /event=push\.subscription_gone/);
+      assert.match(hub.logs(), /event=push\.subscribed/);
+      assert.doesNotMatch(hub.logs(), /push\/abc/, "never an endpoint in the log");
+    }, { NODE_EXTRA_CA_CERTS: path.join(dir, "c") });
+  } finally { service.close(); fs.rmSync(dir, { recursive: true, force: true }); }
+});

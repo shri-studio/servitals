@@ -134,7 +134,68 @@ function showSettings() {
   loadNodes().then(() => renderServers({ keep: true }));
   markManaged();
   $("#acct-msg").textContent = "";
+  drawPush();
   $("#overlay").classList.add("open");
+}
+
+/* ------------------------------------------------------------------ notifications on this device (spec 8.5)
+   Web Push needs HTTPS and a service worker; on iPhone and iPad also the app on the home
+   screen (iOS 16.4 or later). The hub's public key comes from GET /__ctl/push. */
+const b64uBytes = s => Uint8Array.from(atob(s.replace(/-/g, "+").replace(/_/g, "/") + "===".slice((s.length + 3) % 4)), c => c.charCodeAt(0));
+// "https" (plain HTTP), "unsupported", or "ok"
+function pushSupport() {
+  if (!window.isSecureContext) return "https";
+  if (!("serviceWorker" in navigator) || !("PushManager" in window) || typeof Notification === "undefined") return "unsupported";
+  return "ok";
+}
+// a name for this device in the hub's list: the system and the browser (product names)
+function deviceLabel() {
+  const ua = navigator.userAgent || "";
+  const os = /Android/.test(ua) ? "Android" : /iPhone|iPad/.test(ua) ? "iOS" : /Macintosh/.test(ua) ? "Mac" : /Windows/.test(ua) ? "Windows" : /Linux/.test(ua) ? "Linux" : "";
+  const br = /Firefox\//.test(ua) ? "Firefox" : /Edg\//.test(ua) ? "Edge" : /Chrome\//.test(ua) ? "Chrome" : /Safari\//.test(ua) ? "Safari" : "";
+  return [os, br].filter(Boolean).join(" ") || "browser";
+}
+async function pushSub() {
+  const reg = await navigator.serviceWorker.ready;
+  return { reg, sub: await reg.pushManager.getSubscription() };
+}
+async function drawPush() {
+  const s = pushSupport();
+  $("#push-guide").classList.toggle("hidden", s !== "https");
+  $("#push-on").classList.add("hidden");
+  $("#push-off").classList.add("hidden");
+  if (s === "https") { $("#push-msg").textContent = tr("push.needHttps"); return; }
+  if (s !== "ok") { $("#push-msg").textContent = tr("push.unsupported"); return; }
+  if (Notification.permission === "denied") { $("#push-msg").textContent = tr("push.denied"); return; }
+  let sub = null;
+  try { sub = (await pushSub()).sub; } catch (e) { sub = null; }
+  $("#push-msg").textContent = sub ? tr("push.onHere") : tr("push.offHere");
+  $("#push-on").classList.toggle("hidden", !!sub);
+  $("#push-off").classList.toggle("hidden", !sub);
+}
+async function enablePush() {
+  try {
+    if (await Notification.requestPermission() !== "granted") { $("#push-msg").textContent = tr("push.denied"); return; }
+    const info = await (await fetch("/__ctl/push")).json();
+    const { reg, sub: old } = await pushSub();
+    if (old) await old.unsubscribe();   // made with keys the hub may no longer have: renew
+    const sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64uBytes(info.publicKey) });
+    const r = await fetch("/__ctl/push/subscribe", { method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ subscription: sub.toJSON(), label: deviceLabel() }) });
+    if (!r.ok) throw new Error(String(r.status));
+    toast(tr("push.enabled"));
+  } catch (e) { toast(tr("push.failed"), true); }
+  await drawPush();
+}
+async function disablePush() {
+  try {
+    const { sub } = await pushSub();
+    if (sub) {
+      await fetch("/__ctl/push/unsubscribe", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ endpoint: sub.endpoint }) });
+      await sub.unsubscribe();
+    }
+  } catch (e) { toast(tr("push.failed"), true); }
+  await drawPush();
 }
 
 /* ------------------------------------------------------------------ login
@@ -324,6 +385,8 @@ async function saveSettings() {
 // wiring for the settings controls, once, when this file has loaded
 function initSettings() {
   $("#acct-save").onclick = saveAccount;
+  $("#push-on").onclick = enablePush;
+  $("#push-off").onclick = disablePush;
   $("#cfg-p-for").onchange = e => { panelFor = e.target.value; drawPanelCfg(); };
   $("#cfg-p-reset").onclick = () => { delete cfg.nodePanels[panelFor]; drawPanelCfg(); };
   $("#cfg-servers").addEventListener("change", e => {

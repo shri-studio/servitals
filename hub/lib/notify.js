@@ -176,6 +176,17 @@ const ADAPTERS = {
       });
     },
   },
+  // Web Push (spec 8.5): to every browser that subscribed (the hub's push store)
+  webpush: {
+    fields: {},
+    send(c, m, ctx) {
+      if (!ctx.push) throw Object.assign(new Error("web push is off"), { code: "EPUSH_OFF" });
+      // what the service worker shows; one notification per alert (tag), its node's view on a tap
+      const e = m.event;
+      return ctx.push.sendAll(JSON.stringify({ title: cut(m.title, 200), body: fit(m.text, 1500), severity: m.severity,
+        tag: e ? `${e.rule}|${e.node}|${e.sub || ""}` : m.kind, url: e && /^[a-z2-7]{12}$/.test(e.node) ? "/#node=" + e.node : "/" }));
+    },
+  },
   // a room message: PUT with a transaction id, so a retry is not a second message
   matrix: {
     fields: { server: { url: true }, room: { re: /^![A-Za-z0-9._=-]{1,255}:[A-Za-z0-9.-]{1,253}(:[0-9]{1,5})?$/ }, token: { secret: true, header: true } },
@@ -280,7 +291,7 @@ function alertMessage(e) {
 
 /* ------------------------------------------------------------------ the notifier */
 function createNotifier({ dir, outbound, now = Date.now, log = { info() {}, warn() {} }, sleep = (ms) => new Promise((r) => setTimeout(r, ms)).then(() => {}), env = process.env,
-                          execFile = childProcess.execFile, sendMail = smtp.sendMail } = {}) {
+                          execFile = childProcess.execFile, sendMail = smtp.sendMail, push = null } = {}) {
   fs.mkdirSync(dir, { recursive: true });
   const cfgFile = path.join(dir, "channels.json"), stFile = path.join(dir, "notify-state.json");
   let cfg = { channels: [], quiet: null, digestAt: "07:00" };
@@ -330,7 +341,7 @@ function createNotifier({ dir, outbound, now = Date.now, log = { info() {}, warn
   }
   async function sendOnce(ch, m) {
     const ad = ADAPTERS[ch.type];
-    if (ad.send) { await ad.send(resolved(ch), m, { outbound, execFile, sendMail }); return; }
+    if (ad.send) { await ad.send(resolved(ch), m, { outbound, execFile, sendMail, push }); return; }
     const req = ad.build(resolved(ch), m);
     const r = await outbound.request(req.url, { method: req.method || "POST", headers: req.headers, body: req.body, timeoutMs: 15000 });
     if (r.status < 200 || r.status >= 300) { const e = new Error(`HTTP ${r.status}`); e.code = "HTTP_" + r.status; throw e; }
@@ -339,7 +350,7 @@ function createNotifier({ dir, outbound, now = Date.now, log = { info() {}, warn
   // a failure a second try cannot fix: a 4xx (other than 408 and 429), a bad value
   // (SMTP: a 5xx is final, a 4xx is "try later"; no TLS, a bad address, no apprise: final)
   const final = (e) => /^HTTP_4\d\d$/.test(e.code) && !/^HTTP_(408|429)$/.test(e.code) || /^SMTP_5/.test(e.code)
-    || /^(ENV_UNSET|EBADVALUE|EURL|ETLSREQUIRED|EADDRESS|APPRISE_MISSING|ERR_TLS_CERT|DEPTH_ZERO_SELF_SIGNED|SELF_SIGNED_CERT|UNABLE_TO_VERIFY|CERT_)/.test(String(e.code));
+    || /^(ENV_UNSET|EBADVALUE|EURL|ETLSREQUIRED|EADDRESS|APPRISE_MISSING|EPUSH_NONE|EPUSH_OFF|ERR_TLS_CERT|DEPTH_ZERO_SELF_SIGNED|SELF_SIGNED_CERT|UNABLE_TO_VERIFY|CERT_)/.test(String(e.code));
   async function send(ch, m) {
     for (let i = 0; ; i++) {
       try {
@@ -441,6 +452,12 @@ function createNotifier({ dir, outbound, now = Date.now, log = { info() {}, warn
         status[id] = { ...status[id], lastError: errText(e), at: now() };
         return { ok: false, error: errText(e) };
       }
+    },
+    // the first browser that subscribes gets a Web Push channel (warning and up), if none
+    ensureWebPush(name) {
+      if (cfg.channels.some((c) => c.type === "webpush")) return false;
+      this.setConfig({ ...cfg, channels: [...cfg.channels, { id: "ch_webpush", type: "webpush", name, min: "warning", on: true, config: {} }] });
+      return true;
     },
     setConfig(input) {
       const clean = checkChannels(input, cfg);

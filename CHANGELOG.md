@@ -7,6 +7,15 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- Phone notifications (Web Push, spec 8.5): settings has "enable
+  notifications" for each phone or computer; alerts then arrive as system
+  notifications, one per alert, and a tap opens that server's view. The first
+  device adds a "phone notifications" channel (warning and up) to the channels
+  tab. VAPID keys (`vapid.json`) and subscriptions (`push-subscriptions.json`)
+  live in the state directory (0600); expired subscriptions are removed. The
+  encryption (aes128gcm) and the VAPID signature use Node's crypto only and are
+  tested against RFC 8291's test vector. Needs HTTPS: `docs/networking.md`
+  explains how; `VAPID_SUBJECT` can be set in `hub.env`.
 - Email and Apprise channels (spec 8.4): email over SMTP with STARTTLS or
   TLS (the server's certificate checked, a login only over TLS; plain SMTP
   only to a relay on the hub's own host), from a small client of the hub's

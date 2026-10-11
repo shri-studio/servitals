@@ -120,6 +120,24 @@ hub behind one needs a mail relay it can reach (on its own host, the
 55-second long poll ends: set `WAIT_SECONDS=25` (5 to 55) if waits keep
 failing.
 
+### HTTPS (for phone notifications)
+
+Browsers give notifications (Web Push) and the installable app only to a site
+served over HTTPS. Any of these works:
+
+- **Tailscale:** `tailscale cert <name>.<tailnet>.ts.net`, then a reverse
+  proxy (Caddy, nginx) on the hub with that certificate, or `tailscale serve
+  https / http://127.0.0.1:20002`.
+- **Cloudflare tunnel:** the tunnel's hostname is HTTPS already (see above).
+- **Reverse proxy:** Caddy gets a certificate on its own; set `PUBLIC_URL` and
+  `TRUSTED_PROXIES` in `hub.env` (see above).
+
+Then open the dashboard at its `https://` address, open settings, and press
+"enable notifications" on each phone or computer. On iPhone and iPad, add
+servitals to the home screen first (iOS 16.4 or later) and enable them from
+there. `VAPID_SUBJECT` in `hub.env` (a `mailto:` or `https:` address) tells
+push services who runs the hub; it defaults to `PUBLIC_URL`.
+
 ## Troubleshooting
 
 `servitals-agent join` and `servitals-agent status` report one of these:

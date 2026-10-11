@@ -224,3 +224,84 @@ test("the node view asks for the fleet (lamps, badges) at most every 30 s, and r
   assert.deepStrictEqual(await run(Date.now() - 31000), ["nodes", "alerts"]);
   assert.deepStrictEqual(await run(Date.now() - 5000), ["alerts"]);
 });
+
+// Web Push (spec 8.5) in the service worker: what a push shows, where a tap goes
+function pushWorker(windows = []) {
+  const listeners = {}, shown = [], opened = [], navigated = [];
+  const self = { addEventListener: (t, f) => { listeners[t] = f; }, location: { origin: "https://hub.example" },
+    registration: { showNotification: async (title, o) => { shown.push({ title, ...o }); } },
+    clients: { claim: () => {}, openWindow: async (u) => { opened.push(u); },
+      matchAll: async () => windows.map((w) => ({ url: w, focus: async () => {}, navigate: async (u) => { navigated.push(u); } })) } };
+  new Function("self", "caches", "fetch", fs.readFileSync(path.join(WWW, "sw.js"), "utf8"))(self, {}, async () => {});
+  return { listeners, shown, opened, navigated };
+}
+const pushEvent = (body) => { let p; return { e: { data: { json: () => JSON.parse(body), text: () => body }, waitUntil: (x) => { p = x; } }, done: () => p }; };
+
+test("a push shows its alert, one per alert, and a tap opens its node's view; nothing else can choose where", async () => {
+  const w = pushWorker();
+  const ev = pushEvent(JSON.stringify({ title: "warning: disk full /srv on nas", body: "value 92%", tag: "disk_full|nodeaaaaaaaa|/srv", url: "/#node=nodeaaaaaaaa" }));
+  w.listeners.push(ev.e);
+  await ev.done();
+  assert.deepStrictEqual(w.shown, [{ title: "warning: disk full /srv on nas", body: "value 92%", tag: "disk_full|nodeaaaaaaaa|/srv", renotify: true,
+    data: { url: "/#node=nodeaaaaaaaa" }, icon: "/icons/icon-192.png" }]);
+  const evil = pushEvent(JSON.stringify({ title: "x", url: "https://evil.example/" }));
+  w.listeners.push(evil.e);
+  await evil.done();
+  assert.strictEqual(w.shown[1].data.url, "/", "only this hub's own views");
+  const odd = pushEvent("not json");
+  w.listeners.push(odd.e);
+  await odd.done();
+  assert.strictEqual(w.shown[2].title, "not json");
+  let closed = false, p;
+  w.listeners.notificationclick({ notification: { close: () => { closed = true; }, data: { url: "/#node=nodeaaaaaaaa" } }, waitUntil: (x) => { p = x; } });
+  await p;
+  assert.deepStrictEqual([closed, w.opened], [true, ["/#node=nodeaaaaaaaa"]], "no window open: open one");
+  const open = pushWorker(["https://hub.example/#fleet"]);
+  open.listeners.notificationclick({ notification: { close() {}, data: { url: "/#node=nodeaaaaaaaa" } }, waitUntil: (x) => { p = x; } });
+  await p;
+  assert.deepStrictEqual([open.navigated, open.opened], [["/#node=nodeaaaaaaaa"], []], "a window open: it goes there");
+});
+
+test("settings: notifications need HTTPS (with the guide), a browser that can, permission; enabling subscribes with the hub's key", async () => {
+  const el = {};
+  const $ = (s) => (el[s] = el[s] || { textContent: "", classList: { hidden: true, add() { this.hidden = true; }, toggle(c, v) { this.hidden = v; } } });
+  const sent = [], toasts = [];
+  let sub = null;
+  const key = require("node:crypto").createECDH("prime256v1");
+  key.generateKeys();
+  const reg = { pushManager: { getSubscription: async () => sub,
+    subscribe: async (o) => { sub = { endpoint: "https://push.example/1", o, toJSON: () => ({ endpoint: "https://push.example/1", keys: { p256dh: "p", auth: "a" } }), unsubscribe: async () => { sub = null; } }; return sub; } } };
+  const env = (o) => pageScope(["pushSupport", "deviceLabel", "pushSub", "drawPush", "enablePush", "disablePush"], {
+    $, toast: (m, err) => toasts.push([m, !!err]), atob: (s) => Buffer.from(s, "base64").toString("binary"),
+    b64uBytes: (s) => Uint8Array.from(Buffer.from(s, "base64url")),
+    fetch: async (url, opt) => { if (opt) sent.push([url, JSON.parse(opt.body)]); return { ok: true, json: async () => ({ publicKey: key.getPublicKey().toString("base64url") }) }; },
+    ...o });
+  const http = env({ window: { isSecureContext: false }, navigator: {}, Notification: undefined });
+  await http.drawPush();
+  assert.match(el["#push-msg"].textContent, /^Notifications need servitals over HTTPS/);
+  assert.strictEqual(el["#push-guide"].classList.hidden, false, "with a link to the HTTPS guide");
+  const nav = { serviceWorker: { ready: Promise.resolve(reg) }, userAgent: "Mozilla/5.0 (Linux; Android 15) Chrome/140.0 Mobile Safari/537.36" };
+  const ok = env({ window: { isSecureContext: true, PushManager: function () {} }, navigator: nav, Notification: { permission: "default", requestPermission: async () => "granted" } });
+  ok.PushManager = true;
+  await ok.drawPush();
+  assert.strictEqual(el["#push-msg"].textContent, "Off for this device.");
+  assert.strictEqual(el["#push-on"].classList.hidden, false);
+  await ok.enablePush();
+  assert.deepStrictEqual(sent[0], ["/__ctl/push/subscribe", { subscription: { endpoint: "https://push.example/1", keys: { p256dh: "p", auth: "a" } }, label: "Android Chrome" }]);
+  assert.deepStrictEqual(Buffer.from(sub.o.applicationServerKey), key.getPublicKey(), "subscribed with the hub's public key");
+  assert.strictEqual(sub.o.userVisibleOnly, true);
+  assert.strictEqual(el["#push-msg"].textContent, "On for this device. The channels tab sets which alerts it gets.");
+  await ok.disablePush();
+  assert.deepStrictEqual([sent[1], sub], [["/__ctl/push/unsubscribe", { endpoint: "https://push.example/1" }], null]);
+  const no = env({ window: { isSecureContext: true, PushManager: function () {} }, navigator: nav, Notification: { permission: "default", requestPermission: async () => "denied" } });
+  await no.enablePush();
+  assert.match(el["#push-msg"].textContent, /blocked for this site/);
+  assert.strictEqual(sent.length, 2, "nothing subscribed");
+});
+
+test("the hub's key in base64url becomes the bytes the browser wants", () => {
+  const line = /^const b64uBytes = .*$/m.exec(JS)[0];
+  const b64uBytes = new Function("atob", `${line}; return b64uBytes;`)((s) => Buffer.from(s, "base64").toString("binary"));
+  const raw = require("node:crypto").randomBytes(65);
+  assert.deepStrictEqual(Buffer.from(b64uBytes(raw.toString("base64url"))), raw);
+});

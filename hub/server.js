@@ -34,6 +34,7 @@ const { createAlerts } = require("./lib/alerts");
 const alertRules = require("./lib/alertrules");
 const { createOutbound } = require("./lib/proxy");
 const { createNotifier } = require("./lib/notify");
+const webpush = require("./lib/webpush");
 const fleet = require("./lib/fleet");
 const { createAdminStore, USER_RE } = require("./lib/admin");
 const { createLinks } = require("./lib/link");
@@ -198,7 +199,32 @@ historySweep();
 const HUB_START = Date.now();
 const outbound = createOutbound();
 if (outbound.describe().https !== "direct" || outbound.describe().http !== "direct") log.info("outbound.proxy", outbound.describe());
-const notifier = createNotifier({ dir: path.join(DATA, "alerts"), outbound, log });
+// Web Push (spec 8.5): the VAPID keys made on first run, the browsers that subscribed
+const vapid = webpush.loadVapid(path.join(DATA, "vapid.json"));
+const pushStore = webpush.createPushStore(path.join(DATA, "push-subscriptions.json"));
+let pushOrigin = "";   // the page's origin at the last subscribe: the VAPID subject when nothing else says
+const pushSubject = () => {
+  const s = process.env.VAPID_SUBJECT || PUBLIC_URL || pushOrigin;
+  return /^(mailto:|https:\/\/)/.test(s) ? s.replace(/\/+$/, "") : "mailto:servitals@localhost";
+};
+const push = {
+  // every device once; a gone one (404, 410) is removed; an error when none took it
+  async sendAll(payload) {
+    const subs = pushStore.list();
+    if (!subs.length) throw Object.assign(new Error("no device subscribed"), { code: "EPUSH_NONE" });
+    let ok = 0, last = null;
+    for (const s of subs) {
+      try {
+        const r = await webpush.sendPush({ subscription: s, payload, keys: vapid, subject: pushSubject(), outbound, urgency: "high" });
+        if (r.status === 404 || r.status === 410) { pushStore.remove(s.endpoint); log.info("push.subscription_gone", { service: new URL(s.endpoint).host }); }
+        else if (r.status >= 200 && r.status < 300) ok++;
+        else last = Object.assign(new Error(`HTTP ${r.status}`), { code: "HTTP_" + r.status });
+      } catch (e) { last = e; }
+    }
+    if (!ok) throw last || Object.assign(new Error("no device left"), { code: "EPUSH_NONE" });
+  },
+};
+const notifier = createNotifier({ dir: path.join(DATA, "alerts"), outbound, log, push });
 // the alert rules the person set (spec 8.1); a file that cannot be read leaves the defaults
 const RULES_F = path.join(DATA, "alerts", "rules.json");
 let savedRules = { rules: [] };
@@ -819,6 +845,29 @@ async function handle(req, res) {
       const id = body && typeof body.id === "string" ? body.id : "";
       log.audit("alert.channel_test", { ip, channel: id.slice(0, 20) });
       return json(200, await notifier.test(id));
+    }
+
+    // Web Push (spec 8.5): the public key, this hub's devices; subscribe and unsubscribe
+    if (req.method === "GET" && pathname === "/__ctl/push") {
+      return json(200, { publicKey: vapid.publicKey, devices: pushStore.devices(),
+                         https: requestIsHttps(req, { publicUrl: PUBLIC_URL, peerTrusted: client.peerTrusted }) });
+    }
+    if (req.method === "POST" && (pathname === "/__ctl/push/subscribe" || pathname === "/__ctl/push/unsubscribe")) {
+      let body = null;
+      try { body = JSON.parse(await readBodyN(req, 8192)); } catch (_) { return json(400, { error: "invalid json" }); }
+      if (!body || typeof body !== "object") return json(400, { error: "invalid json" });
+      if (pathname.endsWith("/unsubscribe")) {
+        const gone = typeof body.endpoint === "string" && pushStore.remove(body.endpoint);
+        log.audit("push.unsubscribed", { ip });
+        return json(200, { ok: true, removed: gone });
+      }
+      let id;
+      try { id = pushStore.add(body.subscription, body.label); } catch (e) { return json(400, { error: e.message }); }
+      const o = req.headers.origin;
+      if (typeof o === "string" && /^https:\/\/[^\s/]+$/.test(o)) pushOrigin = o;
+      const added = notifier.ensureWebPush(tr("notify.webpushName"));
+      log.audit("push.subscribed", { ip, device: id });
+      return json(200, { ok: true, id, channelAdded: added });
     }
 
     // history (spec 7): ?node=<id>&series=<name>&range=1h|24h|7d|30d|90d, or series=list

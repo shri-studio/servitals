@@ -294,6 +294,18 @@ const STRINGS = {
   "notify.testTitle": "servitals test",
   "notify.testText": "This channel works.",
   "notify.more": "+{n} more in the alert log",
+  "notify.webpushName": "phone notifications",
+  "push.title": "notifications on this device",
+  "push.enable": "enable notifications",
+  "push.disable": "turn them off here",
+  "push.guide": "how to serve servitals over HTTPS",
+  "push.needHttps": "Notifications need servitals over HTTPS (a tunnel, a Tailscale certificate or a reverse proxy).",
+  "push.unsupported": "This browser cannot get notifications. On iPhone and iPad, add servitals to the home screen first (iOS 16.4 or later).",
+  "push.denied": "Notifications are blocked for this site; allow them in the browser's settings.",
+  "push.onHere": "On for this device. The channels tab sets which alerts it gets.",
+  "push.offHere": "Off for this device.",
+  "push.enabled": "notifications on",
+  "push.failed": "could not change notifications",
 
   // dialogs
   "dlg.close": "[esc]",
