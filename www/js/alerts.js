@@ -335,7 +335,9 @@ function chHtml() {
       + `<label><input type="checkbox" data-f="digest"${r.digest ? " checked" : ""}> ${esc(tr("ch.digest"))}</label>`
       + `<span class="grow"></span><button data-act="test">${esc(tr("ch.test"))}</button><button data-act="remove">${esc(tr("rules.remove"))}</button></div>`
       + `<div class="rov cfields">` + fields.map(f => `<label>${esc(tr("ch.field." + f.key))}${f.optional ? " " + esc(tr("ch.optional")) : ""} `
-        + (f.secret && r.config[f.key] === "********"
+        + (f.choices
+          ? `<select class="cval" data-k="${esc(f.key)}">${opts(f.choices.map(c => [c, c]), r.config[f.key] || f.choices[0])}</select>`
+          : f.secret && r.config[f.key] === "********"
           // a saved secret: an empty box (the page never holds it) that a password manager will not fill
           ? `<input type="password" class="cval" data-k="${esc(f.key)}" autocomplete="new-password" data-saved="1" value="" placeholder="${esc(tr("ch.saved"))}">`
           : `<input type="${f.secret ? "password" : "text"}" class="cval" data-k="${esc(f.key)}" autocomplete="${f.secret ? "new-password" : "off"}" value="${esc(r.config[f.key] || "")}">`)
@@ -425,7 +427,9 @@ function chAction(act, i) {
     const el = $$("#channels-body [data-f=newtype]")[0];
     const type = el && chState.types[el.value] ? el.value : Object.keys(chState.types)[0];
     if (!type) return;
-    chState.rows.push({ id: "ch_" + Date.now().toString(36), type, name: type, min: "warning", on: true, digest: true, config: {} });
+    // spec 8.3: email for critical, the rest for warning and up
+    chState.rows.push({ id: "ch_" + Date.now().toString(36), type, name: type, min: type === "email" ? "critical" : "warning", on: true, digest: true,
+      config: type === "email" ? { port: "587", security: "starttls" } : {} });
   }
   if (act === "remove") chState.rows.splice(i, 1);
   chState.dirty = true;

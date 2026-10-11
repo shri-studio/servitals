@@ -7,6 +7,13 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- Email and Apprise channels (spec 8.4): email over SMTP with STARTTLS or
+  TLS (the server's certificate checked, a login only over TLS; plain SMTP
+  only to a relay on the hub's own host), from a small client of the hub's
+  own (`hub/lib/smtp.js`). Apprise reaches everything else, through an
+  Apprise API or the `apprise` command (`Suggests: apprise`), which gets the
+  URLs in its environment, never on its command line. A new email channel
+  starts at critical, as spec 8.3 suggests.
 - More alert channels and their settings (spec 8.4): Gotify, Telegram,
   Discord, Slack, Microsoft Teams (a Workflows webhook), Pushover and Matrix
   join ntfy and webhooks. The alerts view's "channels" tab adds, edits and

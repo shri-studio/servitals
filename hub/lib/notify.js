@@ -26,6 +26,8 @@ const fs = require("fs");
 const path = require("path");
 const { writeFileAtomic } = require("./fsutil");
 const { tr } = require("./i18n");
+const childProcess = require("child_process");
+const smtp = require("./smtp");
 
 const SEV = ["critical", "warning", "info"];
 const rank = (s) => (SEV.includes(s) ? SEV.indexOf(s) : 2);
@@ -132,6 +134,39 @@ const ADAPTERS = {
         body: JSON.stringify({ token: c.token, user: c.user, title: cut(m.title, 250), message: fit(m.text, 1000), priority: pri(m, 1, 0, -1) }) };
     },
   },
+  // email over SMTP (hub/lib/smtp.js): STARTTLS or TLS; plain only to a relay on this host
+  email: {
+    fields: { host: { re: /^[A-Za-z0-9.-]{1,253}$|^\[?[0-9a-fA-F:.]{2,45}\]?$/ }, port: { re: /^[0-9]{1,5}$/ }, security: { choices: ["starttls", "tls", "none"] },
+              user: { optional: true }, pass: { optional: true, secret: true }, from: { re: smtp.ADDRESS },
+              to: { re: /^[A-Za-z0-9._%+@-]+(\s*,\s*[A-Za-z0-9._%+@-]+){0,9}$/, list: smtp.ADDRESS } },
+    send(c, m, ctx) {
+      return ctx.sendMail({ host: c.host.replace(/^\[|\]$/g, ""), port: Number(c.port), security: c.security, user: c.user, pass: c.pass,
+        from: c.from, to: c.to.split(",").map((a) => a.trim()), subject: cut(m.title, 200), text: fit(m.text, 20000) + "\n\n-- \nservitals" });
+    },
+  },
+  // Apprise, the catch-all: an Apprise API (stateless /notify/), or the apprise CLI with
+  // the URLs in its environment (never on its command line, where any user could read them)
+  apprise: {
+    fields: { urls: { secret: true }, api: { optional: true, url: true } },
+    async send(c, m, ctx) {
+      const type = m.resolved || m.kind === "test" ? "success" : m.severity === "critical" ? "failure" : m.severity === "warning" ? "warning" : "info";
+      if (c.api) {
+        const r = await ctx.outbound.request(base(c.api) + "/notify/", { method: "POST", headers: { "content-type": "application/json" }, timeoutMs: 30000,
+          body: JSON.stringify({ urls: c.urls, title: cut(m.title, 250), body: fit(m.text, 3200), type }) });
+        if (r.status < 200 || r.status >= 300) { const e = new Error(`HTTP ${r.status}`); e.code = "HTTP_" + r.status; throw e; }
+        return;
+      }
+      await new Promise((ok, fail) => {
+        const env = { PATH: process.env.PATH || "/usr/bin:/bin", HOME: process.env.HOME || "/tmp", LANG: "C.UTF-8", APPRISE_URLS: c.urls };
+        ctx.execFile("apprise", ["-n", type, "-t", cut(m.title, 250), "-b", fit(m.text, 3200)], { env, timeout: 30000, maxBuffer: 65536 }, (err) => {
+          if (!err) { ok(); return; }
+          const e = new Error("apprise failed");
+          e.code = err.code === "ENOENT" ? "APPRISE_MISSING" : err.killed ? "ETIMEDOUT" : "APPRISE_EXIT_" + (typeof err.code === "number" ? err.code : "x");
+          fail(e);
+        });
+      });
+    },
+  },
   // a room message: PUT with a transaction id, so a retry is not a second message
   matrix: {
     fields: { server: { url: true }, room: { re: /^![A-Za-z0-9._=-]{1,255}:[A-Za-z0-9.-]{1,253}(:[0-9]{1,5})?$/ }, token: { secret: true, header: true } },
@@ -145,6 +180,8 @@ const ADAPTERS = {
 
 // what is wrong with a field's value, or ""
 function fieldError(f, v) {
+  if (f.choices && !f.choices.includes(v)) return "one of " + f.choices.join(", ");
+  if (f.list && !v.split(",").every((x) => f.list.test(x.trim()))) return "not valid";
   if (f.url && !httpUrl(v)) return "an http or https URL";
   if (f.re && !f.re.test(v)) return "not valid";
   if (f.header && !/^[\x20-\x7e]+$/.test(v)) return "printable ASCII only";
@@ -231,7 +268,8 @@ function alertMessage(e) {
 }
 
 /* ------------------------------------------------------------------ the notifier */
-function createNotifier({ dir, outbound, now = Date.now, log = { info() {}, warn() {} }, sleep = (ms) => new Promise((r) => setTimeout(r, ms)).then(() => {}), env = process.env } = {}) {
+function createNotifier({ dir, outbound, now = Date.now, log = { info() {}, warn() {} }, sleep = (ms) => new Promise((r) => setTimeout(r, ms)).then(() => {}), env = process.env,
+                          execFile = childProcess.execFile, sendMail = smtp.sendMail } = {}) {
   fs.mkdirSync(dir, { recursive: true });
   const cfgFile = path.join(dir, "channels.json"), stFile = path.join(dir, "notify-state.json");
   let cfg = { channels: [], quiet: null, digestAt: "07:00" };
@@ -280,13 +318,17 @@ function createNotifier({ dir, outbound, now = Date.now, log = { info() {}, warn
     return out;
   }
   async function sendOnce(ch, m) {
-    const req = ADAPTERS[ch.type].build(resolved(ch), m);
+    const ad = ADAPTERS[ch.type];
+    if (ad.send) { await ad.send(resolved(ch), m, { outbound, execFile, sendMail }); return; }
+    const req = ad.build(resolved(ch), m);
     const r = await outbound.request(req.url, { method: req.method || "POST", headers: req.headers, body: req.body, timeoutMs: 15000 });
     if (r.status < 200 || r.status >= 300) { const e = new Error(`HTTP ${r.status}`); e.code = "HTTP_" + r.status; throw e; }
   }
   const errText = (e) => (e && e.code ? String(e.code) : "failed");
   // a failure a second try cannot fix: a 4xx (other than 408 and 429), a bad value
-  const final = (e) => /^HTTP_4\d\d$/.test(e.code) && !/^HTTP_(408|429)$/.test(e.code) || /^(ENV_UNSET|EBADVALUE|EURL)/.test(String(e.code));
+  // (SMTP: a 5xx is final, a 4xx is "try later"; no TLS, a bad address, no apprise: final)
+  const final = (e) => /^HTTP_4\d\d$/.test(e.code) && !/^HTTP_(408|429)$/.test(e.code) || /^SMTP_5/.test(e.code)
+    || /^(ENV_UNSET|EBADVALUE|EURL|ETLSREQUIRED|EADDRESS|APPRISE_MISSING)/.test(String(e.code));
   async function send(ch, m) {
     for (let i = 0; ; i++) {
       try {
@@ -400,7 +442,7 @@ function createNotifier({ dir, outbound, now = Date.now, log = { info() {}, warn
       const mask = (ch) => ({ ...ch, config: Object.fromEntries(Object.entries(ch.config).map(([k, v]) =>
         [k, ADAPTERS[ch.type].fields[k].secret && !ENVREF.test(v) ? SECRET : v])) });
       return { channels: cfg.channels.map(mask), quiet: cfg.quiet, digestAt: cfg.digestAt, status: { ...status },
-               types: Object.fromEntries(Object.entries(ADAPTERS).map(([t, a]) => [t, Object.entries(a.fields).map(([k, f]) => ({ key: k, secret: !!f.secret, optional: !!f.optional }))])) };
+               types: Object.fromEntries(Object.entries(ADAPTERS).map(([t, a]) => [t, Object.entries(a.fields).map(([k, f]) => ({ key: k, secret: !!f.secret, optional: !!f.optional, ...(f.choices ? { choices: f.choices } : {}) }))])) };
     },
     // for tests: wait for the sends under way
     async flush() { while (pending.size) await Promise.all([...pending]); },

@@ -1063,3 +1063,16 @@ test("channels: an untouched saved secret is sent back masked, a typed one repla
   release(); await run;
   assert.deepStrictEqual([t.chState.rows[1].name, t.chState.dirty, t.chState.status.ch_n.lastOk], ["renamed", true, 99], "the status is new, the edit stays");
 });
+
+test("channels: a field with choices is a select; a new email channel starts at critical on port 587 with STARTTLS", () => {
+  const s = rulesScope({ $$: (sel) => (sel.includes("newtype") ? [{ value: "email" }] : []), $: () => ({ innerHTML: "" }) });
+  const types = { email: [{ key: "host", secret: false, optional: false }, { key: "port", secret: false, optional: false },
+    { key: "security", secret: false, optional: false, choices: ["starttls", "tls", "none"] }, { key: "pass", secret: true, optional: true }] };
+  Object.assign(s.chState, { types, rows: [], status: {} });
+  s.chAction("add", -1);
+  const r = s.chState.rows[0];
+  assert.deepStrictEqual([r.type, r.min, r.config], ["email", "critical", { port: "587", security: "starttls" }]);
+  const html = s.chHtml();
+  assert.match(html, /security <select class="cval" data-k="security"><option value="starttls" selected>starttls<\/option><option value="tls">tls<\/option>/);
+  assert.match(html, /SMTP server <input type="text"/);
+});

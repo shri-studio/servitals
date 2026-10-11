@@ -18,13 +18,13 @@ const at = (hhmm, dayOffset = 0) => Date.UTC(2026, 9, 9 + dayOffset, Number(hhmm
 const ntfy = (extra = {}) => ({ id: "ch_n", type: "ntfy", name: "phone", min: "warning", on: true, config: { topic: "sv-home", token: "tk_secret" }, ...extra });
 const hook = (extra = {}) => ({ id: "ch_w", type: "webhook", name: "pager", min: "critical", on: true, config: { url: "https://hooks.test/T0K3N", secret: "s3" }, ...extra });
 
-function setup(config, { fail = () => 0, sleep } = {}) {
+function setup(config, { fail = () => 0, sleep, sendMail, execFile } = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sv-notify-"));
   const sent = [], logs = [], slept = [];
   const clock = { t: at("12:00") };
   const outbound = { request: async (url, o) => { sent.push({ url, ...o }); const s = fail(url, sent.length); return { status: s || 200, headers: {}, body: "" }; } };
   const make = () => createNotifier({ dir, outbound, now: () => clock.t, env: { SERVITALS_NOTIFY_NTFY: "from_env", SERVITALS_NOTIFY_HOOK: "https://hooks.test/env", SERVITALS_NOTIFY_BAD: "ftp://x", AUTH_PASS: "pw" },
-    log: { info() {}, warn: (event, f) => logs.push([event, f]) }, sleep: sleep || (async (ms) => { slept.push(ms); }) });
+    log: { info() {}, warn: (event, f) => logs.push([event, f]) }, sleep: sleep || (async (ms) => { slept.push(ms); }), sendMail, execFile });
   const n = make();
   if (config) n.setConfig(config);
   return { n, dir, sent, logs, slept, clock, make };
@@ -275,4 +275,52 @@ test("a long digest is cut at a line, saying how many more; a cut never splits a
   assert.strictEqual(d.description, "\\*x\\*");
   const tm = JSON.parse(ADAPTERS.teams.build({ url: "https://t.test/x" }, name).body).attachments[0].content.body[0].text;
   assert.match(tm, /\\\[fix here\\\]\\\(/);
+});
+
+test("email: what the SMTP client is given; a refused login is final, a busy server is tried again", async () => {
+  const mails = [];
+  let answer = null;
+  const ch = { id: "ch_e", type: "email", name: "mail", min: "critical", on: true,
+    config: { host: "smtp.example.org", port: "587", security: "starttls", user: "hub", pass: "pw", from: "hub@example.org", to: "a@example.org, b@example.org" } };
+  const s = setup({ channels: [ch] }, { sendMail: async (o) => { mails.push(o); if (answer) { const e = new Error("x"); e.code = answer; throw e; } } });
+  s.n.onEvent(ev("firing", "critical"));
+  await s.n.flush();
+  assert.deepStrictEqual({ ...mails[0], text: undefined }, { host: "smtp.example.org", port: 587, security: "starttls", user: "hub", pass: "pw",
+    from: "hub@example.org", to: ["a@example.org", "b@example.org"], subject: "critical: disk full /srv on nas", text: undefined });
+  assert.match(mails[0].text, /^value 92%\nsince 11:55\n\n-- \nservitals$/);
+  answer = "SMTP_535"; s.n.onEvent(ev("firing", "critical")); await s.n.flush();
+  assert.strictEqual(mails.length, 2, "535: a wrong password stays wrong");
+  answer = "SMTP_451"; s.n.onEvent(ev("firing", "critical")); await s.n.flush();
+  assert.strictEqual(mails.length, 6, "451: try later, three more times");
+  const bad = (config, re) => assert.throws(() => checkChannels({ channels: [{ ...ch, config: { ...ch.config, ...config } }] }), re);
+  bad({ security: "ssl" }, /mail: security: one of starttls, tls, none/);
+  bad({ to: "a@example.org, nope" }, /mail: to: not valid/);
+  bad({ from: "hub" }, /mail: from: not valid/);
+  bad({ port: "x" }, /mail: port: not valid/);
+  assert.deepStrictEqual(s.n.view().types.email.find((f) => f.key === "security").choices, ["starttls", "tls", "none"]);
+});
+
+test("Apprise: the CLI gets the URLs in its environment, not its arguments, and none of the hub's settings; or an Apprise API", async () => {
+  process.env.AUTH_PASS_TEST_LEAK = "should-not-leak";
+  const runs = [];
+  let fail = null;
+  const ch = { id: "ch_a", type: "apprise", name: "apprise", min: "warning", on: true, config: { urls: "tgram://tok/chat mailto://u:p@x" } };
+  const s = setup({ channels: [ch] }, { execFile: (cmd, args, opts, cb) => { runs.push({ cmd, args, opts }); setImmediate(() => cb(fail)); } });
+  s.n.onEvent(ev("firing", "critical"));
+  await s.n.flush();
+  assert.deepStrictEqual([runs[0].cmd, runs[0].args.slice(0, 4)], ["apprise", ["-n", "failure", "-t", "critical: disk full /srv on nas"]]);
+  assert.ok(!runs[0].args.join(" ").includes("tgram://"), "never on the command line");
+  assert.strictEqual(runs[0].opts.env.APPRISE_URLS, "tgram://tok/chat mailto://u:p@x");
+  assert.strictEqual(runs[0].opts.env.AUTH_PASS_TEST_LEAK, undefined, "only PATH, HOME, LANG and the URLs");
+  fail = Object.assign(new Error("spawn apprise ENOENT"), { code: "ENOENT" });
+  s.n.onEvent(ev("firing", "warning"));
+  await s.n.flush();
+  assert.strictEqual(runs.length, 2, "not installed: no retry");
+  assert.strictEqual(s.n.view().status.ch_a.lastError, "APPRISE_MISSING");
+  delete process.env.AUTH_PASS_TEST_LEAK;
+  const api = setup({ channels: [{ ...ch, config: { urls: "tgram://tok/chat", api: "https://apprise.lan/" } }] });
+  api.n.onEvent(ev("resolved", "warning"));
+  await api.n.flush();
+  assert.strictEqual(api.sent[0].url, "https://apprise.lan/notify/");
+  assert.deepStrictEqual(JSON.parse(api.sent[0].body), { urls: "tgram://tok/chat", title: "resolved: disk full /srv on nas", body: "value 92%\nsince 11:55", type: "success" });
 });

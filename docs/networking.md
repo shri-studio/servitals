@@ -113,7 +113,10 @@ proxy URLs work; HTTPS goes through a `CONNECT` tunnel, so the proxy never
 sees the message and the destination's certificate is checked as usual.
 `NO_PROXY` takes host names, domain suffixes (`.example.com`), IPv4 CIDRs
 (`10.0.0.0/8`), IPv6 addresses and `*`; `localhost` is always direct. The
-hub's log names the proxy host at start, never its credentials. Proxies and firewalls often cut idle connections before the
+hub's log names the proxy host at start, never its credentials. Email goes
+straight to the SMTP server: SMTP does not go through an HTTP proxy, so a
+hub behind one needs a mail relay it can reach (on its own host, the
+"none" security setting is allowed for that). Proxies and firewalls often cut idle connections before the
 55-second long poll ends: set `WAIT_SECONDS=25` (5 to 55) if waits keep
 failing.
 
