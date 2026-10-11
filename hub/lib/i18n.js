@@ -229,7 +229,7 @@ const STRINGS = {
   "ch.field.host": "SMTP server",
   "ch.field.port": "port",
   "ch.field.security": "security",
-  "ch.field.user": "user",
+  "ch.field.login": "login",
   "ch.field.pass": "password",
   "ch.field.from": "from address",
   "ch.field.to": "to (comma between addresses)",

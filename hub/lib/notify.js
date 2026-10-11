@@ -136,11 +136,20 @@ const ADAPTERS = {
   },
   // email over SMTP (hub/lib/smtp.js): STARTTLS or TLS; plain only to a relay on this host
   email: {
-    fields: { host: { re: /^[A-Za-z0-9.-]{1,253}$|^\[?[0-9a-fA-F:.]{2,45}\]?$/ }, port: { re: /^[0-9]{1,5}$/ }, security: { choices: ["starttls", "tls", "none"] },
-              user: { optional: true }, pass: { optional: true, secret: true }, from: { re: smtp.ADDRESS },
+    // dest: where the password goes; a change there and a saved password must be typed again
+    fields: { host: { dest: true, re: /^[A-Za-z0-9.-]{1,253}$|^\[?[0-9a-fA-F:.]{2,45}\]?$/ }, port: { dest: true, re: /^[0-9]{1,5}$/ },
+              security: { dest: true, choices: ["starttls", "tls", "none"] },
+              login: { optional: true }, pass: { optional: true, secret: true }, from: { re: smtp.ADDRESS },
               to: { re: /^[A-Za-z0-9._%+@-]+(\s*,\s*[A-Za-z0-9._%+@-]+){0,9}$/, list: smtp.ADDRESS } },
+    // settings that cannot work are refused on save, not at 3 am
+    check(c) {
+      if (c.login && !c.pass) return "pass: needed with a login";
+      if (c.security === "none" && (!/^(localhost|127\.0\.0\.1|\[?::1\]?)$/.test(c.host) || c.login))
+        return "security: none only to a mail relay on this host, without a login";
+      return "";
+    },
     send(c, m, ctx) {
-      return ctx.sendMail({ host: c.host.replace(/^\[|\]$/g, ""), port: Number(c.port), security: c.security, user: c.user, pass: c.pass,
+      return ctx.sendMail({ host: c.host.replace(/^\[|\]$/g, ""), port: Number(c.port), security: c.security, user: c.login, pass: c.pass,
         from: c.from, to: c.to.split(",").map((a) => a.trim()), subject: cut(m.title, 200), text: fit(m.text, 20000) + "\n\n-- \nservitals" });
     },
   },
@@ -213,7 +222,7 @@ function checkChannels(input, old = { channels: [] }) {
       // a saved secret goes only where it went: an address changed, and it must be typed again
       if (v === SECRET && f.secret) {
         const same = (x, y) => (x || "") === (y || "");
-        const moved = was && Object.entries(ad.fields).some(([k2, f2]) => f2.url && !f2.secret && !same(cfg[k2], was.config[k2]));
+        const moved = was && Object.entries(ad.fields).some(([k2, f2]) => (f2.url || f2.dest) && !f2.secret && !same(cfg[k2], was.config[k2]));
         if (!was || was.config[k] === undefined || moved) throw new Error(`${at}: ${k}: type it again`);
         v = was.config[k];
       }
@@ -229,6 +238,8 @@ function checkChannels(input, old = { channels: [] }) {
       }
       config[k] = v;
     }
+    const wrong = ad.check && !Object.values(config).some((v) => ENVREF.test(v)) ? ad.check(config) : "";
+    if (wrong) throw new Error(`${at}: ${wrong}`);
     return { id: ch.id, type: ch.type, name: ch.name.trim(), min: ch.min, on: ch.on, ...(ch.digest === false ? { digest: false } : {}), config };
   });
   let quiet = null;
@@ -328,7 +339,7 @@ function createNotifier({ dir, outbound, now = Date.now, log = { info() {}, warn
   // a failure a second try cannot fix: a 4xx (other than 408 and 429), a bad value
   // (SMTP: a 5xx is final, a 4xx is "try later"; no TLS, a bad address, no apprise: final)
   const final = (e) => /^HTTP_4\d\d$/.test(e.code) && !/^HTTP_(408|429)$/.test(e.code) || /^SMTP_5/.test(e.code)
-    || /^(ENV_UNSET|EBADVALUE|EURL|ETLSREQUIRED|EADDRESS|APPRISE_MISSING)/.test(String(e.code));
+    || /^(ENV_UNSET|EBADVALUE|EURL|ETLSREQUIRED|EADDRESS|APPRISE_MISSING|ERR_TLS_CERT|DEPTH_ZERO_SELF_SIGNED|SELF_SIGNED_CERT|UNABLE_TO_VERIFY|CERT_)/.test(String(e.code));
   async function send(ch, m) {
     for (let i = 0; ; i++) {
       try {

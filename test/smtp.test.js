@@ -25,11 +25,14 @@ function certFor(ip) {
 const CERT = certFor("127.0.0.1");
 
 // an SMTP server: offers STARTTLS (unless implicit), AUTH as asked; records what it saw
-function smtpServer({ implicit = false, starttls = true, auth = "PLAIN LOGIN", login = ["u", "p"], rcptCode = 250 } = {}) {
+function smtpServer({ implicit = false, starttls = true, auth = "PLAIN LOGIN", login = ["u", "p"], rcptCode = 250, inject = "", doubleMail = false, split = false } = {}) {
   const seen = { lines: [], data: "", tls: false, auth: null };
   const serve = (sock, secure, greet = true) => {
     let buf = "", inData = false, step = null;
-    const say = (s) => sock.write(s + "\r\n");
+    const say = (s) => {
+      const out = s + "\r\n";
+      if (split) { for (const ch of out) sock.write(ch); } else sock.write(out);   // a reply byte by byte
+    };
     const ehlo = () => say(["250-hi", ...(starttls && !secure ? ["250-STARTTLS"] : []), ...(auth && secure ? [`250-AUTH ${auth}`] : []), "250 OK"].join("\r\n"));
     sock.on("data", (c) => {
       buf += c.toString("utf8");
@@ -47,7 +50,7 @@ function smtpServer({ implicit = false, starttls = true, auth = "PLAIN LOGIN", l
         const [verb] = line.split(" ");
         if (verb === "EHLO") ehlo();
         else if (verb === "STARTTLS") {
-          say("220 go");
+          say("220 go" + inject);
           sock.removeAllListeners("data");
           const t = new tls.TLSSocket(sock, { isServer: true, key: CERT.key, cert: CERT.cert });
           seen.tls = true;
@@ -59,7 +62,7 @@ function smtpServer({ implicit = false, starttls = true, auth = "PLAIN LOGIN", l
           seen.auth = ok ? "PLAIN" : "bad";
           say(ok ? "235 ok" : "535 no");
         } else if (verb === "AUTH") { step = "user"; say("334 VXNlcm5hbWU6"); }
-        else if (verb === "MAIL") say("250 ok");
+        else if (verb === "MAIL") say(doubleMail ? "250 ok\r\n250 again" : "250 ok");
         else if (verb === "RCPT") say(`${rcptCode} rcpt`);
         else if (verb === "DATA") { inData = true; say("354 go"); }
         else if (verb === "QUIT") { say("221 bye"); sock.end(); }
@@ -87,7 +90,7 @@ test("STARTTLS: the login only after TLS, the message as UTF-8 base64, the subje
     const [head, body] = s.seen.data.split("\n\n");
     assert.match(head, /^Subject: =\?UTF-8\?B\?/m);
     assert.match(head, /^Content-Transfer-Encoding: base64$/m);
-    assert.strictEqual(Buffer.from(body.replace(/\n/g, ""), "base64").toString(), "value 96%\n.since 03:10", "a line starting with a dot arrives whole");
+    assert.strictEqual(Buffer.from(body.replace(/\n/g, ""), "base64").toString(), "value 96%\r\n.since 03:10", "a line starting with a dot arrives whole");
   } finally { s.srv.close(); }
 });
 
@@ -128,4 +131,28 @@ test("addresses and subjects cannot add headers; a silent server times out", asy
   try {
     await assert.rejects(sendMail({ ...base, port: mute.address().port, security: "starttls", timeoutMs: 300 }), (e) => e.code === "ETIMEDOUT");
   } finally { mute.close(); }
+});
+
+test("STARTTLS: bytes sent before the upgrade are refused, not read as TLS replies; replies split or doubled are handled", async () => {
+  const s = await smtpServer({ inject: "\r\n250-INJECTED\r\n250 AUTH LOGIN" });
+  try {
+    await assert.rejects(sendMail({ ...base, port: s.port, security: "starttls", user: "u", pass: "p" }), (e) => e.code === "ESMTP");
+    assert.ok(!s.seen.lines.some((l) => l.startsWith("AUTH")), "nothing more was said");
+  } finally { s.srv.close(); }
+  const sp = await smtpServer({ split: true });
+  try { await sendMail({ ...base, port: sp.port, security: "starttls", user: "u", pass: "p" }); } finally { sp.srv.close(); }
+  const d = await smtpServer({ doubleMail: true });
+  try {
+    await assert.rejects(sendMail({ ...base, port: d.port, security: "starttls", timeoutMs: 5000 }), (e) => e.code === "ESMTP", "an extra reply: an error at once, not a timeout");
+  } finally { d.srv.close(); }
+});
+
+test("the message: CRLF lines in the body, encoded words within 75 characters", async () => {
+  const s = await smtpServer();
+  try {
+    await sendMail({ ...base, port: s.port, security: "starttls", subject: "Ünïcödé ".repeat(10), text: "a\nb" });
+    const [head, body] = s.seen.data.split("\n\n");
+    assert.strictEqual(Buffer.from(body.replace(/\n/g, ""), "base64").toString(), "a\r\nb");
+    for (const w of head.match(/=\?UTF-8\?B\?[^?]*\?=/g)) assert.ok(w.length <= 75, w);
+  } finally { s.srv.close(); }
 });

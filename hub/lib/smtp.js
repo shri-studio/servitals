@@ -23,19 +23,21 @@ const LOOPBACK = new Set(["localhost", "127.0.0.1", "::1"]);
 
 const coded = (msg, code) => { const e = new Error(msg); e.code = code; return e; };
 const b64 = (s) => Buffer.from(s, "utf8").toString("base64");
-// a header value: plain ASCII as it is, else one RFC 2047 encoded word per 30 characters
+// a header value: plain ASCII as it is, else RFC 2047 encoded words of 12 characters
+// (at most 48 UTF-8 bytes, 64 base64 characters: within the 75 a word may have)
 function header(s) {
   s = String(s).replace(/[\r\n]+/g, " ");
   if (/^[\x20-\x7e]*$/.test(s)) return s;
   const parts = [];
   const chars = Array.from(s);
-  for (let i = 0; i < chars.length; i += 30) parts.push(`=?UTF-8?B?${b64(chars.slice(i, i + 30).join(""))}?=`);
+  for (let i = 0; i < chars.length; i += 12) parts.push(`=?UTF-8?B?${b64(chars.slice(i, i + 12).join(""))}?=`);
   return parts.join("\r\n ");
 }
 
-// the whole message, CRLF lines, with the body in base64 (no line can start with a dot)
+// the whole message, CRLF lines, with the body (CRLF lines too) in base64: no line can
+// start with a dot
 function message({ from, to, subject, text, hostname }) {
-  const body = b64(text).replace(/.{1,76}/g, "$&\r\n");
+  const body = b64(String(text).replace(/\r?\n/g, "\r\n")).replace(/.{1,76}/g, "$&\r\n");
   return [
     `From: ${from}`, `To: ${to.join(", ")}`, `Subject: ${header(subject)}`, `Date: ${new Date().toUTCString().replace("GMT", "+0000")}`,
     `Message-ID: <${crypto.randomBytes(12).toString("hex")}@${hostname}>`, "MIME-Version: 1.0",
@@ -50,6 +52,7 @@ function sendMail({ host, port, security = "starttls", user, pass, from, to, sub
     if (security === "none" && (!LOOPBACK.has(host) || user)) { reject(coded("plain SMTP only to this host, without a login", "ETLSREQUIRED")); return; }
     const helo = /^[A-Za-z0-9.-]{1,253}$/.test(hostname) ? hostname : "servitals";
     let sock, buf = "", waiting = null, done = false, secure = security === "tls";
+    const replies = [];   // complete replies nobody asked for yet
     const finish = (err) => {
       if (done) return;
       done = true;
@@ -58,23 +61,23 @@ function sendMail({ host, port, security = "starttls", user, pass, from, to, sub
       if (err) reject(err); else resolve();
     };
     const timer = setTimeout(() => finish(coded("timed out", "ETIMEDOUT")), timeoutMs);
-    // one reply: its lines up to "NNN text"; resolves { code, lines }
+    // every complete reply in what has arrived ("NNN-…" lines up to "NNN …"), in order;
+    // each goes to the one waiting for it, or waits in replies
     const onData = (chunk) => {
       buf += chunk.toString("utf8");
       if (buf.length > 65536) { finish(coded("reply too long", "ESMTP")); return; }
-      const lines = buf.split("\r\n");
-      for (let i = 0; i < lines.length - 1; i++) {
-        if (/^\d{3} /.test(lines[i]) || /^\d{3}$/.test(lines[i])) {
-          const reply = { code: Number(lines[i].slice(0, 3)), lines: lines.slice(0, i + 1).map((l) => l.slice(4)) };
-          buf = lines.slice(i + 1).join("\r\n");
-          const w = waiting;
-          waiting = null;
-          if (w) w(reply);
-          return;
-        }
+      for (;;) {
+        const lines = buf.split("\r\n");
+        const end = lines.slice(0, -1).findIndex((l) => /^\d{3}( |$)/.test(l));
+        if (end < 0) return;
+        const reply = { code: Number(lines[end].slice(0, 3)), lines: lines.slice(0, end + 1).map((l) => l.slice(4)) };
+        buf = lines.slice(end + 1).join("\r\n");
+        const w = waiting;
+        waiting = null;
+        if (w) w(reply); else replies.push(reply);
       }
     };
-    const read = () => new Promise((r) => { waiting = r; });
+    const read = () => (replies.length ? Promise.resolve(replies.shift()) : new Promise((r) => { waiting = r; }));
     const attach = (s) => {
       sock = s;
       s.on("data", onData);
@@ -83,6 +86,8 @@ function sendMail({ host, port, security = "starttls", user, pass, from, to, sub
     };
     // a command and its reply, which must have the expected code
     async function cmd(line, want) {
+      // a reply before its command: the server is out of step (or someone injects)
+      if (replies.length) throw coded("a reply nobody asked for", "ESMTP");
       const r = read();
       sock.write(line + "\r\n");
       const reply = await r;
@@ -96,6 +101,8 @@ function sendMail({ host, port, security = "starttls", user, pass, from, to, sub
       if (security === "starttls") {
         if (!ehlo.lines.some((l) => /^STARTTLS\b/i.test(l))) throw coded("the server offers no STARTTLS", "ETLSREQUIRED");
         await cmd("STARTTLS", 220);
+        // nothing may come in the clear after 220: such bytes would read as TLS replies
+        if (buf !== "" || replies.length) throw coded("bytes after STARTTLS before TLS", "ESMTP");
         const plain = sock;
         plain.removeListener("data", onData);
         plain.removeAllListeners("close");
@@ -118,6 +125,8 @@ function sendMail({ host, port, security = "starttls", user, pass, from, to, sub
       for (const a of list) await cmd(`RCPT TO:<${a}>`, [250, 251]);
       await cmd("DATA", 354);
       await cmd(message({ from, to: list, subject, text, hostname: helo }) + "\r\n.", 250);
+      await new Promise((r) => setImmediate(r));
+      if (replies.length) throw coded("a reply nobody asked for", "ESMTP");
       sock.write("QUIT\r\n");
     }
     const run = () => talk().then(() => finish(), (e) => finish(e));

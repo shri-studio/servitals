@@ -281,7 +281,7 @@ test("email: what the SMTP client is given; a refused login is final, a busy ser
   const mails = [];
   let answer = null;
   const ch = { id: "ch_e", type: "email", name: "mail", min: "critical", on: true,
-    config: { host: "smtp.example.org", port: "587", security: "starttls", user: "hub", pass: "pw", from: "hub@example.org", to: "a@example.org, b@example.org" } };
+    config: { host: "smtp.example.org", port: "587", security: "starttls", login: "hub", pass: "pw", from: "hub@example.org", to: "a@example.org, b@example.org" } };
   const s = setup({ channels: [ch] }, { sendMail: async (o) => { mails.push(o); if (answer) { const e = new Error("x"); e.code = answer; throw e; } } });
   s.n.onEvent(ev("firing", "critical"));
   await s.n.flush();
@@ -323,4 +323,24 @@ test("Apprise: the CLI gets the URLs in its environment, not its arguments, and 
   await api.n.flush();
   assert.strictEqual(api.sent[0].url, "https://apprise.lan/notify/");
   assert.deepStrictEqual(JSON.parse(api.sent[0].body), { urls: "tgram://tok/chat", title: "resolved: disk full /srv on nas", body: "value 92%\nsince 11:55", type: "success" });
+});
+
+test("email: a saved password follows only the same server; settings that cannot work are refused on save; a bad certificate is not retried", async () => {
+  const was = { channels: [{ id: "ch_e", type: "email", name: "mail", min: "critical", on: true,
+    config: { host: "smtp.example.org", port: "587", security: "starttls", login: "hub", pass: "realpw", from: "hub@example.org", to: "a@example.org" } }] };
+  const save = (config) => checkChannels({ channels: [{ ...was.channels[0], config: { ...was.channels[0].config, ...config } }] }, was);
+  assert.strictEqual(save({ pass: SECRET }).channels[0].config.pass, "realpw");
+  assert.throws(() => save({ host: "evil.example.net", pass: SECRET }), /mail: pass: type it again/);
+  assert.throws(() => save({ port: "2525", pass: SECRET }), /mail: pass: type it again/);
+  assert.throws(() => save({ security: "none", host: "smtp.example.org", login: "", pass: "" }), /mail: security: none only to a mail relay on this host, without a login/);
+  assert.throws(() => save({ security: "none", host: "localhost", pass: "x" }), /without a login/);
+  assert.throws(() => save({ pass: "" }), /mail: pass: needed with a login/);
+  assert.strictEqual(save({ security: "none", host: "localhost", login: "", pass: "" }).channels[0].config.host, "localhost");
+  const mails = [];
+  const s = setup(was, { sendMail: async () => { mails.push(1); const e = new Error("x"); e.code = "ERR_TLS_CERT_ALTNAME_INVALID"; throw e; } });
+  s.n.onEvent(ev("firing", "critical"));
+  await s.n.flush();
+  assert.strictEqual(mails.length, 1, "a certificate for another name stays wrong");
+  const { STRINGS } = require("../hub/lib/i18n");
+  assert.deepStrictEqual([STRINGS["ch.field.user"], STRINGS["ch.field.login"]], ["user key", "login"], "Pushover keeps its label");
 });
