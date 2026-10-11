@@ -363,3 +363,18 @@ test("Web Push: one payload for the service worker, per alert a tag and its node
   const off = setup({ channels: [{ id: "ch_webpush", type: "webpush", name: "p", min: "warning", on: true, config: {} }] });
   assert.deepStrictEqual(await off.n.test("ch_webpush"), { ok: false, error: "EPUSH_OFF" });
 });
+
+test("Web Push: a long digest in any script fits one push; urgency high for alerts, normal for the digest", async () => {
+  const pushed = [];
+  const s = setup({ channels: [{ id: "ch_webpush", type: "webpush", name: "p", min: "info", on: true, config: {} }] },
+    { push: { sendAll: async (p, urgency) => { pushed.push([p, urgency]); } } });
+  s.n.onEvent(ev("firing", "critical", { name: "ディスク".repeat(60), rule: "c_x", metric: "temp", value: 1 }));
+  await s.n.flush();
+  s.clock.t = at("08:00"); s.n.tick();
+  for (let i = 0; i < 200; i++) s.n.onEvent(ev("firing", "info", { rule: "security_updates", metric: "security_updates", sub: undefined, nodeName: "сервер-" + "ж".repeat(20) + i, value: 3 }));
+  s.clock.t = at("07:00", 1); s.n.tick();
+  await s.n.flush();
+  for (const [p] of pushed) assert.ok(Buffer.byteLength(p) <= 3800, String(Buffer.byteLength(p)));
+  assert.deepStrictEqual(pushed.map((x) => x[1]), ["high", "normal"]);
+  assert.match(JSON.parse(pushed[1][0]).body, /more in the alert log$/, "cut at a line, saying how many more");
+});

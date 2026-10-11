@@ -9,9 +9,9 @@ All notable changes to this project are documented here. The format follows
 ### Added
 - Phone notifications (Web Push, spec 8.5): settings has "enable
   notifications" for each phone or computer; alerts then arrive as system
-  notifications, one per alert, and a tap opens that server's view. The first
+  notifications, one per alert, and a tap opens that server's view. Enabling a
   device adds a "phone notifications" channel (warning and up) to the channels
-  tab. VAPID keys (`vapid.json`) and subscriptions (`push-subscriptions.json`)
+  tab when there is none; settings lists the devices, each with "remove". VAPID keys (`vapid.json`) and subscriptions (`push-subscriptions.json`)
   live in the state directory (0600); expired subscriptions are removed. The
   encryption (aes128gcm) and the VAPID signature use Node's crypto only and are
   tested against RFC 8291's test vector. Needs HTTPS: `docs/networking.md`

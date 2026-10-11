@@ -181,10 +181,14 @@ const ADAPTERS = {
     fields: {},
     send(c, m, ctx) {
       if (!ctx.push) throw Object.assign(new Error("web push is off"), { code: "EPUSH_OFF" });
-      // what the service worker shows; one notification per alert (tag), its node's view on a tap
+      // what the service worker shows; one notification per alert (tag), its node's view on a tap.
+      // It must fit one push in UTF-8 bytes (any script): the body is cut at a line until it does.
       const e = m.event;
-      return ctx.push.sendAll(JSON.stringify({ title: cut(m.title, 200), body: fit(m.text, 1500), severity: m.severity,
-        tag: e ? `${e.rule}|${e.node}|${e.sub || ""}` : m.kind, url: e && /^[a-z2-7]{12}$/.test(e.node) ? "/#node=" + e.node : "/" }));
+      const make = (n) => JSON.stringify({ title: cut(m.title, 120), body: fit(m.text, n), severity: m.severity,
+        tag: e ? `${e.rule}|${e.node}|${e.sub || ""}`.slice(0, 200) : m.kind, url: e && /^[a-z2-7]{12}$/.test(e.node) ? "/#node=" + e.node : "/" });
+      let n = 1500, p = make(n);
+      while (Buffer.byteLength(p) > 3800 && n > 50) { n = Math.floor(n * 0.7); p = make(n); }
+      return ctx.push.sendAll(p, m.severity === "critical" || m.severity === "warning" ? "high" : "normal");
     },
   },
   // a room message: PUT with a transaction id, so a retry is not a second message

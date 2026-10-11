@@ -27,11 +27,22 @@ function newKeys() {
   ecdh.generateKeys();
   return { publicKey: b64u(ecdh.getPublicKey()), privateKey: b64u(ecdh.getPrivateKey()) };
 }
+// new keys only on the first run: other keys would silently end every subscription, so a
+// file that cannot be read is an error (EVAPID) for the hub to log
 function loadVapid(file) {
-  try {
-    const k = JSON.parse(fs.readFileSync(file, "utf8"));
-    if (unb64u(k.publicKey).length === 65 && unb64u(k.privateKey).length === 32) { try { fs.chmodSync(file, 0o600); } catch (_) { /* read-only */ } return k; }
-  } catch (_) { /* first run */ }
+  let text;
+  try { text = fs.readFileSync(file, "utf8"); } catch (e) {
+    if (e.code !== "ENOENT") throw Object.assign(new Error(`vapid.json: ${e.code}`), { code: "EVAPID" });
+  }
+  if (text !== undefined) {
+    let k = null;
+    try { k = JSON.parse(text); } catch (_) { /* below */ }
+    if (!k || typeof k.publicKey !== "string" || typeof k.privateKey !== "string" || unb64u(k.publicKey).length !== 65 || unb64u(k.privateKey).length !== 32) {
+      throw Object.assign(new Error("vapid.json: not a key pair"), { code: "EVAPID" });
+    }
+    try { fs.chmodSync(file, 0o600); } catch (_) { /* read-only */ }
+    return k;
+  }
   const k = newKeys();
   writeFileAtomic(file, JSON.stringify(k) + "\n", 0o600);
   return k;
@@ -52,7 +63,10 @@ function vapidHeader({ endpoint, subject, keys, now = Date.now() }) {
 }
 
 // RFC 8291 section 3.4 and RFC 8188: one record, the last (delimiter 0x02), no padding
+// one record of 4096 bytes: 86 for the header, 16 for the tag, 1 for the delimiter
+const MAX_PLAIN = 4096 - 86 - 16 - 1;
 function encrypt({ payload, p256dh, auth, salt = crypto.randomBytes(16), serverKeys }) {
+  if (Buffer.byteLength(payload) > MAX_PLAIN) throw Object.assign(new Error("payload too big for one push"), { code: "EPUSHSIZE" });
   const uaPublic = unb64u(p256dh), authSecret = unb64u(auth);
   if (uaPublic.length !== 65 || uaPublic[0] !== 4) throw Object.assign(new Error("p256dh is not a P-256 point"), { code: "EPUSHKEY" });
   if (authSecret.length !== 16) throw Object.assign(new Error("auth is not 16 bytes"), { code: "EPUSHKEY" });
@@ -88,7 +102,10 @@ function checkSubscription(s) {
   try { u = new URL(s.endpoint); } catch (_) { throw new Error("subscription: an endpoint"); }
   if (u.protocol !== "https:") throw new Error("subscription: an https endpoint");
   const k = s.keys || {};
-  if (typeof k.p256dh !== "string" || unb64u(k.p256dh).length !== 65 || typeof k.auth !== "string" || unb64u(k.auth).length !== 16) throw new Error("subscription: its keys");
+  const b64 = (x) => typeof x === "string" && /^[A-Za-z0-9_-]+={0,2}$/.test(x);
+  if (!b64(k.p256dh) || unb64u(k.p256dh).length !== 65 || !b64(k.auth) || unb64u(k.auth).length !== 16) throw new Error("subscription: its keys");
+  try { const e = crypto.createECDH("prime256v1"); e.generateKeys(); e.computeSecret(unb64u(k.p256dh)); }   // a point on the curve
+  catch (_) { throw new Error("subscription: its keys"); }
   return { endpoint: u.href, keys: { p256dh: k.p256dh, auth: k.auth } };
 }
 function createPushStore(file) {
@@ -98,12 +115,14 @@ function createPushStore(file) {
   const id = (endpoint) => crypto.createHash("sha256").update(endpoint).digest("hex").slice(0, 12);
   return {
     list: () => subs.slice(),
-    add(sub, label) {
+    // the newest subscribe's https origin: the VAPID subject when nothing else says, kept
+    origin: () => { const o = subs.map((s) => s.origin).filter(Boolean); return o.length ? o[o.length - 1] : ""; },
+    add(sub, label, origin) {
       const clean = checkSubscription(sub);
       const name = typeof label === "string" ? label.replace(/[\u0000-\u001f\u007f]/g, "").slice(0, 60) : "";
       subs = subs.filter((s) => s.endpoint !== clean.endpoint);
       if (subs.length >= 50) throw new Error("at most 50 devices");
-      subs.push({ ...clean, label: name, created: Date.now() });
+      subs.push({ ...clean, label: name, created: Date.now(), ...(typeof origin === "string" && /^https:\/\/[^\s/]+\/?$/.test(origin) ? { origin: origin.replace(/\/$/, "") } : {}) });
       save();
       return id(clean.endpoint);
     },
@@ -118,4 +137,10 @@ function createPushStore(file) {
   };
 }
 
-module.exports = { loadVapid, vapidHeader, encrypt, sendPush, newKeys, createPushStore, checkSubscription };
+// RFC 8292's subject: the first candidate that is a mailto: or https: address
+function vapidSubject(candidates) {
+  const s = candidates.find((c) => typeof c === "string" && /^(mailto:\S+@\S+|https:\/\/\S+)$/.test(c));
+  return s ? s.replace(/\/+$/, "") : "mailto:servitals@localhost";
+}
+
+module.exports = { loadVapid, vapidHeader, encrypt, sendPush, newKeys, createPushStore, checkSubscription, vapidSubject };

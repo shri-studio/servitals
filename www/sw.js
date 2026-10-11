@@ -52,9 +52,10 @@ self.addEventListener("notificationclick", (e) => {
   e.notification.close();
   const url = (e.notification.data && e.notification.data.url) || "/";
   e.waitUntil(self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((list) => {
-    const w = list.find((c) => new URL(c.url).origin === self.location.origin);
+    const w = list.find((c) => new URL(c.url).origin === self.location.origin && !/[?&]kiosk/.test(c.url));
     if (!w) return self.clients.openWindow(url);
-    return (w.navigate ? w.navigate(url) : Promise.resolve()).then(() => w.focus());
+    // a window this worker does not control cannot be navigated: open one instead
+    return w.focus().then(() => (w.navigate ? w.navigate(url) : Promise.reject(new Error("no navigate")))).catch(() => self.clients.openWindow(url));
   }));
 });
 

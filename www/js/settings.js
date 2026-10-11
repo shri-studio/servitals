@@ -155,9 +155,22 @@ function deviceLabel() {
   const br = /Firefox\//.test(ua) ? "Firefox" : /Edg\//.test(ua) ? "Edge" : /Chrome\//.test(ua) ? "Chrome" : /Safari\//.test(ua) ? "Safari" : "";
   return [os, br].filter(Boolean).join(" ") || "browser";
 }
+// the worker's registration, or an error after 5 s (no worker: a private window, blocked storage)
 async function pushSub() {
-  const reg = await navigator.serviceWorker.ready;
+  const reg = await Promise.race([navigator.serviceWorker.ready,
+    new Promise((ok, fail) => setTimeout(() => fail(new Error("no service worker")), 5000))]);
   return { reg, sub: await reg.pushManager.getSubscription() };
+}
+// a device's id in the hub's list: the first 12 hex of its endpoint's SHA-256
+async function endpointId(endpoint) {
+  const d = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(endpoint));
+  return [...new Uint8Array(d)].map(b => b.toString(16).padStart(2, "0")).join("").slice(0, 12);
+}
+async function removeDevice(id) {
+  try {
+    await fetch("/__ctl/push/unsubscribe", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ endpoint: id }) });
+  } catch (e) { toast(tr("push.failed"), true); }
+  await drawPush();
 }
 async function drawPush() {
   const s = pushSupport();
@@ -167,18 +180,31 @@ async function drawPush() {
   if (s === "https") { $("#push-msg").textContent = tr("push.needHttps"); return; }
   if (s !== "ok") { $("#push-msg").textContent = tr("push.unsupported"); return; }
   if (Notification.permission === "denied") { $("#push-msg").textContent = tr("push.denied"); return; }
-  let sub = null;
-  try { sub = (await pushSub()).sub; } catch (e) { sub = null; }
-  $("#push-msg").textContent = sub ? tr("push.onHere") : tr("push.offHere");
-  $("#push-on").classList.toggle("hidden", !!sub);
-  $("#push-off").classList.toggle("hidden", !sub);
+  let sub = null, info = null;
+  try { sub = (await pushSub()).sub; } catch (e) { $("#push-msg").textContent = tr("push.unsupported"); return; }
+  try { info = await (await fetch("/__ctl/push")).json(); } catch (e) { info = null; }
+  const devices = info && Array.isArray(info.devices) ? info.devices : [];
+  // on only when the hub lists this browser's subscription too (keys renewed, a device gone:
+  // off, so "enable" makes a new one)
+  const mine = sub ? await endpointId(sub.endpoint) : "";
+  const on = !!sub && devices.some(d => d.id === mine);
+  $("#push-msg").textContent = on ? tr("push.onHere") : tr("push.offHere");
+  $("#push-on").classList.toggle("hidden", on);
+  $("#push-off").classList.toggle("hidden", !on);
+  $("#push-devices").innerHTML = devices.map(d => `<div class="pushdev"><span>${esc(d.label || "?")} · ${esc(d.service)} · ${esc(alertWhenOr(d.created))}`
+    + `${d.id === mine ? " " + esc(tr("push.thisDevice")) : ""}</span><button data-device="${esc(d.id)}">${esc(tr("push.remove"))}</button></div>`).join("");
 }
+// a date as the alerts view writes it (alerts.js may not be loaded yet)
+function alertWhenOr(t) { return typeof alertWhen === "function" ? alertWhen(t) : new Date(t).toLocaleDateString(); }
 async function enablePush() {
   try {
     if (await Notification.requestPermission() !== "granted") { $("#push-msg").textContent = tr("push.denied"); return; }
     const info = await (await fetch("/__ctl/push")).json();
     const { reg, sub: old } = await pushSub();
-    if (old) await old.unsubscribe();   // made with keys the hub may no longer have: renew
+    if (old) {   // made with keys the hub may no longer have: renew, and the hub forgets the old one
+      await fetch("/__ctl/push/unsubscribe", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ endpoint: old.endpoint }) }).catch(() => {});
+      await old.unsubscribe();
+    }
     const sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64uBytes(info.publicKey) });
     const r = await fetch("/__ctl/push/subscribe", { method: "POST", headers: { "content-type": "application/json" },
       body: JSON.stringify({ subscription: sub.toJSON(), label: deviceLabel() }) });
@@ -387,6 +413,7 @@ function initSettings() {
   $("#acct-save").onclick = saveAccount;
   $("#push-on").onclick = enablePush;
   $("#push-off").onclick = disablePush;
+  $("#push-devices").onclick = e => { const b = e.target.closest("button[data-device]"); if (b) removeDevice(b.dataset.device); };
   $("#cfg-p-for").onchange = e => { panelFor = e.target.value; drawPanelCfg(); };
   $("#cfg-p-reset").onclick = () => { delete cfg.nodePanels[panelFor]; drawPanelCfg(); };
   $("#cfg-servers").addEventListener("change", e => {

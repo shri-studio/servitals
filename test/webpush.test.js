@@ -10,7 +10,7 @@ const crypto = require("node:crypto");
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
-const { loadVapid, vapidHeader, encrypt, sendPush, newKeys } = require("../hub/lib/webpush");
+const { loadVapid, vapidHeader, encrypt, sendPush, newKeys, createPushStore, checkSubscription, vapidSubject } = require("../hub/lib/webpush");
 
 // RFC 8291, appendix A
 const RFC = {
@@ -61,7 +61,8 @@ test("the VAPID keys are made once and kept 0600; a push carries the encrypted b
   assert.deepStrictEqual(a, b);
   assert.strictEqual(fs.statSync(f).mode & 0o777, 0o600);
   fs.writeFileSync(f, "{broken");
-  assert.notDeepStrictEqual(loadVapid(f), a, "a broken file: new keys (every browser subscribes again)");
+  assert.throws(() => loadVapid(f), (e) => e.code === "EVAPID", "a broken file is an error, never new keys that silently end every subscription");
+  fs.writeFileSync(f, JSON.stringify(a));
   const sent = [];
   const outbound = { request: async (url, o) => { sent.push({ url, ...o }); return { status: 201 }; } };
   const r = await sendPush({ subscription: { endpoint: "https://push.example.net/s/1", keys: { p256dh: RFC.uaPublic, auth: RFC.auth } },
@@ -70,5 +71,27 @@ test("the VAPID keys are made once and kept 0600; a push carries the encrypted b
   assert.deepStrictEqual([sent[0].headers["content-encoding"], sent[0].headers.ttl, sent[0].headers.urgency], ["aes128gcm", "86400", "high"]);
   assert.match(sent[0].headers.authorization, /^vapid t=[\w-]+\.[\w-]+\.[\w-]+, k=/);
   assert.strictEqual(decrypt(sent[0].body, RFC.uaPrivate, RFC.auth), "{\"title\":\"t\"}");
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test("a payload too big for one record is refused; a key that is not a point on the curve, or not base64url, is refused", () => {
+  assert.throws(() => encrypt({ payload: "x".repeat(3994), p256dh: RFC.uaPublic, auth: RFC.auth }), (e) => e.code === "EPUSHSIZE");
+  assert.ok(encrypt({ payload: "x".repeat(3993), p256dh: RFC.uaPublic, auth: RFC.auth }).length <= 4096);
+  const ok = { endpoint: "https://push.example/1", keys: { p256dh: RFC.uaPublic, auth: RFC.auth } };
+  assert.strictEqual(checkSubscription(ok).endpoint, "https://push.example/1");
+  const offCurve = Buffer.alloc(65, 1); offCurve[0] = 4;
+  assert.throws(() => checkSubscription({ ...ok, keys: { ...ok.keys, p256dh: offCurve.toString("base64url") } }), /its keys/);
+  assert.throws(() => checkSubscription({ ...ok, keys: { ...ok.keys, auth: RFC.auth + "!!" } }), /its keys/);
+});
+
+test("the VAPID subject: the first good one of VAPID_SUBJECT, PUBLIC_URL and the page's origin, kept across a restart", () => {
+  assert.strictEqual(vapidSubject(["", "http://hub.lan:20002", "https://dash.example.org/"]), "https://dash.example.org", "an http PUBLIC_URL does not hide a known https origin");
+  assert.strictEqual(vapidSubject(["mailto:me@example.org", "https://x.example"]), "mailto:me@example.org");
+  assert.strictEqual(vapidSubject(["", ""]), "mailto:servitals@localhost");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sv-push-"));
+  const f = path.join(dir, "subs.json");
+  const s = createPushStore(f);
+  s.add({ endpoint: "https://push.example/1", keys: { p256dh: RFC.uaPublic, auth: RFC.auth } }, "phone", "https://dash.example.org");
+  assert.strictEqual(createPushStore(f).origin(), "https://dash.example.org", "known after a restart");
   fs.rmSync(dir, { recursive: true, force: true });
 });

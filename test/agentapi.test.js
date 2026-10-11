@@ -496,6 +496,13 @@ test("Web Push: a browser subscribes, gets a channel, receives an alert it can d
       const msg = JSON.parse(decrypt(got[0].body));
       assert.match(msg.title, /^warning: reboot required on /);
       assert.deepStrictEqual([msg.url, msg.tag], [`/#node=${c.id}`, `reboot_required|${c.id}|`]);
+      // a push service that refuses this hub's key (403): the subscription can never work, so it goes
+      answer = 403;
+      assert.strictEqual((await sub({ subscription: { endpoint: endpoint + "2", keys: { p256dh: UA.public, auth: UA.auth } } })).status, 200);
+      await ctlPost(hub.port, cookie, "/__ctl/alerts/channels/test", JSON.stringify({ id: "ch_webpush" }));
+      assert.deepStrictEqual((await get("/__ctl/push")).devices, [], "both refused: both gone");
+      assert.match(hub.logs(), /event=push\.subscription_rejected/);
+      assert.strictEqual((await sub({ subscription: { endpoint, keys: { p256dh: UA.public, auth: UA.auth } } })).status, 200);
       answer = 410;
       assert.deepStrictEqual(JSON.parse((await ctlPost(hub.port, cookie, "/__ctl/alerts/channels/test", JSON.stringify({ id: "ch_webpush" }))).body),
         { ok: false, error: "EPUSH_NONE" }, "the only device was gone");

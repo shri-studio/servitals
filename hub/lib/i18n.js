@@ -306,6 +306,8 @@ const STRINGS = {
   "push.offHere": "Off for this device.",
   "push.enabled": "notifications on",
   "push.failed": "could not change notifications",
+  "push.thisDevice": "(this device)",
+  "push.remove": "remove",
 
   // dialogs
   "dlg.close": "[esc]",

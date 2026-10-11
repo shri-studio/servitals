@@ -200,27 +200,29 @@ const HUB_START = Date.now();
 const outbound = createOutbound();
 if (outbound.describe().https !== "direct" || outbound.describe().http !== "direct") log.info("outbound.proxy", outbound.describe());
 // Web Push (spec 8.5): the VAPID keys made on first run, the browsers that subscribed
-const vapid = webpush.loadVapid(path.join(DATA, "vapid.json"));
+// (a vapid.json that cannot be read turns Web Push off, loudly: new keys would end every subscription)
+let vapid = null;
+try { vapid = webpush.loadVapid(path.join(DATA, "vapid.json")); } catch (e) { log.warn("push.vapid_unreadable", { error: e.message }); }
 const pushStore = webpush.createPushStore(path.join(DATA, "push-subscriptions.json"));
-let pushOrigin = "";   // the page's origin at the last subscribe: the VAPID subject when nothing else says
-const pushSubject = () => {
-  const s = process.env.VAPID_SUBJECT || PUBLIC_URL || pushOrigin;
-  return /^(mailto:|https:\/\/)/.test(s) ? s.replace(/\/+$/, "") : "mailto:servitals@localhost";
-};
+const pushSubject = () => webpush.vapidSubject([process.env.VAPID_SUBJECT, PUBLIC_URL, pushStore.origin()]);
 const push = {
-  // every device once; a gone one (404, 410) is removed; an error when none took it
-  async sendAll(payload) {
+  // every device at once; a gone one (404, 410) or one that refuses this hub's key (401,
+  // 403) is removed; an error when none took it
+  async sendAll(payload, urgency = "high") {
+    if (!vapid) throw Object.assign(new Error("no VAPID keys"), { code: "EPUSH_OFF" });
     const subs = pushStore.list();
     if (!subs.length) throw Object.assign(new Error("no device subscribed"), { code: "EPUSH_NONE" });
     let ok = 0, last = null;
-    for (const s of subs) {
-      try {
-        const r = await webpush.sendPush({ subscription: s, payload, keys: vapid, subject: pushSubject(), outbound, urgency: "high" });
-        if (r.status === 404 || r.status === 410) { pushStore.remove(s.endpoint); log.info("push.subscription_gone", { service: new URL(s.endpoint).host }); }
-        else if (r.status >= 200 && r.status < 300) ok++;
-        else last = Object.assign(new Error(`HTTP ${r.status}`), { code: "HTTP_" + r.status });
-      } catch (e) { last = e; }
-    }
+    const results = await Promise.allSettled(subs.map((s) => webpush.sendPush({ subscription: s, payload, keys: vapid, subject: pushSubject(), outbound, urgency })));
+    results.forEach((r, i) => {
+      const s = subs[i], service = new URL(s.endpoint).host;
+      if (r.status === "rejected") { last = r.reason; return; }
+      const st = r.value.status;
+      if (st === 404 || st === 410) { pushStore.remove(s.endpoint); log.info("push.subscription_gone", { service }); }
+      else if (st === 401 || st === 403) { pushStore.remove(s.endpoint); log.warn("push.subscription_rejected", { service, status: st }); }
+      else if (st >= 200 && st < 300) ok++;
+      else last = Object.assign(new Error(`HTTP ${st}`), { code: "HTTP_" + st });
+    });
     if (!ok) throw last || Object.assign(new Error("no device left"), { code: "EPUSH_NONE" });
   },
 };
@@ -849,7 +851,7 @@ async function handle(req, res) {
 
     // Web Push (spec 8.5): the public key, this hub's devices; subscribe and unsubscribe
     if (req.method === "GET" && pathname === "/__ctl/push") {
-      return json(200, { publicKey: vapid.publicKey, devices: pushStore.devices(),
+      return json(200, { publicKey: vapid ? vapid.publicKey : null, devices: pushStore.devices(),
                          https: requestIsHttps(req, { publicUrl: PUBLIC_URL, peerTrusted: client.peerTrusted }) });
     }
     if (req.method === "POST" && (pathname === "/__ctl/push/subscribe" || pathname === "/__ctl/push/unsubscribe")) {
@@ -861,10 +863,9 @@ async function handle(req, res) {
         log.audit("push.unsubscribed", { ip });
         return json(200, { ok: true, removed: gone });
       }
+      if (!vapid) return json(503, { error: "web push is off: vapid.json cannot be read" });
       let id;
-      try { id = pushStore.add(body.subscription, body.label); } catch (e) { return json(400, { error: e.message }); }
-      const o = req.headers.origin;
-      if (typeof o === "string" && /^https:\/\/[^\s/]+$/.test(o)) pushOrigin = o;
+      try { id = pushStore.add(body.subscription, body.label, req.headers.origin); } catch (e) { return json(400, { error: e.message }); }
       const added = notifier.ensureWebPush(tr("notify.webpushName"));
       log.audit("push.subscribed", { ip, device: id });
       return json(200, { ok: true, id, channelAdded: added });

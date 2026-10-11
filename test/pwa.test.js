@@ -271,11 +271,16 @@ test("settings: notifications need HTTPS (with the guide), a browser that can, p
   key.generateKeys();
   const reg = { pushManager: { getSubscription: async () => sub,
     subscribe: async (o) => { sub = { endpoint: "https://push.example/1", o, toJSON: () => ({ endpoint: "https://push.example/1", keys: { p256dh: "p", auth: "a" } }), unsubscribe: async () => { sub = null; } }; return sub; } } };
-  const env = (o) => pageScope(["pushSupport", "deviceLabel", "pushSub", "drawPush", "enablePush", "disablePush"], {
+  const env = (o) => pageScope(["pushSupport", "deviceLabel", "pushSub", "drawPush", "enablePush", "disablePush", "endpointId", "alertWhenOr"], {
     $, toast: (m, err) => toasts.push([m, !!err]), atob: (s) => Buffer.from(s, "base64").toString("binary"),
     b64uBytes: (s) => Uint8Array.from(Buffer.from(s, "base64url")),
-    fetch: async (url, opt) => { if (opt) sent.push([url, JSON.parse(opt.body)]); return { ok: true, json: async () => ({ publicKey: key.getPublicKey().toString("base64url") }) }; },
-    ...o });
+    // the hub lists a device once it subscribed, until it unsubscribes
+    fetch: async (url, opt) => { if (opt) sent.push([url, JSON.parse(opt.body)]);
+      const listed = sent.length && sent[sent.length - 1][0].endsWith("/subscribe");
+      return { ok: true, json: async () => ({ publicKey: key.getPublicKey().toString("base64url"),
+        devices: listed ? [{ id: require("node:crypto").createHash("sha256").update("https://push.example/1").digest("hex").slice(0, 12), label: "x", service: "push.example", created: 1 }] : [] }) }; },
+    crypto: { subtle: { digest: async (alg, d) => require("node:crypto").createHash("sha256").update(Buffer.from(d)).digest() } }, TextEncoder, esc: (x) => String(x), alertWhen: () => "",
+    setTimeout, ...o });
   const http = env({ window: { isSecureContext: false }, navigator: {}, Notification: undefined });
   await http.drawPush();
   assert.match(el["#push-msg"].textContent, /^Notifications need servitals over HTTPS/);
@@ -304,4 +309,46 @@ test("the hub's key in base64url becomes the bytes the browser wants", () => {
   const b64uBytes = new Function("atob", `${line}; return b64uBytes;`)((s) => Buffer.from(s, "base64").toString("binary"));
   const raw = require("node:crypto").randomBytes(65);
   assert.deepStrictEqual(Buffer.from(b64uBytes(raw.toString("base64url"))), raw);
+});
+
+test("settings: a subscription the hub does not know shows as off; the hub's devices are listed with a remove; a missing worker is not a hang", async () => {
+  const el = {};
+  const $ = (s) => (el[s] = el[s] || { textContent: "", innerHTML: "", classList: { hidden: true, add() { this.hidden = true; }, toggle(c, v) { this.hidden = v; } } });
+  const sent = [];
+  let devices = [];
+  const sub = { endpoint: "https://push.example/mine", unsubscribe: async () => {} };
+  const reg = { pushManager: { getSubscription: async () => sub } };
+  const subtle = { digest: async (alg, data) => require("node:crypto").createHash("sha256").update(Buffer.from(data)).digest() };
+  const mine = require("node:crypto").createHash("sha256").update(sub.endpoint).digest("hex").slice(0, 12);
+  const env = (nav) => pageScope(["pushSupport", "pushSub", "drawPush", "removeDevice", "endpointId", "alertWhenOr"], {
+    $, toast() {}, esc: (x) => String(x), alertWhen: () => "Oct 11", crypto: { subtle }, TextEncoder,
+    fetch: async (url, opt) => { if (opt) { sent.push([url, JSON.parse(opt.body)]); devices = []; } return { ok: true, json: async () => ({ publicKey: "k", devices }) }; },
+    window: { isSecureContext: true, PushManager: function () {} }, navigator: nav, Notification: { permission: "granted" }, setTimeout });
+  const s = env({ serviceWorker: { ready: Promise.resolve(reg) } });
+  await s.drawPush();
+  assert.strictEqual(el["#push-msg"].textContent, "Off for this device.", "the browser has one, the hub does not: off, so enable renews it");
+  devices = [{ id: mine, label: "Android Chrome", service: "fcm.googleapis.com", created: 1 }, { id: "aaaaaaaaaaaa", label: "old <laptop>", service: "updates.push.services.mozilla.com", created: 1 }];
+  await s.drawPush();
+  assert.strictEqual(el["#push-msg"].textContent, "On for this device. The channels tab sets which alerts it gets.");
+  assert.match(el["#push-devices"].innerHTML, /Android Chrome · fcm\.googleapis\.com · Oct 11 \(this device\)/);
+  assert.match(el["#push-devices"].innerHTML, /<button data-device="aaaaaaaaaaaa">remove<\/button>/);
+  await s.removeDevice("aaaaaaaaaaaa");
+  assert.deepStrictEqual(sent[0], ["/__ctl/push/unsubscribe", { endpoint: "aaaaaaaaaaaa" }]);
+  const stuck = env({ serviceWorker: { ready: new Promise(() => {}) } });
+  const t0 = Date.now();
+  await stuck.drawPush();
+  assert.strictEqual(el["#push-msg"].textContent, "This browser cannot get notifications. On iPhone and iPad, add servitals to the home screen first (iOS 16.4 or later).");
+  assert.ok(Date.now() - t0 < 7000);
+});
+
+test("a tap on a window this worker does not control still opens the view", async () => {
+  const listeners = {}, opened = [];
+  const self = { addEventListener: (t, f) => { listeners[t] = f; }, location: { origin: "https://hub.example" },
+    clients: { claim() {}, openWindow: async (u) => { opened.push(u); },
+      matchAll: async () => [{ url: "https://hub.example/", focus: async () => {}, navigate: async () => { throw new TypeError("not controlled"); } }] } };
+  new Function("self", "caches", "fetch", fs.readFileSync(path.join(WWW, "sw.js"), "utf8"))(self, {}, async () => {});
+  let p;
+  listeners.notificationclick({ notification: { close() {}, data: { url: "/#node=nodeaaaaaaaa" } }, waitUntil: (x) => { p = x; } });
+  await p;
+  assert.deepStrictEqual(opened, ["/#node=nodeaaaaaaaa"]);
 });
