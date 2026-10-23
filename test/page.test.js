@@ -54,7 +54,7 @@ test("the fleet grid and node tabs are wired up", () => {
 
 test("snapshot times are milliseconds", () => {
   assert.match(HTML, /const age = \(Date\.now\(\) - \(ts \|\| 0\)\) \/ 1000;/);
-  assert.match(HTML, /fmtTime\(new Date\(ts \|\| 0\)\)/);
+  assert.match(HTML, /fmtTime\(new Date\(ts\)\)/);
 });
 
 test("fleet numbers show a dash when unknown", () => {
@@ -153,6 +153,19 @@ test("?kiosk turns kiosk on and is remembered; ?kiosk=0 turns it off, even when 
   assert.strictEqual(early({ stored: { "servitals.hub.kiosk": "1" } }).attrs["data-kiosk"], "");
   assert.strictEqual(early({ stored: { "servitals.hub.kiosk": "1", "servitals.kiosk": "0" } }).attrs["data-kiosk"], undefined);
   assert.strictEqual(early({ search: "?kioskx" }).attrs["data-kiosk"], undefined);
+  for (const v of ["false", "no", "off", "FALSE"]) {
+    assert.strictEqual(early({ search: "?kiosk=" + v, stored: { "servitals.hub.kiosk": "1" } }).attrs["data-kiosk"], undefined, v);
+  }
+});
+
+test("the hub's kiosk setting is on only when it is true, not a word that reads as false", () => {
+  const el = { attrs: {}, toggleAttribute(n, on) { if (on) this.attrs[n] = ""; else delete this.attrs[n]; } };
+  const run = (kiosk) => {
+    pageFn("applyAppearanceDefaults", { lsGet: () => null, lsSet() {}, applyStyle() {}, applyMode() {}, applyDensity() {},
+      cfg: { kiosk }, document: { documentElement: el } })();
+    return "data-kiosk" in el.attrs;
+  };
+  assert.deepStrictEqual([true, "false", "0", 0, false].map(run), [true, false, false, false, false]);
 });
 
 // runs one page function from the source with the stubs it needs
@@ -680,8 +693,8 @@ test("alert badge: a count coloured by the worst severity, words for a screen re
   const alertBadge = pageFn("alertBadge", { esc: escA });
   assert.strictEqual(alertBadge(null), "");
   assert.strictEqual(alertBadge({ count: 0, worst: "critical" }), "");
-  assert.strictEqual(alertBadge({ count: 3, worst: "critical" }), '<span class="abadge critical" title="3 alerts, worst critical">3</span>');
-  assert.match(alertBadge({ count: 1, worst: "<odd>" }), /^<span class="abadge info" title="1 alerts, worst info">1<\/span>$/, "a severity the page does not know: info");
+  assert.strictEqual(alertBadge({ count: 3, worst: "critical" }), '<span class="abadge critical" title="alerts: 3, worst critical">3</span>');
+  assert.match(alertBadge({ count: 1, worst: "<odd>" }), /^<span class="abadge info" title="alerts: 1, worst info">1<\/span>$/, "a severity the page does not know: info");
 });
 
 test("the header adds up every node's badge and takes the worst colour", () => {
@@ -736,7 +749,7 @@ function alertsHarness(fetchImpl) {
   const els = {}, toasts = [], calls = { loadNodes: 0, renderFleetIfShown: 0 };
   const el = (sel) => (els[sel] = els[sel] || { innerHTML: "", value: "86400000" });
   const env = { $: el, fetch: fetchImpl, esc: (x) => String(x), tr: (k) => k, STRINGS: {}, fmtShare: String, fmtTemp: String,
-    fmtDur: String, fmtTime: () => "", fleetNodes: [], toast: (m, err) => toasts.push([m, !!err]),
+    fmtDur: String, fmtTime: () => "", fleetNodes: [], toast: (m, err) => toasts.push([m, !!err]), hubStateOf: () => "ok",
     loadNodes: async () => { calls.loadNodes++; }, renderFleetIfShown: () => { calls.renderFleetIfShown++; } };
   const src = fs.readFileSync(path.join(__dirname, "..", "www", "js", "alerts.js"), "utf8");
   const api = new Function(...Object.keys(env), `${src}; return { loadAlerts, muteAlert, initAlerts };`)(...Object.values(env));
@@ -814,7 +827,7 @@ function rulesScope(extra = {}) {
   const { defaultsForPage } = require("../hub/lib/alertrules");
   const env = { esc: escA, STRINGS, fmtShare: String, fmtTemp: String, fmtDur: String, fmtTime: () => "", Date,
     units: () => ({ temp: "c" }), tempUnit: () => "°C", fleetNodes: [], $: () => ({}), $$: () => [], toast() {}, fetch: async () => answer({}),
-    loadNodes: async () => {}, renderFleetIfShown() {}, ...extra };
+    loadNodes: async () => {}, renderFleetIfShown() {}, hubStateOf: () => "ok", ...extra };
   const src = fs.readFileSync(path.join(__dirname, "..", "www", "js", "alerts.js"), "utf8");
   const api = new Function(...Object.keys(env), "tr", `${src}; return { rulesRows, rulesFile, rulesHtml, readRules, saveRules, rulesAction, rulesState, shown, typed, initAlerts,
     chState, chRows, chFile, chHtml, readChannels, testChannel, saveChannels, chAction,
@@ -1075,4 +1088,21 @@ test("channels: a field with choices is a select; a new email channel starts at 
   const html = s.chHtml();
   assert.match(html, /security <select class="cval" data-k="security"><option value="starttls" selected>starttls<\/option><option value="tls">tls<\/option>/);
   assert.match(html, /SMTP server <input type="text"/);
+});
+
+test("the history ranges are buttons a keyboard reaches", () => {
+  for (const r of ["1h", "24h", "7d", "30d", "90d"]) assert.match(HTML, new RegExp(`<button type="button" class="hrange" data-r="${r}"`));
+});
+
+test("alerts view: an ended session says so, instead of 'could not load'", async () => {
+  const els = {};
+  const env = { $: (s) => (els[s] = els[s] || { innerHTML: "" }), fetch: async () => ({ ok: false, status: 401, headers: new Headers({ "content-type": "text/plain" }), json: async () => ({}) }),
+    esc: (x) => String(x), tr, STRINGS: {}, fleetNodes: [], hubStateOf: (r) => (r.status === 401 ? "login" : "ok"), fmtShare: String, fmtTemp: String, fmtDur: String, fmtTime: () => "" };
+  const { loadAlerts } = new Function(...Object.keys(env), `${fs.readFileSync(path.join(__dirname, "..", "www", "js", "alerts.js"), "utf8")}; return { loadAlerts };`)(...Object.values(env));
+  await loadAlerts();
+  assert.match(els["#alerts-body"].innerHTML, /logged out/);
+});
+
+test("settings: tags typed with capitals are kept in lower case", () => {
+  assert.match(JS, /\.split\(\/\[\\s,\]\+\/\)\.map\(t => t\.toLowerCase\(\)\)\.filter\(Boolean\)/);
 });

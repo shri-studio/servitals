@@ -13,7 +13,7 @@
   // ?kiosk and ?kiosk=0 are remembered, so kiosk survives a new login
   var q = /[?&]kiosk(?:=([^&]*))?(?:&|$)/.exec(location.search), kiosk = get("kiosk");
   if (q) {
-    kiosk = q[1] === "0" ? "0" : "1";
+    kiosk = /^(0|false|no|off)$/i.test(q[1] || "") ? "0" : "1";
     try { localStorage.setItem("servitals.kiosk", kiosk); } catch (e) { /* private mode */ }
   }
   if (kiosk === "1" || (kiosk !== "0" && get("hub.kiosk") === "1")) d.setAttribute("data-kiosk", "");

@@ -323,7 +323,7 @@ a:hover { text-decoration: underline; }
 .hline { fill: none; stroke: var(--cyan); stroke-width: 1.6; }
 .hgap { fill: var(--dim); fill-opacity: .12; }
 .hnote { color: var(--dim); font-size: 12px; margin-top: 6px; }
-.hrange { cursor: pointer; margin-left: 6px; }
+.hrange { cursor: pointer; margin-left: 6px; background: none; border: 0; padding: 0; font: inherit; color: inherit; }
 .hrange.on { color: var(--fg-bright); text-decoration: underline; }
 #hist-series { font: inherit; font-size: 11px; }
 .disk .dmodel .dio { white-space: nowrap; }   /* "read 7.3 MB/s · write 1.1 MB/s" stays on one line */

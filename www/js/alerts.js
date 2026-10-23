@@ -81,13 +81,14 @@ function alertsHtml(d, names) {
 // fetch and draw; a late answer never draws over a newer one
 async function loadAlerts() {
   const seq = ++alertsSeq;
-  let d = null;
+  let d = null, gone = false;
   try {
     const r = await fetch("/__ctl/alerts?t=" + Date.now());
-    d = r.ok ? await r.json() : null;
+    gone = hubStateOf(r) === "login";   // the session ended: say so, not "could not load"
+    d = r.ok && !gone ? await r.json() : null;
   } catch (e) { d = null; }
   if (seq !== alertsSeq) return;
-  if (!d) { $("#alerts-body").innerHTML = `<div class="muted">${esc(tr("alerts.failed"))}</div>`; return; }
+  if (!d) { $("#alerts-body").innerHTML = `<div class="muted">${esc(gone ? tr("status.loggedOut") : tr("alerts.failed"))}</div>`; return; }
   const names = Object.fromEntries(fleetNodes.map(n => [n.id, n.name]));
   alertRuleInfo = d.rules && typeof d.rules === "object" ? d.rules : {};
   $("#alerts-body").innerHTML = alertsHtml(d, names);

@@ -394,10 +394,10 @@ function applyAppearanceDefaults() {
   applyDensity(lsGet("density") || cfg.density || "comfortable");
   // this screen's own ?kiosk / ?kiosk=0 wins; otherwise the hub decides, also when it turned kiosk off
   const own = lsGet("kiosk");
-  document.documentElement.toggleAttribute("data-kiosk", own === "1" || (own !== "0" && !!cfg.kiosk));
+  document.documentElement.toggleAttribute("data-kiosk", own === "1" || (own !== "0" && cfg.kiosk === true));
   // remembered for the next visit, so the hub's look paints at once
   for (const k of ["style", "mode", "density"]) lsSet("hub." + k, cfg[k] || "");
-  lsSet("hub.kiosk", cfg.kiosk ? "1" : "");
+  lsSet("hub.kiosk", cfg.kiosk === true ? "1" : "");
 }
 
 /* ------------------------------------------------------------------ kiosk
@@ -648,8 +648,8 @@ function setStatus(ts, hardFail) {
   else if (hardFail && !ts) { dot.classList.add("down"); label = tr("status.agentDown"); }
   else if (age > budget) { dot.classList.add("stale"); label = tr("status.stale", { age: fmtDur(age) }); }
   else { label = tr("status.online"); }
-  $("#lastupdate").textContent = label + " · " +
-    fmtTime(new Date(ts || 0));
+  // no snapshot ever: no time to give (not 1970)
+  $("#lastupdate").textContent = ts ? label + " · " + fmtTime(new Date(ts)) : label;
 }
 
 function renderMetrics(d) {

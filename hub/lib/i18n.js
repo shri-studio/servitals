@@ -183,7 +183,7 @@ const STRINGS = {
   // alerts: the view, its words, the default rules
   "key.alerts": "[a] alerts",
   "alerts.title": "alerts",
-  "alerts.badge": "{n} alerts, worst {severity}",
+  "alerts.badge": "alerts: {n}, worst {severity}",
   "alerts.firing": "firing",
   "alerts.none": "nothing is firing",
   "alerts.recent": "recent",
@@ -289,7 +289,7 @@ const STRINGS = {
   "notify.line": "{kind}: {what} on {node}",
   "notify.value": "value {value}",
   "notify.since": "since {time}",
-  "notify.summaryTitle": "{n} alerts held during quiet hours",
+  "notify.summaryTitle": "after quiet hours: {n} held",
   "notify.digestTitle": "daily digest: {n} events",
   "notify.testTitle": "servitals test",
   "notify.testText": "This channel works.",

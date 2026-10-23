@@ -162,6 +162,11 @@ All notable changes to this project are documented here. The format follows
   resends a too-large snapshot without its lists.
 
 ### Fixed
+- `?kiosk=false` (or no, off) and a `"kiosk": "false"` in config.json turn
+  kiosk off; the history ranges are buttons the keyboard reaches; the status
+  line gives no 1970 time when no snapshot was ever seen; an ended session
+  in the alerts view says logged out; tags typed with capitals are kept in
+  lower case; no "1 alerts".
 - Encrypted backups are AES-256-GCM (scrypt key): a backup that was changed
   is refused before anything is restored. Older AES-CBC backups still restore,
   with a note. A backup that fails leaves no partial file, and without a

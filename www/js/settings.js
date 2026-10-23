@@ -83,7 +83,7 @@ async function saveServer(row) {
   const managed = (row.dataset.managed || "").split(" ");
   const body = {};
   if (!managed.includes("name")) body.name = $(".srv-name", row).value;
-  if (!managed.includes("tags")) body.tags = $(".srv-tags", row).value.split(/[\s,]+/).filter(Boolean);
+  if (!managed.includes("tags")) body.tags = $(".srv-tags", row).value.split(/[\s,]+/).map(t => t.toLowerCase()).filter(Boolean);
   const r = await fetch(`/__ctl/node/${row.dataset.id}`, { method: "POST",
     headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
   const j = await r.json().catch(() => ({}));

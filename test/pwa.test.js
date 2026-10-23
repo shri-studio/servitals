@@ -352,3 +352,13 @@ test("a tap on a window this worker does not control still opens the view", asyn
   await p;
   assert.deepStrictEqual(opened, ["/#node=nodeaaaaaaaa"]);
 });
+
+test("no snapshot ever seen: the status line gives no 1970 time", async () => {
+  const el = {};
+  const $ = (sel) => (el[sel] = el[sel] || { textContent: "", classList: { add() {}, remove() {} } });
+  const s = pageScope(["hubStateOf", "hubText", "setStatus"], { $, navigator: { onLine: true }, lastData: null, cfg: {}, fmtTime: () => "01:00", fmtDur: () => "1m" });
+  s.setStatus(0, true);
+  assert.strictEqual(el["#lastupdate"].textContent, "agent unreachable");
+  s.setStatus(Date.now(), false);
+  assert.strictEqual(el["#lastupdate"].textContent, "online · 01:00");
+});

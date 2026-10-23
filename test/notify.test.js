@@ -113,7 +113,7 @@ test("quiet hours hold warnings, not critical; at their end one summary of what 
   await again.flush();
   assert.strictEqual(s.sent.length, 3);
   const sum = JSON.parse(s.sent[2].body);
-  assert.strictEqual(sum.title, "2 alerts held during quiet hours");
+  assert.strictEqual(sum.title, "after quiet hours: 2 held");
   assert.deepStrictEqual(sum.message.split("\n").sort(), ["fired: disk full /b on nas · 92%", "resolved: memory on nas · 92%"]);
   s.clock.t = at("07:01", 1); again.tick();
   await again.flush();
@@ -192,7 +192,7 @@ test("after quiet hours, the summary goes before anything new, even before the m
   s.clock.t = at("07:00", 1) + 20000;
   s.n.onEvent(ev("resolved", "warning"));
   await s.n.flush();
-  assert.deepStrictEqual(s.sent.map((r) => JSON.parse(r.body).title), ["1 alerts held during quiet hours", "resolved: disk full /srv on nas"]);
+  assert.deepStrictEqual(s.sent.map((r) => JSON.parse(r.body).title), ["after quiet hours: 1 held", "resolved: disk full /srv on nas"]);
   fs.chmodSync(path.join(s.dir, "channels.json"), 0o644);
   s.make();
   assert.strictEqual(fs.statSync(path.join(s.dir, "channels.json")).mode & 0o777, 0o600, "tightened at start");

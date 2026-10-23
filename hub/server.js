@@ -414,7 +414,7 @@ button.deny{border-color:#7a3b37;color:#f57b72}button.deny:hover{border-color:#f
 
 // a wall screen opened at /?kiosk keeps kiosk through the login (spec 10.3);
 // only "1" or "0" ever reaches the form and the redirect
-const kioskValue = (v) => (v === null ? "" : v === "0" ? "0" : "1");
+const kioskValue = (v) => (v === null ? "" : /^(0|false|no|off)$/i.test(v) ? "0" : "1");
 const kioskFromUrl = (url) => {
   const m = /[?&]kiosk(?:=([^&#]*))?(?:[&#]|$)/.exec(url || "");
   return m ? kioskValue(m[1] || "") : "";

@@ -159,6 +159,7 @@ test("/?kiosk survives the login page, with only a fixed value in the redirect",
     assert.match(odd.body, /name="kiosk" value="1"/);
     assert.strictEqual((await login(hub.port, { form: { kiosk: "1" } })).headers.location, "/?kiosk=1");
     assert.strictEqual((await login(hub.port, { form: { kiosk: "0" } })).headers.location, "/?kiosk=0");
+    assert.match((await request(hub.port, { path: "/?kiosk=false" })).body, /name="kiosk" value="0"/, "false is off");
     assert.strictEqual((await login(hub.port, { form: { kiosk: "//evil.example" } })).headers.location, "/?kiosk=1");
     assert.strictEqual((await login(hub.port)).headers.location, "/");
     const bad = await login(hub.port, { pass: "wrong", form: { kiosk: "1" } });
