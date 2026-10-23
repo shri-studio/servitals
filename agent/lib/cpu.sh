@@ -12,12 +12,13 @@ cpu_json() {
   local line idle total wait steal v pct=0 iowait=0 stolen=0 dt pt pi pw ps
   # missing or denied (Android forbids /proc/stat to apps): null, like any group without its source
   line=$(grep '^cpu ' "$HOST/proc/stat" 2>/dev/null)
-  # cpu user nice system idle iowait irq softirq steal guest guest_nice
+  # cpu user nice system idle iowait irq softirq steal guest guest_nice: guest and
+  # guest_nice are already inside user and nice, so the total stops at steal
   set -- $line
   [ "$#" -ge 5 ] || { echo null; return; }
   idle=$(( $5 + $6 )); wait=$6; steal=${9:-0}
   total=0; shift
-  for v in "$@"; do total=$((total + v)); done
+  for v in "${@:1:8}"; do total=$((total + v)); done
   if [ -f "$STATE/cpu" ]; then
     read -r pt pi < "$STATE/cpu"
     dt=$((total - pt))
@@ -39,7 +40,7 @@ cpu_json() {
     case "$cn" in cpu[0-9]*) ;; *) continue ;; esac
     set -- $rest
     ci=$(( $4 + $5 )); ct=0
-    for v in "$@"; do ct=$((ct + v)); done
+    for v in "${@:1:8}"; do ct=$((ct + v)); done
     cp=0
     if [ -f "$STATE/$cn" ]; then
       read -r ppt ppi < "$STATE/$cn"

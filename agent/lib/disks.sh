@@ -5,12 +5,16 @@
 # disks: usage per DISKS entry, source and model from mountinfo and sysfs; io: bytes
 # read and written by the block devices behind them, from /proc/diskstats
 
+# mountinfo writes a space as \040, a tab as \011, a newline as \012 and a backslash as \134
+MOUNT_UNESC='function unesc(s,   o, i) { o = ""; while ((i = index(s, "\\")) > 0 && substr(s, i + 1, 3) ~ /^[0-7][0-7][0-7]$/) { o = o substr(s, 1, i - 1) sprintf("%c", substr(s, i + 1, 1) * 64 + substr(s, i + 2, 1) * 8 + substr(s, i + 3, 1)); s = substr(s, i + 4) } return o s }'
+
 mount_infos() {  # $1 = mountpoints, one per line -> "mountpoint<TAB>fstype source maj:min" each
   # One pass for all of them. A mountpoint can appear several times (cifs stacked
   # on autofs); its LAST line is the mount on top, the one a path lookup reaches.
-  awk -v list="$1" '
+  awk -v list="$1" "$MOUNT_UNESC"'
     BEGIN { n = split(list, ms, "\n"); for (i = 1; i <= n; i++) want[ms[i]] = 1 }
-    $5 in want { for (i = 7; i <= NF; i++) if ($i == "-") { v[$5] = $(i+1) " " $(i+2) " " $3; break } }
+    { mp = unesc($5) }
+    mp in want { for (i = 7; i <= NF; i++) if ($i == "-") { v[mp] = $(i+1) " " unesc($(i+2)) " " $3; break } }
     END { for (m in v) print m "\t" v[m] }' "$HOST/proc/1/mountinfo" 2>/dev/null
 }
 
@@ -18,12 +22,13 @@ auto_disks() {  # real filesystems from mountinfo, comma separated: DISKS=auto
   # Whole mounts only ($4 == "/"; bind mounts of a subdirectory are skipped), a
   # disk or network filesystem type, and not under system paths. For a stacked
   # mountpoint the top line wins, so cifs over autofs is kept.
-  awk '
+  awk "$MOUNT_UNESC"'
     $4 != "/" { next }
-    { for (i = 7; i <= NF; i++) if ($i == "-") { fs = $(i+1); break } }
+    { for (i = 7; i <= NF; i++) if ($i == "-") { fs = $(i+1); break }; mp = unesc($5) }
     fs !~ /^(ext[234]|xfs|btrfs|zfs|f2fs|fuseblk|ntfs3?|exfat|cifs|smb3|nfs4?)$/ { next }
-    $5 ~ /^\/(boot|snap|proc|sys|dev|run|tmp|var\/lib\/docker|var\/snap)(\/|$)/ { next }
-    !seen[$5]++ { order[++n] = $5 }
+    mp ~ /^\/(boot|snap|proc|sys|dev|run|tmp|var\/lib\/docker|var\/snap)(\/|$)/ { next }
+    mp ~ /[,\t\n]/ { next }   # a comma would split the list, a tab the row
+    !seen[mp]++ { order[++n] = mp }
     END { for (i = 1; i <= n; i++) printf "%s%s", (i > 1 ? "," : ""), order[i] }
   ' "$HOST/proc/1/mountinfo" 2>/dev/null
 }
@@ -102,9 +107,9 @@ io_json() {  # bytes read and written by the devices behind the DISKS entries, e
   if [ "$list" = auto ]; then list=$(auto_disks); fi
   # one pass: the device number of each wanted mountpoint (the last line wins, as in
   # mount_info), then the counters of those devices; diskstats counts 512-byte sectors
-  awk -v list="$list" '
+  awk -v list="$list" "$MOUNT_UNESC"'
     BEGIN { n = split(list, ms, ","); for (i = 1; i <= n; i++) { gsub(/^[ \t]+|[ \t]+$/, "", ms[i]); want[ms[i]] = 1 } }
-    FNR == NR { if ($5 in want) num[$5] = $3; next }
+    FNR == NR { mp = unesc($5); if (mp in want) num[mp] = $3; next }
     FNR == 1 { for (m in num) if (num[m] !~ /^0:/) dev[num[m]] = 1 }
     ($1 ":" $2) in dev { printf "%s\t%.0f\t%.0f\n", $3, $6 * 512, $10 * 512 }
   ' "$HOST/proc/1/mountinfo" "$HOST/proc/diskstats" 2>/dev/null |

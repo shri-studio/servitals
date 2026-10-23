@@ -15,8 +15,9 @@ systemd_here() { [ "${HOST%/}" = "" ] && [ -d /run/systemd/system ] && command -
 # cannot be asked (no bus, or no answer within 5 s: a stuck bus never stalls the tick)
 failed_units() {
   local out
-  out=$(timeout 5 systemctl --failed --no-legend --plain 2>/dev/null) || return 1
-  awk 'NF && n < 32 { print $1; n++ }' <<< "$out"
+  out=$(timeout 5 systemctl --failed --no-legend --plain --no-pager 2>/dev/null) || return 1
+  # some versions put a status marker before the name even with --plain
+  awk '{ u = ($1 == "●" || $1 == "*" || $1 == "×") ? $2 : $1 } u != "" && n < 32 { print u; n++ }' <<< "$out"
 }
 
 ubuntu_json() {
@@ -46,7 +47,7 @@ ubuntu_json() {
   jq -cn --arg counts "$counts" --arg pkgs "$pkgs" --arg units "$units" --arg asked "$asked" --arg dpkg "$dpkg" \
      --argjson reboot "$([ -e "$HOST/run/reboot-required" ] && echo true || echo false)" '
     ($counts | split(" ")) as $c
-    | (if ($c | length) == 2 then {updates: ($c[0] | tonumber), security: ($c[1] | tonumber)} else {} end)
+    | (if ($c | length) == 2 then {updates: ([$c[0] | tonumber, 1000000] | min), security: ([$c[1] | tonumber, 1000000] | min)} else {} end)
       + (if $dpkg == "1" then {rebootRequired: $reboot, rebootPkgs: ($pkgs | split("\n") | map(select(length > 0)))} else {} end)
       + (if $asked == "1" then {failedUnits: ($units | split("\n") | map(select(length > 0)))} else {} end)'
 }

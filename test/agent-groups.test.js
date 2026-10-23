@@ -445,7 +445,7 @@ test("ubuntu_json: the other wordings, nothing pending, no update-notifier, and 
 test("failed_units: the names of systemd's failed units, at most 32", () => {
   const bin = fs.mkdtempSync(path.join(os.tmpdir(), "sv-bin-"));
   const units = Array.from({ length: 40 }, (_, i) => `unit${i}.service loaded failed failed Something ${i}`).join("\n");
-  fs.writeFileSync(path.join(bin, "systemctl"), `#!/bin/sh\n[ "$*" = "--failed --no-legend --plain" ] || exit 9\ncat <<'X'\n${units}\nX\n`, { mode: 0o755 });
+  fs.writeFileSync(path.join(bin, "systemctl"), `#!/bin/sh\n[ "$*" = "--failed --no-legend --plain --no-pager" ] || exit 9\ncat <<'X'\n${units}\nX\n`, { mode: 0o755 });
   const r = runGroup(fakeHost(BASE), "failed_units", { PATH: `${bin}:${process.env.PATH}` });
   assert.strictEqual(r.status, 0, r.stderr);
   const names = r.stdout.trim().split("\n");
@@ -568,4 +568,37 @@ test("hardware_json: a reading the hub would refuse is skipped, never a refused 
   const checked = validate({ schema: 1, ts: 1, interval: 60, host: { name: "x" }, ...d });
   assert.ok(checked.ok);
   assert.deepStrictEqual(checked.dropped, [], "the hub keeps every group the agent sends");
+});
+
+test("a mountpoint with a space (mountinfo writes \\040), such as a USB drive under /media, is found by name and by DISKS=auto", () => {
+  const host = fakeHost({ ...BASE, "proc/1/mountinfo": BASE["proc/1/mountinfo"] + "40 25 8:33 / /media/me/My\\040Drive rw - exfat /dev/sdc1 rw\n",
+    "media/me/My Drive/file": "x" });
+  const d = json(runGroup(host, "disks_json", { DISKS: "/, /media/me/My Drive" }));
+  assert.deepStrictEqual(d.map((x) => [x.mount, x.source, x.fstype]), [["/", "/dev/sda2", "ext4"], ["/media/me/My Drive", "/dev/sdc1", "exfat"]]);
+  assert.ok(d[1].size > 0, "measured, not 'not a mountpoint'");
+  const auto = runGroup(host, "auto_disks");
+  assert.strictEqual(auto.stdout, "/,/srv,/media/me/My Drive");
+});
+
+test("cpu_json: guest time is already part of user time, so it is not counted twice (KVM hosts read low)", () => {
+  const host = fakeHost({ ...BASE, "proc/stat": "cpu  100 0 100 800 0 0 0 0 0 0\ncpu0 100 0 100 800 0 0 0 0 0 0\n" });
+  const state = fs.mkdtempSync(path.join(os.tmpdir(), "sv-state-"));
+  json(runGroup(host, "cpu_json", { STATE: state, NCPU: "1" }));
+  // 500 of 1000 jiffies busy, 400 of them running guests (inside user)
+  fs.writeFileSync(path.join(host, "proc/stat"), "cpu  600 0 100 1300 0 0 0 0 400 0\ncpu0 600 0 100 1300 0 0 0 0 400 0\n");
+  const s = json(runGroup(host, "cpu_json", { STATE: state, NCPU: "1" }));
+  assert.strictEqual(s.usage, 50);
+  assert.deepStrictEqual(s.per, [50]);
+});
+
+test("ubuntu_json: counts beyond what the hub takes are capped, never a refused group", () => {
+  const host = fakeHost({ ...BASE, "var/lib/dpkg/status": "", [NOTIFIER]: "2000000 updates can be applied immediately.\n1500000 of these updates are standard security updates.\n" });
+  const u = json(runGroup(host, "ubuntu_json"));
+  assert.deepStrictEqual([u.updates, u.security], [1000000, 1000000]);
+});
+
+test("failed_units: a status marker before the unit name is not taken for it", () => {
+  const env = fakeSystemctl("printf '● nginx.service loaded failed failed A web server\\n* smartd.service loaded failed failed SMART\\nplain.service loaded failed failed X\\n'");
+  const r = runGroup(fakeHost(BASE), "failed_units", env);
+  assert.deepStrictEqual(r.stdout.trim().split("\n"), ["nginx.service", "smartd.service", "plain.service"]);
 });

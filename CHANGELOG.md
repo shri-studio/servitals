@@ -162,6 +162,12 @@ All notable changes to this project are documented here. The format follows
   resends a too-large snapshot without its lists.
 
 ### Fixed
+- Disks whose mountpoint has a space (a USB drive under `/media`) are found,
+  by name and with `DISKS=auto`.
+- CPU use on virtual machine hosts no longer reads low: guest time was
+  counted twice.
+- Update counts beyond a million are capped instead of dropping the group;
+  a status marker before a failed unit's name is not taken for the name.
 - An agent that starts before its hub (at boot) or meets a hub that is
   restarting tries again after 5, 10, 20 s… instead of a whole interval
   later, so the dashboard is not empty for a minute.
