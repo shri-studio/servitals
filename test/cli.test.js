@@ -591,7 +591,7 @@ test("an encrypted backup needs its passphrase; a wrong one or a newer version c
   const out = path.join(tmp(), "hub.tar.gz.enc");
   let r = run("servitals-ctl", ["backup", "--encrypt", out], { ...h.env, SERVITALS_BACKUP_PASSPHRASE: "correct horse" });
   assert.strictEqual(r.status, 0, r.stderr);
-  assert.strictEqual(fs.readFileSync(out).subarray(0, 8).toString(), "Salted__");
+  assert.strictEqual(fs.readFileSync(out).subarray(0, 6).toString(), "SVBK1\n", "AES-256-GCM, authenticated");
   assert.notStrictEqual(list(out).status, 0, "not readable without the passphrase");
   fs.writeFileSync(path.join(h.state, "nodes.json"), '{"changed":true}\n');
   r = run("servitals-ctl", ["restore", out], { ...h.env, SERVITALS_BACKUP_PASSPHRASE: "wrong" });
@@ -612,6 +612,48 @@ test("an encrypted backup needs its passphrase; a wrong one or a newer version c
   r = run("servitals-ctl", ["restore", newer], h.env);
   assert.strictEqual(r.status, 1);
   assert.match(r.stderr, /made by servitals 99\.0\.0, newer than this one/);
+});
+
+test("an encrypted backup that was changed is refused before anything is restored; an older (CBC) one still restores", () => {
+  const h = hubFiles();
+  const out = path.join(tmp(), "hub.enc");
+  const env = { ...h.env, SERVITALS_BACKUP_PASSPHRASE: "correct horse" };
+  assert.strictEqual(run("servitals-ctl", ["backup", "--encrypt", out], env).status, 0);
+  const b = fs.readFileSync(out);
+  b[b.length - 40] ^= 1;   // one bit of the ciphertext
+  const bad = path.join(tmp(), "bad.enc");
+  fs.writeFileSync(bad, b);
+  fs.writeFileSync(path.join(h.state, "nodes.json"), '{"changed":true}\n');
+  let r = run("servitals-ctl", ["restore", bad], env);
+  assert.strictEqual(r.status, 1);
+  assert.match(r.stderr, /wrong passphrase or a damaged file/);
+  assert.strictEqual(fs.readFileSync(path.join(h.state, "nodes.json"), "utf8"), '{"changed":true}\n');
+  assert.ok(!fs.existsSync(h.calls), "the hub was not stopped");
+  // a backup made before 1.0: openssl's AES-256-CBC
+  const plain = path.join(tmp(), "plain.tar.gz");
+  assert.strictEqual(run("servitals-ctl", ["backup", plain], h.env).status, 0);
+  const old = path.join(tmp(), "old.enc");
+  spawnSync("openssl", ["enc", "-aes-256-cbc", "-pbkdf2", "-iter", "600000", "-salt", "-pass", "pass:correct horse", "-in", plain, "-out", old]);
+  r = run("servitals-ctl", ["restore", old], env);
+  assert.strictEqual(r.status, 0, r.stderr);
+  assert.match(r.stderr, /older encrypted backup.*not authenticated/);
+});
+
+test("a backup that fails leaves no file behind; without a terminal or a passphrase in the environment, it says so", () => {
+  const h = hubFiles();
+  const bin = tmp();
+  fs.writeFileSync(path.join(bin, "tar"), "#!/bin/sh\nexit 2\n", { mode: 0o755 });
+  const out = path.join(tmp(), "hub.tar.gz"), enc = path.join(tmp(), "hub.enc");
+  let r = run("servitals-ctl", ["backup", out], { ...h.env, PATH: `${bin}:${process.env.PATH}` });
+  assert.notStrictEqual(r.status, 0);
+  assert.ok(!fs.existsSync(out), "no half-written backup");
+  r = run("servitals-ctl", ["backup", "--encrypt", enc], { ...h.env, PATH: `${bin}:${process.env.PATH}`, SERVITALS_BACKUP_PASSPHRASE: "p" });
+  assert.notStrictEqual(r.status, 0);
+  assert.ok(!fs.existsSync(enc), "no half-written encrypted backup");
+  r = spawnSync("setsid", ["bash", path.join(BIN, "servitals-ctl"), "backup", "--encrypt", enc], { env: { PATH: process.env.PATH, ...h.env }, encoding: "utf8", timeout: 30000 });
+  assert.notStrictEqual(r.status, 0);
+  assert.match(r.stderr, /set SERVITALS_BACKUP_PASSPHRASE, or run this in a terminal/);
+  assert.doesNotMatch(r.stderr, /No such device|cannot open/i, "no shell error");
 });
 
 test("backup --auto keeps the 7 newest in the state dir; backup enable and disable switch the daily timer", () => {

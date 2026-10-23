@@ -326,7 +326,8 @@ sv_version() { head -n 1 "$ROOT/VERSION" 2>/dev/null || echo 0; }
 backup_passphrase() {  # [twice]
   local a b
   if [ -n "${SERVITALS_BACKUP_PASSPHRASE:-}" ]; then printf '%s' "$SERVITALS_BACKUP_PASSPHRASE"; return; fi
-  [ -r /dev/tty ] || die "set SERVITALS_BACKUP_PASSPHRASE, or run this in a terminal"
+  # readable is not enough: without a controlling terminal opening it fails
+  { : < /dev/tty; } 2>/dev/null || die "set SERVITALS_BACKUP_PASSPHRASE, or run this in a terminal"
   read -rsp "passphrase: " a < /dev/tty; echo >&2
   if [ "${1:-}" = twice ]; then
     read -rsp "passphrase again: " b < /dev/tty; echo >&2
@@ -367,7 +368,6 @@ cmd_backup() {
   [ -n "$out" ] || die "usage: servitals-ctl backup [--encrypt] <file>"
   [ ! -e "$out" ] || die "$out exists; choose another name"
   [ -d "$DATA_DIR" ] || die "no hub state in $DATA_DIR"
-  [ "$encrypt" = 0 ] || command -v openssl >/dev/null || die "--encrypt needs openssl (apt install openssl)"
   # global, not local: the EXIT trap runs after this function has returned
   BACKUP_DIR=$(mktemp -d)
   trap 'rm -rf "$BACKUP_DIR"' EXIT
@@ -389,15 +389,20 @@ cmd_backup() {
   if [ -d "$ETC_DIR/conf.d" ]; then cp -rp "$ETC_DIR/conf.d" "$BACKUP_DIR/etc/"; fi
   jq -n --arg v "$(sv_version)" --arg h "$(hostname 2>/dev/null || echo unknown)" --arg t "$(date -u +%FT%TZ)" \
     '{format: 1, version: $v, created: $t, host: $h}' > "$BACKUP_DIR/manifest.json"
+  # written next to its place and renamed: a backup that fails leaves nothing behind
+  BACKUP_PART="$out.part.$$"
+  trap 'rm -rf "$BACKUP_DIR"; rm -f "$BACKUP_PART"' EXIT
   if [ "$encrypt" = 1 ]; then
     pass=$(backup_passphrase twice)
-    # the passphrase goes through the environment, never the command line (ps shows that)
-    (umask 077; tar -C "$BACKUP_DIR" -czf - . | SV_BACKUP_PASS="$pass" openssl enc -aes-256-cbc -pbkdf2 -iter 600000 -salt \
-       -pass env:SV_BACKUP_PASS -out "$out")
+    # AES-256-GCM (hub/lib/backupcrypt.js): a changed file is refused, not restored. The
+    # passphrase goes through the environment, never the command line (ps shows that)
+    (set -o pipefail; umask 077; tar -C "$BACKUP_DIR" -czf - . | SV_BACKUP_PASS="$pass" node "$ROOT/hub/lib/backupcrypt.js" encrypt > "$BACKUP_PART") ||
+      die "the backup failed; nothing was written"
   else
-    (umask 077; tar -C "$BACKUP_DIR" -czf "$out" .)
+    (umask 077; tar -C "$BACKUP_DIR" -czf "$BACKUP_PART" .) || die "the backup failed; nothing was written"
   fi
-  chmod 600 "$out"
+  chmod 600 "$BACKUP_PART"
+  mv "$BACKUP_PART" "$out"
   echo "backup written: $out$([ "$encrypt" = 1 ] && echo " (encrypted)")"
   if [ "$auto" = 1 ]; then   # keep the 7 newest
     find "$DATA_DIR/backups" -maxdepth 1 -name 'servitals-[0-9]*-[0-9]*-[0-9]*.tar.gz' -printf '%T@ %p\n' | sort -rn | tail -n +8 | cut -d' ' -f2- |
@@ -435,7 +440,13 @@ cmd_restore() {
   trap 'rm -rf "$RESTORE_DIR" ${NEW_DIR:+"$NEW_DIR"}' EXIT
   chmod 700 "$RESTORE_DIR"
   archive="$RESTORE_DIR/archive.tar.gz"
-  if [ "$(head -c 8 "$in" | tr -d '\000')" = "Salted__" ]; then   # openssl's header
+  if [ "$(head -c 5 "$in")" = SVBK1 ]; then   # hub/lib/backupcrypt.js
+    pass=$(backup_passphrase)
+    # nothing is written unless the whole file is authentic
+    SV_BACKUP_PASS="$pass" node "$ROOT/hub/lib/backupcrypt.js" decrypt < "$in" > "$archive" 2>/dev/null && gzip -t "$archive" 2>/dev/null ||
+      die "could not read $in: a wrong passphrase or a damaged file"
+  elif [ "$(head -c 8 "$in" | tr -d '\000')" = "Salted__" ]; then   # openssl's header: made before 1.0
+    echo "note: an older encrypted backup (AES-CBC): it is not authenticated, so check what it restores" >&2
     command -v openssl >/dev/null || die "this backup is encrypted; restoring it needs openssl"
     pass=$(backup_passphrase)
     SV_BACKUP_PASS="$pass" openssl enc -d -aes-256-cbc -pbkdf2 -iter 600000 -pass env:SV_BACKUP_PASS \

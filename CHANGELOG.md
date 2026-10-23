@@ -162,6 +162,10 @@ All notable changes to this project are documented here. The format follows
   resends a too-large snapshot without its lists.
 
 ### Fixed
+- Encrypted backups are AES-256-GCM (scrypt key): a backup that was changed
+  is refused before anything is restored. Older AES-CBC backups still restore,
+  with a note. A backup that fails leaves no partial file, and without a
+  terminal the passphrase prompt says to set `SERVITALS_BACKUP_PASSPHRASE`.
 - Disks whose mountpoint has a space (a USB drive under `/media`) are found,
   by name and with `DISKS=auto`.
 - CPU use on virtual machine hosts no longer reads low: guest time was

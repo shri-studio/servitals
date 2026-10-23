@@ -19,9 +19,12 @@ sudo servitals-ctl backup /root/servitals-$(date +%F).tar.gz
 sudo servitals-ctl backup --encrypt /mnt/usb/servitals.tar.gz.enc   # asks for a passphrase
 ```
 
-`--encrypt` uses `openssl enc -aes-256-cbc -pbkdf2 -iter 600000` (install
-`openssl` if it is missing). For scripts, put the passphrase in
-`SERVITALS_BACKUP_PASSPHRASE`; it never appears on a command line.
+`--encrypt` uses AES-256-GCM with a key made from the passphrase by scrypt
+(Node's crypto, nothing to install): a backup that was changed is refused
+before anything is restored. Backups encrypted before 1.0 (openssl's AES-CBC)
+still restore, with a note, and need `openssl`. For scripts, put the
+passphrase in `SERVITALS_BACKUP_PASSPHRASE`; it never appears on a command
+line.
 
 ## Daily backups
 
