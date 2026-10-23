@@ -162,6 +162,9 @@ All notable changes to this project are documented here. The format follows
   resends a too-large snapshot without its lists.
 
 ### Fixed
+- A rules or channels file the hub cannot read (edited by hand, say) is
+  reported in its tab and kept aside as `*.ignored-<time>` on the next save,
+  never overwritten.
 - The installed app shows its saved page when the network answers nothing
   for 6 s (instead of a white screen), and shows the fleet again when the hub
   comes back after an offline start.

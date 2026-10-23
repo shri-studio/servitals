@@ -1106,3 +1106,11 @@ test("alerts view: an ended session says so, instead of 'could not load'", async
 test("settings: tags typed with capitals are kept in lower case", () => {
   assert.match(JS, /\.split\(\/\[\\s,\]\+\/\)\.map\(t => t\.toLowerCase\(\)\)\.filter\(Boolean\)/);
 });
+
+test("the rules and channels tabs say when the hub ignored its file", () => {
+  const s = rulesScope();
+  s.rulesState.ignored = "cpu: severity: one of critical, warning, info";
+  assert.match(s.rulesHtml(s.rulesRows({ rules: [] }, s.rulesState.defaults)), /<p class="warn">The hub could not read its rules file \(cpu: severity: one of critical, warning, info\)/);
+  Object.assign(s.chState, { types: {}, rows: [], status: {}, ignored: "channel 1: type" });
+  assert.match(s.chHtml(), /<p class="warn">The hub could not read its channels file \(channel 1: type\)/);
+});

@@ -395,6 +395,13 @@ test("alert rules: a rules file that cannot be read leaves the defaults, and say
     const cookie = cookieFrom(await login(h.port));
     const r = JSON.parse((await request(h.port, { path: "/__ctl/alerts/rules", headers: { cookie } })).body);
     assert.deepStrictEqual(r.saved, { rules: [] });
+    assert.match(r.ignored, /cpu: severity/, "the page is told why");
+    assert.strictEqual((await ctlPost(h.port, cookie, "/__ctl/alerts/rules", JSON.stringify({ rules: [{ id: "memory", threshold: 80 }] }))).status, 200);
+    const aside = fs.readdirSync(path.join(dir, "alerts")).filter((f) => f.startsWith("rules.json.ignored-"));
+    assert.strictEqual(aside.length, 1, "the file it could not read is kept aside, not overwritten");
+    assert.strictEqual(fs.readFileSync(path.join(dir, "alerts", aside[0]), "utf8"), '{"rules":[{"id":"cpu","severity":"page"}]}');
+    const r2 = JSON.parse((await request(h.port, { path: "/__ctl/alerts/rules", headers: { cookie } })).body);
+    assert.strictEqual(r2.ignored, undefined);
   } finally { await h.stop(); }
   fs.rmSync(dir, { recursive: true, force: true });
 });

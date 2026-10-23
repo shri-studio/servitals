@@ -378,3 +378,17 @@ test("Web Push: a long digest in any script fits one push; urgency high for aler
   assert.deepStrictEqual(pushed.map((x) => x[1]), ["high", "normal"]);
   assert.match(JSON.parse(pushed[1][0]).body, /more in the alert log$/, "cut at a line, saying how many more");
 });
+
+test("a channels file the hub cannot read is reported to the page and kept aside on the next save, never overwritten", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sv-notify-"));
+  fs.writeFileSync(path.join(dir, "channels.json"), '{"channels":[{"id":"ch_x","type":"fax"}]}', { mode: 0o600 });
+  const logs = [];
+  const n = createNotifier({ dir, outbound: { request: async () => ({ status: 200 }) }, log: { info() {}, warn: (e, f) => logs.push([e, f]) } });
+  assert.strictEqual(logs[0][0], "alerts.channels_ignored");
+  assert.match(n.view().ignored, /type/);
+  n.setConfig({ channels: [] });
+  const aside = fs.readdirSync(dir).filter((f) => f.startsWith("channels.json.ignored-"));
+  assert.strictEqual(aside.length, 1);
+  assert.strictEqual(fs.statSync(path.join(dir, aside[0])).mode & 0o777, 0o600, "it may hold tokens");
+  assert.strictEqual(n.view().ignored, undefined);
+});

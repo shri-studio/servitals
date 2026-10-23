@@ -230,8 +230,9 @@ const notifier = createNotifier({ dir: path.join(DATA, "alerts"), outbound, log,
 // the alert rules the person set (spec 8.1); a file that cannot be read leaves the defaults
 const RULES_F = path.join(DATA, "alerts", "rules.json");
 let savedRules = { rules: [] };
+let rulesIgnored = "";   // why rules.json was not read: told to the page; the next save keeps the file aside
 try { savedRules = alertRules.checkRules(JSON.parse(fs.readFileSync(RULES_F, "utf8")), { nodeIds: null }); }
-catch (e) { if (e.code !== "ENOENT") log.warn("alerts.rules_ignored", { error: e.message || String(e) }); }
+catch (e) { if (e.code !== "ENOENT") { rulesIgnored = e.message || String(e); log.warn("alerts.rules_ignored", { error: rulesIgnored }); } }
 const alerts = createAlerts(path.join(DATA, "alerts"), {
   rules: alertRules.buildRules(savedRules),
   warn: (event, fields) => log.warn(event, fields),
@@ -812,7 +813,7 @@ async function handle(req, res) {
 
     // the alert rules (spec 8.1): what is saved, the defaults and the metrics, for the editor
     if (req.method === "GET" && pathname === "/__ctl/alerts/rules") {
-      return json(200, { saved: savedRules, defaults: alertRules.defaultsForPage(), metrics: alertRules.METRICS });
+      return json(200, { saved: savedRules, defaults: alertRules.defaultsForPage(), metrics: alertRules.METRICS, ...(rulesIgnored ? { ignored: rulesIgnored } : {}) });
     }
     // save them whole: checked, kept, applied at once. A server named before it was revoked
     // may stay named; a new one must exist.
@@ -823,6 +824,7 @@ async function handle(req, res) {
       let clean;
       try { clean = alertRules.checkRules(body, { nodeIds: [...nodes.list().map((n) => n.id), ...named] }); }
       catch (e) { return json(400, { error: e.message }); }
+      if (rulesIgnored) { try { fs.renameSync(RULES_F, `${RULES_F}.ignored-${Date.now()}`); } catch (_) { /* gone meanwhile */ } rulesIgnored = ""; }
       try { writeFileAtomic(RULES_F, JSON.stringify(clean, null, 2) + "\n"); }
       catch (e) { return json(500, { error: String(e.code || e) }); }
       savedRules = clean;

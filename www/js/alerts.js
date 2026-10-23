@@ -183,7 +183,8 @@ function rulesHtml(rows) {
   const targets = rulesTargets();
   const sevs = ["critical", "warning", "info"].map(s => [s, tr("alert.sev." + s)]);
   const known = w => targets.some(([v]) => v === w) ? targets : [...targets, [w, w.replace(/^(node|tag):/, "")]];
-  let h = `<p class="hint">${esc(tr("rules.intro"))}</p>`;
+  let h = (rulesState.ignored ? `<p class="warn">${esc(tr("rules.ignored", { error: rulesState.ignored }))}</p>` : "")
+    + `<p class="hint">${esc(tr("rules.intro"))}</p>`;
   h += rows.map((r, i) => {
     const yesno = YESNO.includes(r.metric), offline = r.metric === "offline";
     let row = `<div class="rule${r.on ? "" : " roff"}" data-i="${i}"><div class="rline">`
@@ -260,6 +261,7 @@ async function loadRules(force) {
   rulesState.defaults = d.defaults;
   rulesState.metrics = Array.isArray(d.metrics) ? d.metrics : [];
   rulesState.rows = rulesRows(d.saved, d.defaults);
+  rulesState.ignored = typeof d.ignored === "string" ? d.ignored : "";
   rulesState.dirty = false;
   drawRules();
 }
@@ -321,7 +323,8 @@ function chStatus(s) {
 function chHtml() {
   const sevs = ["critical", "warning", "info"].map(s => [s, tr("alert.sev." + s)]);
   const q = chState.quiet;
-  let h = `<p class="hint">${esc(tr("ch.intro"))}</p><div class="rline cglobal">`
+  let h = (chState.ignored ? `<p class="warn">${esc(tr("ch.ignored", { error: chState.ignored }))}</p>` : "")
+    + `<p class="hint">${esc(tr("ch.intro"))}</p><div class="rline cglobal">`
     + `<label><input type="checkbox" data-q="on"${q ? " checked" : ""}> ${esc(tr("ch.quiet"))}</label>`
     + `<label>${esc(tr("ch.quietFrom"))} <input type="time" data-q="from" value="${esc(q ? q.from : "23:00")}"${q ? "" : " disabled"}></label>`
     + `<label>${esc(tr("ch.quietTo"))} <input type="time" data-q="to" value="${esc(q ? q.to : "07:00")}"${q ? "" : " disabled"}></label>`
@@ -376,7 +379,8 @@ async function loadChannels(force) {
     d = r.ok ? await r.json() : null;
   } catch (e) { d = null; }
   if (!d || !Array.isArray(d.channels)) { $("#channels-body").innerHTML = `<div class="muted">${esc(tr("ch.loadFailed"))}</div>`; return; }
-  Object.assign(chState, { types: d.types || {}, status: d.status || {}, rows: chRows(d), quiet: d.quiet || null, digestAt: d.digestAt || "07:00", dirty: false });
+  Object.assign(chState, { types: d.types || {}, status: d.status || {}, rows: chRows(d), quiet: d.quiet || null, digestAt: d.digestAt || "07:00", dirty: false,
+    ignored: typeof d.ignored === "string" ? d.ignored : "" });
   drawChannels();
 }
 

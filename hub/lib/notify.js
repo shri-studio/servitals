@@ -299,8 +299,10 @@ function createNotifier({ dir, outbound, now = Date.now, log = { info() {}, warn
   fs.mkdirSync(dir, { recursive: true });
   const cfgFile = path.join(dir, "channels.json"), stFile = path.join(dir, "notify-state.json");
   let cfg = { channels: [], quiet: null, digestAt: "07:00" };
+  // a file it cannot read: no channels, the page is told, and the next save keeps it aside
+  let ignored = "";
   try { cfg = checkChannels(JSON.parse(fs.readFileSync(cfgFile, "utf8"))); }
-  catch (e) { if (e.code !== "ENOENT") log.warn("alerts.channels_ignored", { error: e.message }); }
+  catch (e) { if (e.code !== "ENOENT") { ignored = e.message; log.warn("alerts.channels_ignored", { error: e.message }); } }
   // the files hold tokens: only the hub reads them, also when an older build or a hand made them
   for (const f of [cfgFile, stFile]) { try { fs.chmodSync(f, 0o600); } catch (_) { /* not there yet */ } }
   let st = { held: [], digest: [], digestDay: null };
@@ -465,6 +467,7 @@ function createNotifier({ dir, outbound, now = Date.now, log = { info() {}, warn
     },
     setConfig(input) {
       const clean = checkChannels(input, cfg);
+      if (ignored) { try { fs.renameSync(cfgFile, `${cfgFile}.ignored-${now()}`); } catch (_) { /* gone meanwhile */ } ignored = ""; }
       writeFileAtomic(cfgFile, JSON.stringify(clean, null, 2) + "\n", 0o600);
       cfg = clean;
       for (const id of Object.keys(status)) if (!cfg.channels.some((c) => c.id === id)) delete status[id];
@@ -473,7 +476,7 @@ function createNotifier({ dir, outbound, now = Date.now, log = { info() {}, warn
     view() {
       const mask = (ch) => ({ ...ch, config: Object.fromEntries(Object.entries(ch.config).map(([k, v]) =>
         [k, ADAPTERS[ch.type].fields[k].secret && !ENVREF.test(v) ? SECRET : v])) });
-      return { channels: cfg.channels.map(mask), quiet: cfg.quiet, digestAt: cfg.digestAt, status: { ...status },
+      return { channels: cfg.channels.map(mask), quiet: cfg.quiet, digestAt: cfg.digestAt, status: { ...status }, ...(ignored ? { ignored } : {}),
                types: Object.fromEntries(Object.entries(ADAPTERS).map(([t, a]) => [t, Object.entries(a.fields).map(([k, f]) => ({ key: k, secret: !!f.secret, optional: !!f.optional, ...(f.choices ? { choices: f.choices } : {}) }))])) };
     },
     // for tests: wait for the sends under way
