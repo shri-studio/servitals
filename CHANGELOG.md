@@ -162,6 +162,9 @@ All notable changes to this project are documented here. The format follows
   resends a too-large snapshot without its lists.
 
 ### Fixed
+- The installed app shows its saved page when the network answers nothing
+  for 6 s (instead of a white screen), and shows the fleet again when the hub
+  comes back after an offline start.
 - `?kiosk=false` (or no, off) and a `"kiosk": "false"` in config.json turn
   kiosk off; the history ranges are buttons the keyboard reaches; the status
   line gives no 1970 time when no snapshot was ever seen; an ended session

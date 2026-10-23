@@ -362,3 +362,25 @@ test("no snapshot ever seen: the status line gives no 1970 time", async () => {
   s.setStatus(Date.now(), false);
   assert.strictEqual(el["#lastupdate"].textContent, "online · 01:00");
 });
+
+test("a page load the network never answers gets the cached page after a few seconds, not a white screen", async () => {
+  const listeners = {}, cached = new Map([["/", "shell page"]]);
+  const self = { addEventListener: (t, f) => { listeners[t] = f; }, skipWaiting() {}, clients: { claim() {} }, location: { origin: "https://hub.example" } };
+  const caches = { open: async () => ({ put: async () => {} }), match: async (r) => cached.get(typeof r === "string" ? r : new URL(r.url).pathname) };
+  const fast = (f, ms) => setTimeout(f, Math.min(ms, 20));   // the worker's timeout, quicker
+  new Function("self", "caches", "fetch", "setTimeout", fs.readFileSync(path.join(WWW, "sw.js"), "utf8"))(self, caches, () => new Promise(() => {}), fast);
+  let answer;
+  listeners.fetch({ request: { url: "https://hub.example/", method: "GET", mode: "navigate" }, respondWith: (x) => { answer = x; }, waitUntil() {} });
+  const late = new Promise((r) => { const t = setTimeout(() => r("still waiting"), 2000); t.unref(); });
+  assert.strictEqual(await Promise.race([answer, late]), "shell page");
+});
+
+test("the fleet comes back when the hub does, after the app started offline", async () => {
+  const calls = [];
+  const s = pageScope(["loadNodes"], {
+    fetch: async () => ({ ok: true, json: async () => [{ id: "nodeaaaaaaaa", local: true }, { id: "nodebbbbbbbb" }] }),
+    fleetNodes: [], localNode: null, nodesAt: 0, location: { hash: "" },
+    renderTabs() {}, renderAlertCount() {}, route() { calls.push("route"); } });
+  await s.loadNodes();
+  assert.deepStrictEqual(calls, ["route"], "two servers where there were none: the fleet view");
+});

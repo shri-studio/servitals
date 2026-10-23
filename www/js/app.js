@@ -465,6 +465,7 @@ function hubText() {
 let nodesAt = 0;
 async function loadNodes() {
   nodesAt = Date.now();
+  const before = fleetNodes.length;
   try {
     const r = await fetch("/__ctl/nodes?t=" + Date.now());
     if (!r.ok) { hubState = r.status === 401 ? "login" : "down"; return; }
@@ -473,6 +474,8 @@ async function loadNodes() {
   } catch (e) { hubState = "down"; return; }
   const local = fleetNodes.find(n => n.local);
   localNode = local ? local.id : null;
+  // the app started offline (no servers known) and the hub is back with several: the fleet
+  if (before < 2 && fleetNodes.length > 1 && !location.hash) { route(); renderAlertCount(); return; }
   renderTabs();
   renderAlertCount();
 }

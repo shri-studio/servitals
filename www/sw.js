@@ -59,9 +59,20 @@ self.addEventListener("notificationclick", (e) => {
   }));
 });
 
+// a page load the network has not answered in 6 s (a connection that is up but delivers
+// nothing) is treated as offline; the request may still finish and refresh the cache
+const NAV_WAIT = 6000;
+function fetchFor(request) {
+  if (request.mode !== "navigate") return fetch(request);
+  return new Promise((ok, fail) => {
+    const t = setTimeout(() => fail(new Error("no answer")), NAV_WAIT);
+    fetch(request).then((r) => { clearTimeout(t); ok(r); }, (e) => { clearTimeout(t); fail(e); });
+  });
+}
+
 self.addEventListener("fetch", (e) => {
   if (route(e.request) !== "shell") return;
-  e.respondWith(fetch(e.request).then((res) => {
+  e.respondWith(fetchFor(e.request).then((res) => {
     // a proxy in front of the hub answers 502/503/504 when the hub is down: as good as offline
     if (res.status >= 500) return lastCopy(e.request).then((hit) => hit || res);
     if (keep(e.request, res)) {
