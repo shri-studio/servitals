@@ -169,6 +169,7 @@ sudo servitals-ctl backup enable                         # daily, the 7 newest k
 sudo servitals-ctl restore /root/servitals.tar.gz        # --etc also restores hub.env and conf.d
 sudo servitals-ctl node rotate <id|--all>                # new secrets; old ones work for 24 hours
 sudo servitals-ctl rotate session-key                    # every browser logs in again
+sudo servitals-ctl rotate vapid                          # new Web Push keys; devices enable notifications again
 ```
 
 See [docs/backup.md](docs/backup.md).
@@ -196,6 +197,25 @@ lm-sensors && sudo sensors-detect` loads the right driver. The network
 panel's live rate needs nothing; today, month, all-time and the 30-day /
 24-hour bars come from vnStat, which the package recommends (`apt install
 vnstat` if you skipped recommends). Without it the panel says so.
+
+## History, alerts and notifications
+
+- **History:** each server's view has a history panel: any series (cpu,
+  memory, temperature, load, pressure, disks, network, containers) over 1 hour
+  to 90 days, with its average, low-high band and gaps.
+- **Alerts:** the hub watches every server: offline, disks filling, memory,
+  cpu, temperature, a container that stopped, failed units, a needed reboot,
+  security updates. `[a]` opens the alerts view: what is firing, mutes, the
+  last events; its "rules" tab changes thresholds, adds rules of your own and
+  sets per-server or per-tag overrides (turn "offline" off for a laptop).
+- **Where alerts go:** the "channels" tab: ntfy, Gotify, Telegram, Discord,
+  Slack, Microsoft Teams, Pushover, Matrix, email (SMTP), webhooks and Apprise,
+  each from a chosen severity; quiet hours hold warnings; info goes to a daily
+  digest; every channel has "send test". `HTTPS_PROXY` in `hub.env` is used for
+  every call out.
+- **Phone notifications:** over HTTPS, settings has "enable notifications" on
+  each phone or computer (on iPhone and iPad, from the home-screen app). See
+  [docs/networking.md](docs/networking.md#https-for-phone-notifications).
 
 ## Watch more servers
 

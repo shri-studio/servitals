@@ -280,6 +280,13 @@ UI and hosted service agree on them.
 | `POST /__ctl/refresh?node=<id\|all>` | wake the node(s) |
 | `GET /__ctl/history?node=<id>&series=<name>&range=<1h\|24h\|7d\|30d\|90d>` | history points |
 | `GET /data.json` | latest snapshot of the local node, kept for old scripts |
+| `GET /__ctl/alerts` | firing alerts, the last 50 events, running mutes, each rule's name and metric |
+| `POST /__ctl/alerts/mute` | `{rule\|node, for\|until}`: mute for a time (the hub's clock), or until 0 to unmute |
+| `GET`/`POST /__ctl/alerts/rules` | the alert rules a person set (changes, rules of their own, overrides) |
+| `GET`/`POST /__ctl/alerts/channels` | alert channels (secrets masked as `********`), quiet hours, the digest's time |
+| `POST /__ctl/alerts/channels/test` | `{id}`: send one test message, answered at once |
+| `GET /__ctl/push` | Web Push: the public VAPID key and the subscribed devices (never an endpoint) |
+| `POST /__ctl/push/subscribe`, `/unsubscribe` | a browser's push subscription; unsubscribe takes an endpoint or a device id |
 
 ## 8. Test vectors
 

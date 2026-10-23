@@ -68,6 +68,11 @@ also restores hub.env and conf.d.
 .B rotate session\-key
 A new session signing key; the hub restarts and every browser logs in again.
 .TP
+.B rotate vapid
+New Web Push keys: the subscriptions made with the old ones are removed, the
+hub restarts and makes new keys, and each phone or computer enables
+notifications again in settings.
+.TP
 .BI import-docker " dir"
 Copy the login, dashboard settings, whitelist, bans and disk list from a
 Docker install in

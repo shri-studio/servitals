@@ -502,7 +502,30 @@ test("servitals-ctl rotate session-key: a new key, same owner and mode, the hub 
   try {
     assert.strictEqual((await request(port, { path: "/__ctl/whoami", headers: { cookie } })).status, 401, "the old session is gone");
   } finally { await again.stop(); fs.rmSync(dataDir, { recursive: true, force: true }); }
-  assert.notStrictEqual(run("servitals-ctl", ["rotate", "vapid"], { STATE_DIR: dataDir }).status, 0);
+  assert.notStrictEqual(run("servitals-ctl", ["rotate", "nonsense"], { STATE_DIR: dataDir }).status, 0);
+});
+
+test("servitals-ctl rotate vapid: the keys and the subscriptions made with them go; the hub restarts and makes new keys", async () => {
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "sv-hub-"));
+  const hub = await startHub({}, { dataDir });
+  const port = hub.port;
+  const before = JSON.parse((await request(port, { path: "/__ctl/push", headers: { cookie: cookieFrom(await login(port)) } })).body).publicKey;
+  await hub.stop();
+  fs.writeFileSync(path.join(dataDir, "push-subscriptions.json"), '{"subscriptions":[]}\n', { mode: 0o600 });
+  const calls = path.join(tmp(), "calls");
+  const stub = path.join(path.dirname(calls), "systemctl");
+  fs.writeFileSync(stub, `#!/bin/sh\necho "$@" >> ${calls}\n`, { mode: 0o755 });
+  const r = run("servitals-ctl", ["rotate", "vapid"], { STATE_DIR: dataDir, SYSTEMCTL: stub });
+  assert.strictEqual(r.status, 0, r.stderr);
+  assert.match(r.stdout, /enable notifications again/);
+  assert.ok(!fs.existsSync(path.join(dataDir, "vapid.json")) && !fs.existsSync(path.join(dataDir, "push-subscriptions.json")));
+  assert.match(fs.readFileSync(calls, "utf8"), /^try-restart servitals\.service$/m);
+  const again = await startHub({}, { dataDir, port });
+  try {
+    const after = JSON.parse((await request(port, { path: "/__ctl/push", headers: { cookie: cookieFrom(await login(port)) } })).body).publicKey;
+    assert.ok(after && after !== before, "new keys");
+  } finally { await again.stop(); fs.rmSync(dataDir, { recursive: true, force: true }); }
+  assert.notStrictEqual(run("servitals-ctl", ["rotate", "vapid"], { STATE_DIR: dataDir, SYSTEMCTL: stub }).status, 0, "no hub state: an error");
 });
 
 // a hub's state and /etc/servitals, as tests make them

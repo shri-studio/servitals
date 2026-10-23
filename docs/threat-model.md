@@ -44,7 +44,11 @@ These hold in every version. A change that breaks one needs its own review.
 | hub host | anyone with container control | root on the hub host | Docker access off by default; LAN-only control; root equivalence stated in docs and in `docker enable` output |
 | hosted database | breach, stolen backup | every account's data | scrypt passwords; node secrets and TOTP secrets AES-256-GCM encrypted with a master key held only in the environment; backups encrypted |
 | relay key | leak | fake nodes in one hosted account | scoped to one account and its node limit; revocable in the hosted UI |
-| push subscriptions | leak | spam notifications to one browser | stored 0600; VAPID key rotation invalidates them |
+| push subscriptions | leak | spam notifications to one browser | stored 0600; endpoints never shown to the page or logged; VAPID key rotation invalidates them; a device can be removed in settings |
+| VAPID private key | anyone reading the state dir | send pushes to subscribed browsers | `vapid.json` 0600; an unreadable file turns Web Push off instead of silently making new keys |
+| alert channel secrets (tokens, webhook URLs, SMTP password) | a stolen page session; anyone reading logs | the token itself, or alert content sent elsewhere | `channels.json` 0600; shown to the page only masked; a masked secret is kept only while the channel's server, URL or SMTP host stays the same; `$NAME` reads only `SERVITALS_NOTIFY_*` (never the hub's own settings); never logged, nor are channel URLs |
+| alert content in transit | network observer | server names and failures | HTTPS to channels with certificates checked; SMTP only with STARTTLS or TLS (plain only to a relay on the hub's host, never with a login); STARTTLS response injection refused; Web Push end-to-end encrypted |
+| messages built from names | a node or container that names itself | links, mentions or markup in someone's chat | Slack text escaped, Discord with no mentions and Markdown shown as text, Teams text escaped, Telegram and Matrix as plain text; the push service worker opens only the hub's own views |
 | release pipeline | supply chain | malicious package | GPG signing key only in CI secrets; signed `SHA256SUMS`; GitHub Actions pinned by commit; zero dependencies |
 | user privacy (hosted) | operator, breach | exposure of infrastructure details | latest snapshot plus capped history only; no analytics; IPs kept 30 days; inactive accounts deleted |
 
@@ -69,6 +73,12 @@ script at all (`default-src 'none'`).
 - Delivery metadata of Web Push (that a notification went to a device, and
   when) is visible to the browser vendor's push service. The content is
   end-to-end encrypted.
+- A logged-in person can make a self-hosted hub send requests to any address
+  (a webhook channel and its "send test", a push subscription's endpoint).
+  On a hub with one admin this gives them nothing they could not do from the
+  hub host; the hosted service guards outbound requests (see above).
+- Alert messages go to the services a person chose (ntfy, Telegram, Slack,
+  email…), which then hold server names and failure text.
 - Cloudflare Bot Fight Mode can block agents that report through a tunnel.
   This is an availability issue documented in the tunnel guide.
 - Code-based linking can be abused by talking someone into approving a code
@@ -108,7 +118,8 @@ latest release.
 | node secret | `servitals-ctl node rotate <id\|--all>` | old and new accepted for 24 h, then old rejected |
 | admin password | `servitals-ctl passwd` | all sessions end |
 | session signing key | `servitals-ctl rotate session-key` | all sessions end |
-| VAPID keys | `servitals-ctl rotate vapid` (arrives with Web Push, sub-project 6) | browsers must enable notifications again |
+| VAPID keys | `servitals-ctl rotate vapid` | subscriptions removed; each device enables notifications again |
+| a channel's token | change it in the channels tab (or its `$SERVITALS_NOTIFY_…` variable) | the old one is replaced at once |
 | relay key | hosted UI, then `servitals-ctl relay set` | old key rejected at once |
 | hosted master key | operator runbook | re-encrypts stored secrets |
 

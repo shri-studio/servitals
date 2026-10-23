@@ -15,6 +15,7 @@
 #   servitals-ctl passwd [--user NAME] set the admin password (and name); ends every session
 #   servitals-ctl config check [dir]   check the files in /etc/servitals/conf.d (config as code)
 #   servitals-ctl rotate session-key   a new session signing key; every session ends
+#   servitals-ctl rotate vapid         new Web Push keys; every device enables notifications again
 #   servitals-ctl backup [--encrypt] <file>  one private tar of the hub's state and /etc/servitals
 #   servitals-ctl restore [--etc] <file>     put a backup back (stops and starts the hub)
 #   servitals-ctl backup enable|disable      daily backups, the 7 newest kept in the state dir
@@ -505,7 +506,15 @@ cmd_rotate() {
       "${SYSTEMCTL:-systemctl}" try-restart "$UNIT" >/dev/null 2>&1 || true
       echo "new session key in $DATA_DIR/secret; the hub restarted and every session ends (log in again)"
       ;;
-    *) die "usage: servitals-ctl rotate session-key" ;;
+    vapid)
+      # Web Push keys: subscriptions made with the old ones cannot work, so they go too;
+      # the hub makes new keys when it starts
+      [ -f "$DATA_DIR/secret" ] || die "no hub state in $DATA_DIR (has the hub run yet?)"
+      rm -f "$DATA_DIR/vapid.json" "$DATA_DIR/push-subscriptions.json"
+      "${SYSTEMCTL:-systemctl}" try-restart "$UNIT" >/dev/null 2>&1 || true
+      echo "new Web Push keys; the hub restarted. Each phone or computer must enable notifications again (settings)"
+      ;;
+    *) die "usage: servitals-ctl rotate session-key|vapid" ;;
   esac
 }
 

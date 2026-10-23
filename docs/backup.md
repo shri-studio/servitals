@@ -60,6 +60,7 @@ gone from the hub: pair them again.
 | a server's secret | `sudo servitals-ctl node rotate <id>` | prints a new join line; the old secret keeps working for 24 hours |
 | every server's secret | `sudo servitals-ctl node rotate --all` | the same for each; the hub's own agent is updated at once |
 | session key | `sudo servitals-ctl rotate session-key` | the hub restarts; every browser logs in again |
+| Web Push keys | `sudo servitals-ctl rotate vapid` | the hub restarts; each phone or computer enables notifications again |
 | admin password | `sudo servitals-ctl passwd` | every session ends |
 
 After `node rotate`, run the printed `servitals-agent join` line on each

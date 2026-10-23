@@ -7,6 +7,10 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- `servitals-ctl rotate vapid`: new Web Push keys; the subscriptions made
+  with the old ones are removed and each device enables notifications again.
+  The threat model and the protocol notes now cover alerts, channels and
+  Web Push.
 - Phone notifications (Web Push, spec 8.5): settings has "enable
   notifications" for each phone or computer; alerts then arrive as system
   notifications, one per alert, and a tap opens that server's view. Enabling a
