@@ -78,6 +78,7 @@ collect() {  # $1 = destination file
 }
 
 tick() {
+  API_STATUS=""
   collect "$SNAP" || { agent_log warn agent.tick_failed; return 1; }
   [ -z "${OUT_FILE:-}" ] || return 0
   if push_held; then
@@ -113,11 +114,20 @@ if [ -z "${OUT_FILE:-}" ]; then
   WAIT_PID=$!
   trap 'kill "$WAIT_PID" 2>/dev/null; exit 0' TERM INT
 fi
+# a push nobody answered (000) or a hub that is starting or behind a proxy (5xx): try
+# again in 5, 10, 20 s… up to INTERVAL, not a whole interval later (an agent that starts
+# before its hub at boot would show nothing for a minute)
+retry=0
 while true; do
-  tick
-  # sleep INTERVAL, but sample at once when the wait loop touches the trigger
+  if tick; then retry=0
+  elif [[ ${API_STATUS:-} =~ ^(000|5[0-9][0-9])$ ]] && ! push_held; then
+    retry=$(( retry > 0 ? retry * 2 : 5 ))
+    [ "$retry" -gt "$INTERVAL" ] && retry=$INTERVAL
+  else retry=0
+  fi
+  # sleep INTERVAL (or the retry), but sample at once when the wait loop touches the trigger
   i=0
-  while [ "$i" -lt "$INTERVAL" ]; do
+  while [ "$i" -lt "$(( retry > 0 ? retry : INTERVAL ))" ]; do
     if [ -e "$TRIGGER" ]; then rm -f "$TRIGGER"; break; fi
     sleep 1
     i=$((i + 1))

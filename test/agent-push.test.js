@@ -173,6 +173,27 @@ test("the agent reconnects after a hub restart", { timeout: 90000 }, async () =>
   }
 });
 
+test("an agent that starts before its hub pushes within seconds once the hub is up, not an interval later", { timeout: 60000 }, async () => {
+  const dir = tmp();
+  const a = await startHub({}, { dataDir: dir });
+  const port = a.port;
+  await a.stop();   // the credentials exist; the hub is not up yet (a boot where the agent is first)
+  const agent = startAgent(path.join(dir, "local-agent.env"));   // INTERVAL 3600
+  let b;
+  try {
+    await until(async () => /agent\.push_failed status=000/.test(agent.logs()), 15000, "the first push to fail");
+    await sleep(3000);
+    b = await startHub({}, { dataDir: dir, port });
+    const cookie = cookieFrom(await login(b.port));
+    await until(() => snapshotTs(b, cookie), 25000, "a push once the hub is up");
+  } catch (e) { e.message += "\nagent log:\n" + agent.logs(); throw e; }
+  finally {
+    agent.stop();
+    if (b) await b.stop();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("a push inside the hub's 5 s limit waits it out instead of failing", { timeout: 60000 }, async () => {
   const hub = await startHub();
   try {
