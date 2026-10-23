@@ -158,6 +158,9 @@ All notable changes to this project are documented here. The format follows
   resends a too-large snapshot without its lists.
 
 ### Fixed
+- An agent that starts before its hub (at boot) or meets a hub that is
+  restarting tries again after 5, 10, 20 s… instead of a whole interval
+  later, so the dashboard is not empty for a minute.
 - A source the agent cannot read (missing, or denied as `/proc/stat` is on
   Android) now gives null for its group instead of failing the whole tick.
 - The settings panel is tidier: sections are separated, fields have captions
